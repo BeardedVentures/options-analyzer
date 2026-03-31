@@ -1,0 +1,142 @@
+name: Options Intelligence Daily Scan
+
+on:
+  schedule:
+    # Morning scan — 9:50 AM ET
+    #   EDT (Mar–Nov): UTC-4 → 13:50 UTC
+    #   EST (Nov–Mar): UTC-5 → 14:50 UTC
+    # Running at 13:50 UTC covers EDT perfectly; runs 8:50 AM during EST (early but harmless).
+    - cron: "50 13 * * 1-5"
+
+    # Close scan — 3:10 PM ET
+    #   EDT: 19:10 UTC | EST: 20:10 UTC
+    - cron: "10 19 * * 1-5"
+
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+    inputs:
+      session:
+        description: "Session type"
+        required: true
+        default: "morning"
+        type: choice
+        options:
+          - morning
+          - close
+
+jobs:
+  morning-scan:
+    name: Morning Scan
+    # Only runs on the morning cron or manual morning trigger
+    if: >
+      github.event_name == 'workflow_dispatch' && github.event.inputs.session == 'morning' ||
+      github.event_name == 'schedule' && startsWith(github.event.schedule, '50 13')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Tailscale: connect Actions runner to JARVIS home network ─────────
+      # Requires TAILSCALE_AUTH_KEY secret (ephemeral, reusable key from
+      # tailscale.com/admin → Settings → Auth keys).
+      # The runner joins your tailnet, reaches JARVIS at its Tailscale IP.
+      # Connection is torn down automatically when the job ends.
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          tags: tag:ci                  # optional — tag for this ephemeral node
+          args: --accept-routes         # respect any subnet routes you have set
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run morning scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
+          NEWS_API_KEY:      ${{ secrets.NEWS_API_KEY }}
+          TRADIER_API_KEY:   ${{ secrets.TRADIER_API_KEY }}
+          TRADIER_SANDBOX:   ${{ secrets.TRADIER_SANDBOX }}
+          EMAIL_SMTP_HOST:   ${{ secrets.EMAIL_SMTP_HOST }}
+          EMAIL_SMTP_PORT:   ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_USER:        ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD:    ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENTS:  ${{ secrets.EMAIL_RECIPIENTS }}
+          # ── WOLF: JARVIS tower endpoint via Tailscale ─────────────────────
+          # Set JARVIS_HOST to the JARVIS tower's Tailscale IP, e.g.:
+          #   http://100.x.x.x:8000
+          # Find it: Tailscale admin console → Machines → JARVIS tower IP
+          JARVIS_HOST:       ${{ secrets.JARVIS_HOST }}
+          GITHUB_RUN_ID:     ${{ github.run_id }}
+        run: python main.py --session morning
+
+      - name: Upload tip sheet artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tipsheet-morning-${{ github.run_id }}
+          path: output/tipsheets/
+          retention-days: 30
+
+  close-scan:
+    name: Close Scan
+    if: >
+      github.event_name == 'workflow_dispatch' && github.event.inputs.session == 'close' ||
+      github.event_name == 'schedule' && startsWith(github.event.schedule, '10 19')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Tailscale: connect Actions runner to JARVIS home network ─────────
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          tags: tag:ci
+          args: --accept-routes
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run close scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY }}
+          NEWS_API_KEY:      ${{ secrets.NEWS_API_KEY }}
+          TRADIER_API_KEY:   ${{ secrets.TRADIER_API_KEY }}
+          TRADIER_SANDBOX:   ${{ secrets.TRADIER_SANDBOX }}
+          EMAIL_SMTP_HOST:   ${{ secrets.EMAIL_SMTP_HOST }}
+          EMAIL_SMTP_PORT:   ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_USER:        ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD:    ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENTS:  ${{ secrets.EMAIL_RECIPIENTS }}
+          # ── WOLF: JARVIS tower endpoint via Tailscale ─────────────────────
+          JARVIS_HOST:       ${{ secrets.JARVIS_HOST }}
+          GITHUB_RUN_ID:     ${{ github.run_id }}
+        run: python main.py --session close
+
+      - name: Upload tip sheet artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tipsheet-close-${{ github.run_id }}
+          path: output/tipsheets/
+          retention-days: 30

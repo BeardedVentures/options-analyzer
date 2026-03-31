@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Options Intelligence — {{ session_type }} — {{ date_str }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:        #0b0b12;
+  --bg2:       #111120;
+  --card:      #16162a;
+  --card2:     #1c1c32;
+  --border:    #252540;
+  --amber:     #f5a623;
+  --amber2:    #c88520;
+  --amber-dim: rgba(245,166,35,0.12);
+  --green:     #00c896;
+  --green-dim: rgba(0,200,150,0.12);
+  --red:       #ff4d6d;
+  --red-dim:   rgba(255,77,109,0.12);
+  --blue:      #4d9fff;
+  --blue-dim:  rgba(77,159,255,0.12);
+  --yellow:    #ffd060;
+  --text:      #e2e2ef;
+  --text2:     #9090b0;
+  --text3:     #555570;
+  --mono:      'IBM Plex Mono', monospace;
+  --sans:      'IBM Plex Sans', sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 14px; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  padding: 0 0 60px;
+}
+
+/* ── LAYOUT ── */
+.container { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
+
+/* ── DISCLAIMER BANNER ── */
+.disclaimer {
+  background: rgba(255,77,109,0.08);
+  border-bottom: 1px solid var(--red);
+  padding: 10px 20px;
+  font-size: 0.78rem;
+  color: var(--text2);
+  text-align: center;
+  line-height: 1.4;
+}
+.disclaimer strong { color: var(--red); }
+
+/* ── HEADER ── */
+.header {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 20px 0;
+  margin-bottom: 28px;
+}
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.logo {
+  font-family: var(--mono);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--amber);
+  letter-spacing: 0.04em;
+}
+.logo span { color: var(--text3); font-weight: 400; }
+.header-meta {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text2);
+  text-align: right;
+}
+.session-badge {
+  display: inline-block;
+  background: var(--amber-dim);
+  border: 1px solid var(--amber2);
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  padding: 3px 10px;
+  border-radius: 3px;
+  margin-bottom: 6px;
+}
+
+/* ── SECTION HEADINGS ── */
+.section { margin-bottom: 32px; }
+.section-title {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: var(--text3);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  margin-bottom: 16px;
+}
+
+/* ── MARKET CONTEXT STRIP ── */
+.market-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.market-stat {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+}
+.market-stat-label {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--text3);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.market-stat-value {
+  font-family: var(--mono);
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.market-stat-value.up { color: var(--green); }
+.market-stat-value.down { color: var(--red); }
+.market-stat-value.amber { color: var(--amber); }
+.market-stat-sub {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--text2);
+  margin-top: 2px;
+}
+
+.bias-pill {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.bias-risk-on  { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+.bias-risk-off { background: var(--red-dim);   color: var(--red);   border: 1px solid var(--red); }
+.bias-neutral  { background: var(--blue-dim);  color: var(--blue);  border: 1px solid var(--blue); }
+
+.summary-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--amber);
+  border-radius: 6px;
+  padding: 14px 16px;
+  font-size: 0.88rem;
+  color: var(--text2);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+/* ── TRADE CARDS ── */
+.trade-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.trade-card:hover { border-color: var(--amber2); }
+.trade-card.consider { border-left: 3px solid var(--green); }
+.trade-card.watch    { border-left: 3px solid var(--amber); }
+.trade-card.avoid    { border-left: 3px solid var(--red); opacity: 0.75; }
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 12px;
+  cursor: pointer;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.card-header:hover { background: var(--card2); }
+
+.card-ticker {
+  font-family: var(--mono);
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--amber);
+  min-width: 70px;
+}
+.card-strategy {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text2);
+  letter-spacing: 0.04em;
+}
+.card-strikes {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  color: var(--text);
+}
+.card-credit {
+  font-family: var(--mono);
+  font-size: 1.0rem;
+  font-weight: 600;
+  color: var(--green);
+}
+.card-dte {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text2);
+}
+
+.rec-badge {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  padding: 4px 12px;
+  border-radius: 3px;
+}
+.rec-consider { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+.rec-watch    { background: var(--amber-dim); color: var(--amber); border: 1px solid var(--amber2); }
+.rec-avoid    { background: var(--red-dim);   color: var(--red);   border: 1px solid var(--red); }
+
+.expand-icon {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--text3);
+  user-select: none;
+  transition: transform 0.2s;
+}
+.trade-card.expanded .expand-icon { transform: rotate(180deg); }
+
+/* ── EDGE METER ── */
+.edge-meter-wrap {
+  padding: 0 18px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.edge-label {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.edge-track {
+  flex: 1;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.edge-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+.edge-fill.score-high { background: var(--green); }
+.edge-fill.score-med  { background: var(--amber); }
+.edge-fill.score-low  { background: var(--red); }
+.edge-score-num {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 46px;
+  text-align: right;
+}
+.edge-score-num.score-high { color: var(--green); }
+.edge-score-num.score-med  { color: var(--amber); }
+.edge-score-num.score-low  { color: var(--red); }
+
+/* ── KEY STATS ROW ── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+  padding: 0 18px 14px;
+}
+.stat-box {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 8px 10px;
+}
+.stat-name {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+.stat-val {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+}
+.stat-val.green { color: var(--green); }
+.stat-val.red   { color: var(--red); }
+.stat-val.amber { color: var(--amber); }
+.stat-val.blue  { color: var(--blue); }
+
+/* ── POP COMPARISON ── */
+.pop-compare {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px 14px;
+  flex-wrap: wrap;
+}
+.pop-box {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 8px 14px;
+  text-align: center;
+}
+.pop-label {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+.pop-value {
+  font-family: var(--mono);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+.pop-value.true  { color: var(--green); }
+.pop-value.implied { color: var(--blue); }
+.pop-arrow {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--text3);
+}
+.pop-edge {
+  background: var(--amber-dim);
+  border: 1px solid var(--amber2);
+  border-radius: 5px;
+  padding: 8px 14px;
+  text-align: center;
+}
+.pop-edge .pop-label { color: var(--amber2); }
+.pop-edge .pop-value { color: var(--amber); }
+
+/* ── EXPANDED DETAIL ── */
+.card-detail {
+  display: none;
+  padding: 0 18px 16px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.trade-card.expanded .card-detail { display: block; }
+
+.detail-section {
+  margin-top: 14px;
+}
+.detail-section-title {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--text3);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+.detail-text {
+  font-size: 0.88rem;
+  color: var(--text2);
+  line-height: 1.6;
+}
+.detail-text strong { color: var(--text); }
+
+.instruction-box {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 10px 14px;
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: var(--text2);
+  line-height: 1.55;
+}
+.instruction-box.entry { border-left: 3px solid var(--green); }
+.instruction-box.exit  { border-left: 3px solid var(--amber); }
+.instruction-box.stop  { border-left: 3px solid var(--red); }
+
+.invalidation-box {
+  background: var(--red-dim);
+  border: 1px solid rgba(255,77,109,0.3);
+  border-radius: 5px;
+  padding: 8px 14px;
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: var(--text2);
+}
+.invalidation-box::before {
+  content: "INVALIDATION: ";
+  color: var(--red);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  display: block;
+  margin-bottom: 2px;
+}
+
+/* ── WARNINGS ── */
+.warnings-list { margin-top: 10px; }
+.warning-item {
+  background: rgba(255,208,96,0.06);
+  border: 1px solid rgba(255,208,96,0.25);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  color: var(--yellow);
+  margin-bottom: 5px;
+  font-family: var(--mono);
+}
+
+/* ── NEWS STATUS ── */
+.news-badge {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+.news-clear    { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+.news-monitor  { background: var(--amber-dim); color: var(--amber); border: 1px solid var(--amber2); }
+.news-blocked  { background: var(--red-dim);   color: var(--red);   border: 1px solid var(--red); }
+
+/* ── TECHNICAL SIGNALS ── */
+.signals-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.signal-tag {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid;
+}
+.signal-bull { color: var(--green); border-color: var(--green); background: var(--green-dim); }
+.signal-bear { color: var(--red);   border-color: var(--red);   background: var(--red-dim); }
+.signal-neut { color: var(--blue);  border-color: var(--blue);  background: var(--blue-dim); }
+
+/* ── SCORE BREAKDOWN ── */
+.score-breakdown {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+.score-component {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  text-align: center;
+}
+.score-comp-name {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: block;
+}
+.score-comp-val {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--amber);
+}
+
+/* ── AVOIDED LIST ── */
+.avoided-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.avoided-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--red);
+  border-radius: 6px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.avoided-ticker {
+  font-family: var(--mono);
+  font-size: 1.0rem;
+  font-weight: 600;
+  color: var(--red);
+  min-width: 48px;
+}
+.avoided-reason {
+  font-size: 0.8rem;
+  color: var(--text2);
+  line-height: 1.4;
+}
+.avoided-category {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--text3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ── EMPTY STATE ── */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text3);
+  font-size: 0.88rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.empty-state-title {
+  font-family: var(--mono);
+  font-size: 1.0rem;
+  color: var(--text2);
+  margin-bottom: 8px;
+}
+
+/* ── EOD MEAN REVERSION ── */
+.eod-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.eod-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--blue);
+  border-radius: 6px;
+  padding: 12px;
+}
+.eod-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.eod-ticker {
+  font-family: var(--mono);
+  font-size: 1.0rem;
+  font-weight: 600;
+  color: var(--blue);
+}
+.eod-change {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+.eod-change.down { color: var(--red); }
+.eod-change.up { color: var(--green); }
+.eod-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text2);
+  margin-top: 4px;
+}
+.eod-note {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--text2);
+  line-height: 1.4;
+}
+
+/* ── PREMIUM DECAY ── */
+.decay-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.decay-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--amber);
+  border-radius: 6px;
+  padding: 12px;
+}
+.decay-ticker {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--amber);
+}
+.decay-text {
+  font-size: 0.78rem;
+  color: var(--text2);
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+/* ── WEEKLY SUMMARY ── */
+.weekly-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.weekly-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--green);
+  border-radius: 6px;
+  padding: 12px;
+}
+.weekly-label {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.weekly-value {
+  font-size: 1.1rem;
+  color: var(--green);
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+/* ── FOOTER ── */
+.footer {
+  margin-top: 50px;
+  padding: 20px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text3);
+  line-height: 1.6;
+}
+.footer strong { color: var(--red); }
+
+/* ── PRINT ── */
+@media print {
+  body { background: white; color: black; }
+  .card-detail { display: block !important; }
+  .expand-icon { display: none; }
+  .trade-card, .card, .stat-box { border-color: #ccc !important; }
+  .decision-bar, .decision-btns { display: none !important; }
+}
+
+/* ── RESPONSIVE ── */
+@media (max-width: 600px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .market-strip { grid-template-columns: repeat(2, 1fr); }
+  .pop-compare { flex-direction: column; align-items: flex-start; }
+  .decision-bar { flex-direction: column; align-items: flex-start; }
+  .decision-btns { flex-wrap: wrap; }
+}
+
+/* ── DECISION LAYER ── */
+.decision-bar {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--amber);
+  border-radius: 8px;
+  padding: 12px 18px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.dec-bar-label {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--text3);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.dec-counts {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.dec-count-item {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  opacity: 0.35;
+  transition: opacity 0.2s;
+}
+.dec-count-item.has-count { opacity: 1; }
+.dec-count-item.take     { color: var(--green); }
+.dec-count-item.watch-dec{ color: var(--amber); }
+.dec-count-item.pass     { color: var(--red); }
+.dec-count-item.undecided{ color: var(--text2); }
+.filter-btns {
+  display: flex;
+  gap: 5px;
+}
+.filter-btn {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.filter-btn:hover { border-color: var(--amber2); color: var(--amber); }
+.filter-btn.active { background: var(--amber-dim); border-color: var(--amber2); color: var(--amber); }
+.decision-btns {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.dec-btn {
+  border: 1px solid;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 5px 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: transparent;
+  white-space: nowrap;
+}
+.dec-btn.take      { color: var(--green); border-color: rgba(0,200,150,0.35); }
+.dec-btn.watch-dec { color: var(--amber); border-color: rgba(245,166,35,0.35); }
+.dec-btn.pass      { color: var(--red);   border-color: rgba(255,77,109,0.35); }
+.dec-btn.take:hover,      .dec-btn.take.active      { background: var(--green); color: var(--bg); border-color: var(--green); }
+.dec-btn.watch-dec:hover, .dec-btn.watch-dec.active { background: var(--amber); color: var(--bg); border-color: var(--amber); }
+.dec-btn.pass:hover,      .dec-btn.pass.active      { background: var(--red);   color: #fff;      border-color: var(--red); }
+/* Decision state overrides on cards */
+.trade-card[data-decision="TAKE"]  { border-color: var(--green) !important; box-shadow: 0 0 0 1px var(--green); }
+.trade-card[data-decision="WATCH"] { border-color: var(--amber) !important; }
+.trade-card[data-decision="PASS"]  { opacity: 0.28 !important; filter: grayscale(60%); }
+</style>
+</head>
+<body>
+
+<!-- DISCLAIMER BANNER -->
+<div class="disclaimer">
+  <strong>EDUCATIONAL USE ONLY</strong> — {{ disclaimer }}
+</div>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="container header-inner">
+    <div>
+      <div class="session-badge">{{ session_type }} SESSION</div>
+      <div class="logo">OPTIONS<span> INTELLIGENCE</span></div>
+    </div>
+    <div class="header-meta">
+      {{ timestamp }}<br>
+      Account: ${{ "%.2f"|format(account_balance) }} · Max Risk/Trade: ${{ "%.2f"|format(max_risk_per_trade) }}
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ══ MARKET CONTEXT ══ -->
+<div class="section">
+  <div class="section-title">Market Context</div>
+
+  <div class="market-strip">
+    <!-- VIX -->
+    <div class="market-stat">
+      <div class="market-stat-label">VIX</div>
+      <div class="market-stat-value {% if vix.current > 25 %}down{% elif vix.current < 15 %}up{% else %}amber{% endif %}">
+        {{ vix.current }}
+      </div>
+      <div class="market-stat-sub">{{ vix.label }} · {{ vix.trend|capitalize }}</div>
+    </div>
+
+    <!-- SPY -->
+    <div class="market-stat">
+      <div class="market-stat-label">SPY</div>
+      <div class="market-stat-value {% if spy.day_change_pct is defined and spy.day_change_pct >= 0 %}up{% else %}down{% endif %}">
+        ${{ spy.price|default("—") }}
+      </div>
+      <div class="market-stat-sub">
+        {% if spy.day_change_pct is defined %}
+          {% if spy.day_change_pct >= 0 %}+{% endif %}{{ "%.2f"|format(spy.day_change_pct) }}% today
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Market Bias -->
+    <div class="market-stat">
+      <div class="market-stat-label">Bias</div>
+      <div style="margin-top: 4px;">
+        {% if market_bias == "RISK-ON" %}
+          <span class="bias-pill bias-risk-on">RISK-ON</span>
+        {% elif market_bias == "RISK-OFF" %}
+          <span class="bias-pill bias-risk-off">RISK-OFF</span>
+        {% else %}
+          <span class="bias-pill bias-neutral">NEUTRAL</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Synthesis Source -->
+    <div class="market-stat">
+      <div class="market-stat-label">Analysis</div>
+      <div class="market-stat-value" style="font-size:0.75rem; margin-top:4px; color: var(--text2);">
+        {% if synthesis_source == "claude_api" %}Claude AI{% else %}Rule-Based{% endif %}
+      </div>
+      <div class="market-stat-sub">{{ qualified_trades|length }} setups qualified</div>
+    </div>
+  </div>
+
+  {% if market_summary %}
+  <div class="summary-box">{{ market_summary }}</div>
+  {% endif %}
+
+  {% if macro_events %}
+  <div style="font-family: var(--mono); font-size: 0.75rem; color: var(--text2);">
+    <span style="color: var(--text3); letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.65rem;">Today's Events · </span>
+    {% for ev in macro_events %}{{ ev }}{% if not loop.last %} · {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- ══ QUALIFIED TRADES ══ -->
+<div class="section">
+  <div class="section-title">Qualified Trade Setups — Options to Consider Selling</div>
+
+  {% if qualified_trades %}
+
+  <!-- ── DECISION BAR ── -->
+  <div class="decision-bar" id="decisionBar">
+    <div>
+      <div class="dec-bar-label">Your Decisions</div>
+      <div class="dec-counts">
+        <span class="dec-count-item take"      id="cntTake">0 TAKING</span>
+        <span class="dec-count-item watch-dec" id="cntWatch">0 WATCHING</span>
+        <span class="dec-count-item pass"      id="cntPass">0 PASSING</span>
+        <span class="dec-count-item undecided has-count" id="cntUndecided">{{ qualified_trades|length }} UNDECIDED</span>
+      </div>
+    </div>
+    <div class="filter-btns">
+      <button class="filter-btn active" onclick="filterCards('all', this)">ALL</button>
+      <button class="filter-btn" onclick="filterCards('TAKE', this)">TAKE</button>
+      <button class="filter-btn" onclick="filterCards('WATCH', this)">WATCH</button>
+      <button class="filter-btn" onclick="filterCards('PASS', this)">PASS</button>
+    </div>
+  </div>
+
+    {% for trade in qualified_trades %}
+    <div class="trade-card {{ trade.recommendation|lower }}" id="trade-{{ trade.ticker }}">
+
+      <!-- Card Header (clickable) -->
+      <div class="card-header" onclick="toggleCard('trade-{{ trade.ticker }}')">
+        <div>
+          <div class="card-ticker">{{ trade.ticker }}</div>
+          <div class="card-strategy">{{ trade.strategy|replace("_", " ")|upper }}</div>
+        </div>
+        <div>
+          <div class="card-strikes">
+            ${{ "%.0f"|format(trade.short_strike) }} / ${{ "%.0f"|format(trade.long_strike) }}
+          </div>
+          <div class="card-dte">{{ trade.expiration }} · {{ trade.dte }}DTE</div>
+        </div>
+        <div>
+          <div class="card-credit">+${{ "%.2f"|format(trade.credit_per_share) }} credit</div>
+          <div style="font-family:var(--mono); font-size:0.72rem; color:var(--red);">
+            Max loss: ${{ "%.0f"|format(trade.max_loss_usd) }}
+          </div>
+        </div>
+        <div>
+          <span class="rec-badge {{ trade.rec_class }}">{{ trade.recommendation }}</span>
+          {% if trade.oversized_position %}
+            <div style="margin-top:4px;"><span class="news-badge" style="background:var(--red);color:#fff;letter-spacing:0.06em;">OVERSIZED 1x</span></div>
+          {% endif %}
+          {% if trade.news_sentiment == "CLEAR" or trade.news_sentiment == "POSITIVE" or trade.news_sentiment == "NEUTRAL" %}
+            <div style="margin-top:4px;"><span class="news-badge news-clear">NEWS CLEAR</span></div>
+          {% elif trade.news_sentiment == "NEGATIVE" %}
+            <div style="margin-top:4px;"><span class="news-badge news-monitor">NEWS MONITOR</span></div>
+          {% endif %}
+        </div>
+        <!-- Decision buttons — stop propagation so clicks don't toggle expand -->
+        <div class="decision-btns" onclick="event.stopPropagation()">
+          <button class="dec-btn take"      onclick="setDecision('{{ trade.ticker }}', 'TAKE')">✓ TAKE</button>
+          <button class="dec-btn watch-dec" onclick="setDecision('{{ trade.ticker }}', 'WATCH')">◎ WATCH</button>
+          <button class="dec-btn pass"      onclick="setDecision('{{ trade.ticker }}', 'PASS')">✕ PASS</button>
+        </div>
+        <div class="expand-icon">&#x25BC;</div>
+      </div>
+
+      <!-- Edge Meter -->
+      <div class="edge-meter-wrap">
+        <span class="edge-label">EDGE SCORE</span>
+        <div class="edge-track">
+          <div class="edge-fill {{ trade.score_class }}" style="width: {{ trade.edge_score }}%"></div>
+        </div>
+        <span class="edge-score-num {{ trade.score_class }}">{{ trade.edge_score }}/100</span>
+      </div>
+
+      <!-- POP Comparison -->
+      <div class="pop-compare">
+        <div class="pop-box">
+          <div class="pop-label">True Historical POP</div>
+          <div class="pop-value true">{{ trade.true_pop_pct }}%</div>
+        </div>
+        <div class="pop-arrow">vs</div>
+        <div class="pop-box">
+          <div class="pop-label">Market Implied POP</div>
+          <div class="pop-value implied">{{ trade.implied_pop_pct }}%</div>
+        </div>
+        <div class="pop-edge">
+          <div class="pop-label">Edge</div>
+          <div class="pop-value amber">{{ trade.edge_pts_display }}pts</div>
+        </div>
+        <div style="font-family:var(--mono); font-size:0.72rem; color:var(--text3); align-self:center;">
+          &#x03B4;={{ trade.delta|round(3) }} · IV Rank {{ trade.iv_rank|round(0)|int }}
+        </div>
+      </div>
+
+      <!-- Key Stats -->
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-name">Strike Distance</div>
+          <div class="stat-val amber">${{ trade.strike_distance_usd }} ({{ trade.strike_distance_pct }}%)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-name">Credit Collected</div>
+          <div class="stat-val green">${{ trade.credit_usd }}/contract</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-name">Profit Target</div>
+          <div class="stat-val green">${{ trade.profit_target_usd }} (50%)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-name">VRP (IV-RV)</div>
+          <div class="stat-val {% if trade.vrp > 0 %}green{% else %}red{% endif %}">+{{ trade.vrp }}pp</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-name">Trend</div>
+          <div class="stat-val {% if 'UP' in trade.trend %}green{% elif 'DOWN' in trade.trend %}red{% else %}blue{% endif %}">
+            {{ trade.trend|replace("_", " ") }}
+          </div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-name">RSI (14)</div>
+          <div class="stat-val {% if trade.rsi > 70 %}red{% elif trade.rsi < 30 %}green{% else %}blue{% endif %}">{{ trade.rsi }}</div>
+        </div>
+        {% if trade.nearest_support %}
+        <div class="stat-box">
+          <div class="stat-name">Nearest Support</div>
+          <div class="stat-val">${{ "%.2f"|format(trade.nearest_support) }}</div>
+        </div>
+        {% endif %}
+        <div class="stat-box">
+          <div class="stat-name">Contracts OK</div>
+          <div class="stat-val">{{ trade.contracts_allowed }}</div>
+        </div>
+      </div>
+
+      <!-- Expandable Detail -->
+      <div class="card-detail">
+
+        {% if trade.reasoning %}
+        <div class="detail-section">
+          <div class="detail-section-title">Analysis</div>
+          <div class="detail-text">{{ trade.reasoning }}</div>
+        </div>
+        {% endif %}
+
+        <!-- Technical Signals -->
+        <div class="detail-section">
+          <div class="detail-section-title">Technical Signals</div>
+          <div class="signals-grid">
+            {% if trade.trend in ["STRONG_UP", "UP"] %}
+              <span class="signal-tag signal-bull">{{ trade.trend|replace("_", " ") }}</span>
+            {% elif trade.trend in ["STRONG_DOWN", "DOWN"] %}
+              <span class="signal-tag signal-bear">{{ trade.trend|replace("_", " ") }}</span>
+            {% else %}
+              <span class="signal-tag signal-neut">NEUTRAL TREND</span>
+            {% endif %}
+            {% if trade.macd_crossover == "bullish" %}
+              <span class="signal-tag signal-bull">MACD BULLISH</span>
+            {% else %}
+              <span class="signal-tag signal-bear">MACD BEARISH</span>
+            {% endif %}
+            {% if trade.rsi is defined %}
+              {% if trade.rsi > 70 %}<span class="signal-tag signal-bear">RSI OVERBOUGHT {{ trade.rsi }}</span>
+              {% elif trade.rsi < 30 %}<span class="signal-tag signal-bull">RSI OVERSOLD {{ trade.rsi }}</span>
+              {% else %}<span class="signal-tag signal-neut">RSI {{ trade.rsi }}</span>
+              {% endif %}
+            {% endif %}
+            {% if trade.sma200 and trade.current_price > trade.sma200 %}
+              <span class="signal-tag signal-bull">ABOVE 200 SMA</span>
+            {% elif trade.sma200 %}
+              <span class="signal-tag signal-bear">BELOW 200 SMA</span>
+            {% endif %}
+          </div>
+          {% if trade.sma50 or trade.sma200 %}
+          <div style="font-family:var(--mono); font-size:0.72rem; color:var(--text3); margin-top:8px;">
+            {% if trade.sma20 %}SMA20: ${{ "%.2f"|format(trade.sma20) }} · {% endif %}
+            {% if trade.sma50 %}SMA50: ${{ "%.2f"|format(trade.sma50) }} · {% endif %}
+            {% if trade.sma200 %}SMA200: ${{ "%.2f"|format(trade.sma200) }}{% endif %}
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- Entry / Exit -->
+        <div class="detail-section">
+          <div class="detail-section-title">Execution</div>
+          {% if trade.entry_instruction %}
+          <div class="instruction-box entry"><strong style="color:var(--green); font-family:var(--mono); font-size:0.68rem; letter-spacing:0.08em;">ENTRY</strong><br>{{ trade.entry_instruction }}</div>
+          {% endif %}
+          {% if trade.exit_instruction %}
+          <div class="instruction-box exit"><strong style="color:var(--amber); font-family:var(--mono); font-size:0.68rem; letter-spacing:0.08em;">EXIT / PROFIT TARGET</strong><br>{{ trade.exit_instruction }}</div>
+          {% endif %}
+          {% if trade.invalidation %}
+          <div class="invalidation-box">{{ trade.invalidation }}</div>
+          {% endif %}
+        </div>
+
+        <!-- Edge Score Breakdown -->
+        {% if trade.component_breakdown %}
+        <div class="detail-section">
+          <div class="detail-section-title">Edge Score Breakdown</div>
+          <div class="score-breakdown">
+            {% for comp, val in trade.component_breakdown.items() %}
+            <div class="score-component">
+              <span class="score-comp-name">{{ comp|replace("_", " ")|upper }}</span>
+              <span class="score-comp-val">{{ val }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- Warnings -->
+        {% if trade.warnings %}
+        <div class="detail-section">
+          <div class="detail-section-title">Flags</div>
+          <div class="warnings-list">
+            {% for w in trade.warnings %}
+            <div class="warning-item">{{ w }}</div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+
+      </div><!-- /card-detail -->
+    </div><!-- /trade-card -->
+    {% endfor %}
+
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-state-title">No Qualified Setups Today</div>
+    <p>All screened tickers failed one or more hard validation rules.<br>
+    Check the Avoided list below for reasons. Market conditions may not favor premium selling today.</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ══ EOD MEAN REVERSION ══ -->
+{% if eod_setups %}
+<div class="section">
+  <div class="section-title">EOD Mean Reversion Watch</div>
+  <div class="eod-grid">
+    {% for e in eod_setups %}
+    <div class="eod-card">
+      <div class="eod-header">
+        <div class="eod-ticker">{{ e.ticker }}</div>
+        <div class="eod-change {% if e.day_change_pct < 0 %}down{% else %}up{% endif %}">
+          {{ "%.2f"|format(e.day_change_pct) }}%
+        </div>
+      </div>
+      <div class="eod-row"><span>Price</span><strong>${{ "%.2f"|format(e.price) }}</strong></div>
+      <div class="eod-row"><span>Volume Ratio</span><strong>{{ "%.2f"|format(e.vol_ratio) }}x</strong></div>
+      <div class="eod-row"><span>RSI</span><strong>{{ e.rsi }}</strong></div>
+      {% if e.nearest_support %}
+      <div class="eod-row"><span>Support</span><strong>${{ "%.2f"|format(e.nearest_support) }}</strong></div>
+      {% endif %}
+      {% if e.entry_zone %}
+      <div class="eod-note">{{ e.entry_zone }}</div>
+      {% endif %}
+      {% if e.note %}
+      <div class="eod-note">{{ e.note }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+<div class="section">
+  <div class="empty-state">
+    <div class="empty-state-title">No EOD Mean Reversion Setups</div>
+    <p>None of today's names met the volume, RSI, and price-drop filters.</p>
+  </div>
+</div>
+{% endif %}
+
+<!-- ══ PREMIUM DECAY ALERTS ══ -->
+<div class="section">
+  <div class="section-title">Premium Decay Alerts</div>
+  {% if decay_alerts %}
+  <div class="decay-grid">
+    {% for a in decay_alerts %}
+    <div class="decay-card">
+      <div class="decay-ticker">{{ a.ticker }}</div>
+      <div class="decay-text">{{ a.message }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-state-title">No Profit Targets Hit</div>
+    <p>No open positions at or beyond the {{ target_profit_pct }}% profit target.</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ══ WEEKLY SUMMARY ══ -->
+{% if is_friday and weekly_summary %}
+<div class="section">
+  <div class="section-title">Weekly Summary (Friday Close)</div>
+  <div class="weekly-grid">
+    <div class="weekly-card">
+      <div class="weekly-label">Qualified Setups</div>
+      <div class="weekly-value">{{ weekly_summary.qualified_count }}</div>
+    </div>
+    <div class="weekly-card">
+      <div class="weekly-label">Avg Edge Score</div>
+      <div class="weekly-value">{{ weekly_summary.avg_edge_score }}</div>
+    </div>
+    <div class="weekly-card">
+      <div class="weekly-label">Account Balance</div>
+      <div class="weekly-value">${{ "%.2f"|format(weekly_summary.account_balance) }}</div>
+    </div>
+  </div>
+  {% if weekly_summary.note %}
+  <div class="summary-box" style="border-left-color: var(--green); margin-top: 12px;">
+    <strong style="color:var(--green); font-family:var(--mono); font-size:0.68rem; letter-spacing:0.08em;">WEEKLY NOTE</strong><br>
+    {{ weekly_summary.note }}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- ══ AVOIDED LIST ══ -->
+{% if avoided_tickers %}
+<div class="section">
+  <div class="section-title">Screened — Blocked ({{ avoided_tickers|length }})</div>
+  <div class="avoided-grid">
+    {% for item in avoided_tickers %}
+    <div class="avoided-item">
+      <div class="avoided-ticker">{{ item.ticker }}</div>
+      <div>
+        <div class="avoided-reason">{{ item.reason }}</div>
+        <div class="avoided-category">{{ item.category|replace("_", " ") }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if session_notes %}
+<div class="section">
+  <div class="summary-box" style="border-left-color: var(--blue);">
+    <strong style="color:var(--blue); font-family:var(--mono); font-size:0.68rem; letter-spacing:0.08em;">SESSION NOTES</strong><br>
+    {{ session_notes }}
+  </div>
+</div>
+{% endif %}
+
+</div><!-- /container -->
+
+<!-- FOOTER DISCLAIMER -->
+<div class="footer container">
+  <strong>DISCLAIMER</strong><br>
+  {{ disclaimer }}<br><br>
+  Generated: {{ timestamp }} · Options Intelligence v1.0
+</div>
+
+<script>
+// ── WOLF Decision Layer ──────────────────────────────────────────────────────
+const SHEET_KEY = 'wolf_dec_{{ date_str }}_{{ session_type|lower }}';
+
+function toggleCard(id) {
+  const card = document.getElementById(id);
+  if (card) card.classList.toggle('expanded');
+}
+
+function setDecision(ticker, decision) {
+  const saved = JSON.parse(localStorage.getItem(SHEET_KEY) || '{}');
+  if (saved[ticker] === decision) {
+    delete saved[ticker];
+    applyDecision(ticker, null);
+  } else {
+    saved[ticker] = decision;
+    applyDecision(ticker, decision);
+  }
+  localStorage.setItem(SHEET_KEY, JSON.stringify(saved));
+  updateDecisionBar();
+}
+
+function applyDecision(ticker, decision) {
+  const card = document.getElementById('trade-' + ticker);
+  if (!card) return;
+  card.dataset.decision = decision || '';
+  card.querySelectorAll('.dec-btn').forEach(b => b.classList.remove('active'));
+  if (decision) {
+    const cls = decision === 'WATCH' ? 'watch-dec' : decision.toLowerCase();
+    const btn = card.querySelector('.dec-btn.' + cls);
+    if (btn) btn.classList.add('active');
+  }
+}
+
+function updateDecisionBar() {
+  const saved = JSON.parse(localStorage.getItem(SHEET_KEY) || '{}');
+  const cards = document.querySelectorAll('.trade-card[id^="trade-"]');
+  const total = cards.length;
+  const take  = Object.values(saved).filter(d => d === 'TAKE').length;
+  const watch = Object.values(saved).filter(d => d === 'WATCH').length;
+  const pass  = Object.values(saved).filter(d => d === 'PASS').length;
+  const undec = total - take - watch - pass;
+
+  const set = (id, val, cnt) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = val;
+    el.classList.toggle('has-count', cnt > 0);
+  };
+  set('cntTake',      take + ' TAKING',    take);
+  set('cntWatch',     watch + ' WATCHING', watch);
+  set('cntPass',      pass + ' PASSING',   pass);
+  set('cntUndecided', undec + ' UNDECIDED', undec);
+}
+
+function filterCards(filter, btn) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.querySelectorAll('.trade-card[id^="trade-"]').forEach(card => {
+    card.style.display = (filter === 'all' || card.dataset.decision === filter) ? '' : 'none';
+  });
+}
+
+function loadDecisions() {
+  const saved = JSON.parse(localStorage.getItem(SHEET_KEY) || '{}');
+  Object.entries(saved).forEach(([ticker, dec]) => applyDecision(ticker, dec));
+  updateDecisionBar();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.trade-card.consider').forEach(c => c.classList.add('expanded'));
+loadDecisions();
+</script>
+</body>
+</html>

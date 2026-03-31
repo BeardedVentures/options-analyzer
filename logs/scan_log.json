@@ -1,0 +1,4682 @@
+[
+  {
+    "timestamp": "2026-03-03T17:42:46.093466-05:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "AAPL",
+      "NVDA",
+      "MSFT"
+    ],
+    "qualified_trades": [],
+    "rejected_trades": [
+      {
+        "ticker": "SPY",
+        "reason": "No options chain in DTE range",
+        "category": "NO_OPTIONS"
+      },
+      {
+        "ticker": "QQQ",
+        "reason": "No options chain in DTE range",
+        "category": "NO_OPTIONS"
+      },
+      {
+        "ticker": "IWM",
+        "reason": "No options chain in DTE range",
+        "category": "NO_OPTIONS"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No options chain in DTE range",
+        "category": "NO_OPTIONS"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "No options chain in DTE range",
+        "category": "NO_OPTIONS"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No options chain in DTE range",
+        "category": "NO_OPTIONS"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:46.712120"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:47.095091"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:47.805473"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:48.184528"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:48.558903"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:48.940195"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:49.308848"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:49.702870"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:50.186181"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": false,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:50.654081"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:51.045537"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:51.440677"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": false,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:51.900187"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:52.475575"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:52.905998"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": false,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:53.400744"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:53.878410"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:54.361052"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": false,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:54.853326"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:55.258593"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:55.645364"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": false,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:56.075806"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:56.514476"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:56.879209"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": false,
+        "error": "",
+        "timestamp": "2026-03-03T16:42:57.349469"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\jadams\\Claude\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-03-03.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-03-03T17:43:24.624058-05:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "AAPL",
+      "NVDA",
+      "MSFT"
+    ],
+    "qualified_trades": [],
+    "rejected_trades": [
+      {
+        "ticker": "SPY",
+        "reason": "Insufficient liquidity \u2014 volume 29, open interest 373. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "QQQ",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "IWM",
+        "reason": "Insufficient liquidity \u2014 volume 9, open interest 70. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:25.245423"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:25.630666"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:26.213207"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:26.637768"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:27.014170"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:27.409199"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:27.994622"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:28.379146"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:28.850124"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:30.969588"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:31.457787"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:31.808912"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:33.975168"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:34.350912"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:34.772327"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:36.617893"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:37.048313"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:37.427269"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:38.880965"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:39.262667"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:39.697189"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:41.302821"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:41.714305"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:42.102474"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-03T16:43:43.712229"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\jadams\\Claude\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-03-03.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-03-04T14:58:08.215888-05:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "AAPL",
+      "NVDA",
+      "MSFT"
+    ],
+    "qualified_trades": [
+      {
+        "ticker": "SPY",
+        "edge_score": 60
+      },
+      {
+        "ticker": "QQQ",
+        "edge_score": 63
+      }
+    ],
+    "rejected_trades": [
+      {
+        "ticker": "IWM",
+        "reason": "Insufficient liquidity \u2014 volume 1, open interest 252. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:08.930484"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:09.338020"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:09.906770"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:10.399857"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:10.776929"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:11.176600"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:11.598352"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:12.043755"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:12.454969"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:14.567585"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:14.983717"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:15.341919"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:17.537880"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:18.131652"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:18.565763"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:20.646855"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:21.221286"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:21.606357"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:23.153089"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:23.626135"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:24.048452"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:25.571011"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:26.024363"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:26.439968"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T13:58:27.973582"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\jadams\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-03-04.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-03-04T15:00:43.121692-05:00",
+    "session_type": "close",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "AAPL",
+      "NVDA",
+      "MSFT"
+    ],
+    "qualified_trades": [
+      {
+        "ticker": "SPY",
+        "edge_score": 60
+      },
+      {
+        "ticker": "QQQ",
+        "edge_score": 63
+      }
+    ],
+    "rejected_trades": [
+      {
+        "ticker": "IWM",
+        "reason": "Insufficient liquidity \u2014 volume 1, open interest 252. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:43.719590"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:44.094872"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:44.560690"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:45.043039"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:45.618252"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:46.003792"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:46.385636"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:46.939422"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:47.335754"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:49.386028"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:49.883448"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:50.271621"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:52.329030"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:52.752474"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:53.104707"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:55.114468"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:55.623181"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:55.986740"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:57.459018"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:57.813021"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:58.183179"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:00:59.698838"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:01:00.077246"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:01:00.474839"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:01:01.987894"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\jadams\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_CLOSE_2026-03-04.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-03-04T15:38:56.002864-05:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [
+      {
+        "ticker": "SPY",
+        "edge_score": 60
+      },
+      {
+        "ticker": "XLE",
+        "edge_score": 69
+      },
+      {
+        "ticker": "KRE",
+        "edge_score": 60
+      }
+    ],
+    "rejected_trades": [
+      {
+        "ticker": "QQQ",
+        "reason": "Insufficient liquidity \u2014 volume 23, open interest 214. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "IWM",
+        "reason": "Insufficient liquidity \u2014 volume 1, open interest 252. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "Insufficient liquidity \u2014 volume 2, open interest 3. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "Negative VRP (-18.5%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:38:57.008937"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:38:57.434890"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:38:58.357376"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:38:58.737468"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:38:59.113816"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:38:59.506554"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:38:59.905418"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:00.361190"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:00.892925"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:01.362767"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:01.733203"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:02.341232"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:02.725108"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:03.101657"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:03.486071"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:03.961995"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:06.137983"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:06.616113"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:07.071605"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:09.160342"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:09.656563"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:10.068200"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:12.024625"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:12.485442"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:12.828782"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:14.369263"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:14.887314"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:15.289027"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:16.889606"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:17.414831"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:17.770583"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:19.330072"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:19.762306"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:20.166029"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:21.777416"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:22.220238"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:22.621854"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:24.188706"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:24.576683"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:24.950439"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:26.798800"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:27.401360"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:27.887414"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:30.143667"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:30.759341"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:31.195410"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:32.747017"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "OXY",
+        "success": false,
+        "error": "'dict' object has no attribute 'empty'",
+        "timestamp": "2026-03-04T14:39:33.108487"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:33.759232"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:34.144795"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:36.171290"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:36.788374"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:37.197496"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:39:39.005259"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\jadams\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-03-04.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-03-04T15:42:37.421013-05:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [
+      {
+        "ticker": "SPY",
+        "edge_score": 60
+      },
+      {
+        "ticker": "QQQ",
+        "edge_score": 63
+      },
+      {
+        "ticker": "IWM",
+        "edge_score": 63
+      },
+      {
+        "ticker": "XLE",
+        "edge_score": 69
+      },
+      {
+        "ticker": "KRE",
+        "edge_score": 60
+      }
+    ],
+    "rejected_trades": [
+      {
+        "ticker": "NVDA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "Insufficient liquidity \u2014 volume 2, open interest 3. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "Negative VRP (-18.0%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:38.061215"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:38.459019"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:38.913383"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:39.394991"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:39.831527"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:40.289400"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:40.683201"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:41.159542"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:41.554517"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:42.178897"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:42.578845"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:42.957862"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:43.347375"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:43.763376"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:44.189285"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:44.657327"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:46.818724"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:47.363125"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:47.765182"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:49.882400"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:50.396119"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:50.785090"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:52.825821"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:53.258801"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:53.643832"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:55.265179"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:55.702101"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:56.083619"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:57.675706"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:58.061685"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:42:58.562293"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:00.468045"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:00.896267"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:01.351227"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:02.842245"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:03.275988"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:03.673120"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:05.290426"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:05.712012"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:06.050291"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:07.847088"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:08.434293"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:08.888510"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:11.000226"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:11.469078"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:11.905921"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:13.506855"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "OXY",
+        "success": false,
+        "error": "'dict' object has no attribute 'empty'",
+        "timestamp": "2026-03-04T14:43:13.875541"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:14.408243"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:14.795486"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:16.782450"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:17.255823"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:17.658066"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:43:19.281461"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\jadams\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-03-04.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-03-04T15:56:56.078900-05:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [
+      {
+        "ticker": "IWM",
+        "edge_score": 63
+      },
+      {
+        "ticker": "XLE",
+        "edge_score": 69
+      },
+      {
+        "ticker": "KRE",
+        "edge_score": 60
+      }
+    ],
+    "rejected_trades": [
+      {
+        "ticker": "SPY",
+        "reason": "Insufficient liquidity \u2014 volume 45, open interest 420. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "QQQ",
+        "reason": "Insufficient liquidity \u2014 volume 16, open interest 251. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "Insufficient liquidity \u2014 volume 2, open interest 3. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "Negative VRP (-19.3%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:56:56.628976"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:56:56.996334"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:56:57.478354"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:56:57.862259"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:56:58.297024"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:56:58.710765"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:56:59.099801"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:56:59.610271"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:00.099107"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:00.602198"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:01.024598"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:01.408377"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:01.820460"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:02.185572"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:02.555894"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:03.048683"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:05.320480"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:05.743679"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:06.319907"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:08.790959"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:09.212541"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:09.623418"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:11.835325"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:12.233422"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:12.666793"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:14.318603"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:14.656822"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:14.992701"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:16.785651"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:17.178252"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:17.571370"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:19.099141"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:19.546160"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:19.929472"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:21.520244"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:22.007035"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:22.442598"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:24.249020"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:24.602235"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:24.967019"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:26.569504"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:27.134036"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:27.492192"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:29.423286"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:29.887563"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:30.250657"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:31.844938"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:32.209681"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:32.677459"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:33.046014"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:34.938863"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:35.384885"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:35.784493"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-04T14:57:38.132486"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\jadams\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-03-04.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-03-05T13:36:14.167079-05:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [
+      {
+        "ticker": "SPY",
+        "edge_score": 70
+      }
+    ],
+    "rejected_trades": [
+      {
+        "ticker": "QQQ",
+        "reason": "Insufficient liquidity \u2014 volume 25, open interest 213. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "IWM",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "XLE",
+        "reason": "Insufficient liquidity \u2014 volume 2, open interest 22. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "KRE",
+        "reason": "Insufficient liquidity \u2014 volume 1, open interest 1. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "Negative VRP (-18.0%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:14.908555"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:15.308878"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:15.764706"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:16.169355"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:16.685496"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:17.022410"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:17.491899"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:17.852483"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:18.224804"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:18.591628"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:19.065789"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:19.430702"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:19.811937"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:20.174316"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:20.603670"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:20.952088"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:21.329930"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:21.722700"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:22.218502"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:22.577345"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:22.957731"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:23.338002"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:23.730610"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:24.236325"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:24.612830"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:25.027938"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:25.406378"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:25.775289"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:26.199645"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:27.924492"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "SPY",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=SPY&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:36:28.383483"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:30.630374"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:31.147727"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:31.532064"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "QQQ",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=QQQ&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:36:32.001159"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:34.246291"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:34.788087"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:35.134618"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "IWM",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=IWM&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:36:35.678186"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:37.835434"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:38.298458"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:38.832667"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "NVDA",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=NVDA&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:36:39.374938"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:41.045138"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:41.416650"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:41.813749"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "AMD",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=AMD&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:36:42.264722"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:43.998693"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:44.392742"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:44.752281"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "PLTR",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=PLTR&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:36:45.309991"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:47.202958"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:47.681557"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:48.055425"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "AAPL",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=AAPL&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:36:48.541657"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:50.825091"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:51.325476"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:51.704620"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "MSFT",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=MSFT&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:36:52.209409"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:54.170691"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:54.624683"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:54.972917"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "TSLA",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=TSLA&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:36:55.481676"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:57.519936"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:57.915975"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:36:58.270349"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "XLE",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=XLE&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:36:58.740154"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:37:01.008206"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:37:01.586992"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:37:02.046356"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "OXY",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=OXY&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:37:02.457939"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:37:03.900367"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:37:04.274115"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:37:04.665547"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:37:05.006981"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "KRE",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=KRE&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:37:05.434394"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:37:07.340433"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:37:07.764202"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:37:08.170479"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "GDX",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://sandbox.tradier.com/v1/markets/options/expirations?symbol=GDX&includeAllRoots=true",
+        "timestamp": "2026-03-05T12:37:08.573310"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T12:37:10.091691"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\jadams\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-03-05.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-03-05T14:04:56.730535-05:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [],
+    "rejected_trades": [
+      {
+        "ticker": "SPY",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "QQQ",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "IWM",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "No long strike within max spread width",
+        "category": "NO_LONG_STRIKE"
+      },
+      {
+        "ticker": "XLE",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "KRE",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:04:57.504766"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:04:57.860639"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:04:58.291927"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:04:58.718880"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:04:59.250114"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:04:59.739679"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:00.151406"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:00.558651"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:00.945753"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:01.387576"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:01.755352"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:02.135097"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:02.527988"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:02.920100"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:03.337588"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:03.751617"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:04.140327"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:04.478788"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:04.877604"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:05.253429"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:05.727428"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:06.085094"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:06.467378"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:06.824260"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:07.236881"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:07.635937"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:08.081676"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:08.465884"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:08.893676"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:10.369237"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:15.995730"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:16.490239"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:16.900580"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:22.262373"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:22.814598"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:23.159973"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:28.466046"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:28.843399"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:29.275876"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:34.107408"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:34.467025"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:34.798611"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:38.853608"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:39.270851"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:39.670471"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:43.715416"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:44.130448"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:44.508574"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:48.515191"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:48.925398"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:49.377008"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:53.445013"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:53.868791"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:54.250352"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:58.665295"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:59.160549"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:05:59.520887"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:06:04.548861"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:06:05.094721"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:06:05.500850"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:06:09.751678"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:06:10.240209"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:06:10.675715"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:06:15.935375"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:06:16.336509"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:06:16.679867"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:06:20.832508"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\jadams\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-03-05.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-03-05T14:17:29.095920-05:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [],
+    "rejected_trades": [
+      {
+        "ticker": "SPY",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "QQQ",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "IWM",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "XLE",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "KRE",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "IV Rank 0.0 below minimum 45",
+        "category": "IV_RANK"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:29.824250"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:30.227807"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:30.621277"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:30.976081"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:31.549263"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:31.899984"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:32.300560"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:32.673640"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:33.035608"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:33.394137"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:33.775111"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:34.145000"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:34.533402"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:34.931137"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:35.306263"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:35.622911"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:36.029613"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:36.378424"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:36.787933"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:37.173920"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:37.546182"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:37.918426"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:38.346986"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:38.729504"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:39.110430"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:39.458834"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:39.828125"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:40.155127"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:40.544625"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:41.803548"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:47.555833"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:47.985404"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:48.327056"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:53.436192"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:53.920477"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:54.361964"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:59.418096"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:17:59.844528"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:00.189644"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:04.247890"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:04.653552"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:04.996861"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:08.975984"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:09.385884"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:09.705887"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:14.772577"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:15.274497"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:15.637407"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:19.528204"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:20.424520"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:20.907459"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:25.185811"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:25.568501"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:25.936620"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:31.046729"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:31.548515"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:31.906387"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:37.089068"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:37.524397"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:38.044403"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:41.734414"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:42.122301"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:42.458811"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:47.229436"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:47.700568"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:48.049161"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:18:51.932925"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\jadams\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-03-05.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-03-05T14:25:58.274877-05:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [
+      {
+        "ticker": "QQQ",
+        "edge_score": 73
+      },
+      {
+        "ticker": "IWM",
+        "edge_score": 66
+      },
+      {
+        "ticker": "NVDA",
+        "edge_score": 70
+      },
+      {
+        "ticker": "AAPL",
+        "edge_score": 60
+      },
+      {
+        "ticker": "XLE",
+        "edge_score": 69
+      }
+    ],
+    "rejected_trades": [
+      {
+        "ticker": "SPY",
+        "reason": "Insufficient liquidity \u2014 volume 2, open interest 497. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "Negative VRP (-15.9%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "Negative VRP (-2.7%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "Negative VRP (-8.7%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "IV Rank 27.4 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "KRE",
+        "reason": "Insufficient liquidity \u2014 volume 0, open interest 1. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "Negative VRP (-15.6%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:25:58.938197"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:25:59.326901"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:25:59.718104"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:00.172302"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:00.686190"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:01.198431"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:01.599637"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:02.041547"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:02.423038"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:02.814173"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:03.218430"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:03.624443"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:04.018309"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:04.410781"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:04.803803"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:05.184139"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:05.575111"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:05.975176"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:06.412079"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:06.811412"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:07.284228"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:07.714507"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:08.126612"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:08.506186"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:08.877942"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:09.270942"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:09.659866"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:10.049518"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:10.432462"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:11.856721"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:18.412171"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:18.935620"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:19.297089"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:25.713680"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:26.286263"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:26.671104"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:32.104495"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:32.586097"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:32.960909"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:37.095918"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:37.487151"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:37.913263"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:38.282787"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:43.100704"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:43.501251"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:43.993403"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:44.370944"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:48.238361"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:48.596259"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:49.006936"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:49.445791"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:53.659062"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:54.081205"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:54.548129"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:54.893990"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:59.136533"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:26:59.518280"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:00.246714"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:00.574579"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:05.279285"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:05.803603"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:06.160286"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:11.024133"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:11.633784"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:12.000931"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:15.785564"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:16.158715"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:16.601709"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:17.004461"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:22.252169"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:22.718081"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:23.060897"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-03-05T13:27:27.774047"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\jadams\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-03-05.html",
+    "account_balance": 500.0,
+    "errors": []
+  }
+]
