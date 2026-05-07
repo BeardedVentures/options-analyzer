@@ -99,14 +99,24 @@ def validate_strike(
             logger.debug(f"[validator] REJECT {ticker} {short_strike}: {reason}")
             return _reject(reason, "STRIKE_TOO_CLOSE", warnings)
 
-    # ── RULE 3: Earnings blackout ──
+
+    # ── RULE 3: Earnings blackout or volatility crush ──
     if days_to_earnings < config.EARNINGS_BLACKOUT_DAYS:
-        reason = (
-            f"Earnings in {days_to_earnings} days — premium selling blocked. "
-            f"Policy: no selling within {config.EARNINGS_BLACKOUT_DAYS} days of earnings."
-        )
-        logger.debug(f"[validator] REJECT {ticker}: {reason}")
-        return _reject(reason, "EARNINGS_BLACKOUT", warnings)
+        if getattr(config, "ENABLE_VOL_CRUSH_MODE", False):
+            warnings.append(
+                f"VOLATILITY CRUSH: Earnings in {days_to_earnings} days — this is a volatility crush play. Expect IV collapse after earnings. Manage risk tightly!"
+            )
+            # Tag trade as volatility crush (will be surfaced in trade dict)
+            trade_type = "volatility_crush"
+        else:
+            reason = (
+                f"Earnings in {days_to_earnings} days — premium selling blocked. "
+                f"Policy: no selling within {config.EARNINGS_BLACKOUT_DAYS} days of earnings."
+            )
+            logger.debug(f"[validator] REJECT {ticker}: {reason}")
+            return _reject(reason, "EARNINGS_BLACKOUT", warnings)
+    else:
+        trade_type = "standard_premium"
 
     if days_to_earnings <= 14:
         warnings.append(
@@ -187,6 +197,7 @@ def validate_strike(
         "rejection_reason": None,
         "rejection_category": None,
         "warnings": warnings,
+        "trade_type": trade_type,
     }
 
 

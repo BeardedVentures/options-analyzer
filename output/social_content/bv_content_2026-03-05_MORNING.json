@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-04-22T21:43:22.612497",
+  "scan_timestamp": "2026-03-05T14:25:58.274877-05:00",
+  "session_type": "morning",
+  "date_str": "2026-03-05",
+  "source_mode": "scan_log",
+  "scan_summary": {
+    "tickers_scanned": 13,
+    "qualified_count": 5,
+    "rejected_count": 8
+  },
+  "posts": [
+    {
+      "post_type": "market_context",
+      "session": "morning",
+      "date": "March 05",
+      "platforms": {
+        "twitter": "🟡 WOLF Morning Scan | March 05\n\nVIX data unavailable\n\nScanned 13 tickers → 5 qualified setup(s).\n\nNot financial advice. Educational only. #OptionsTrading",
+        "linkedin": "🟡 WOLF Morning Scan — March 05\n\nMarket conditions:\n• SPY data pending\n• VIX data unavailable\n• Bias: NEUTRAL\n\nScan results:\n• 13 tickers screened\n• 5 setup(s) cleared all filters\n• 8 rejected by quantitative rules\n\nTop qualifier: $QQQ — Edge Score 73/100 ✅\n\n📊 Filter insight: 5 setup(s) cut — VRP was negative. Implied vol below realized vol means options are underpriced. No edge for sellers.\n\nThe scanner runs every market day — morning & close. Every setup must clear IV rank, VRP edge, true probability of profit, technicals, and news sentiment before appearing on the sheet.\n\n⚠️ Educational only. Not financial advice. Options trading involves significant risk of loss. All decisions are yours. Past results ≠ future performance."
+      },
+      "char_count_twitter": 153
+    },
+    {
+      "post_type": "setup_highlight",
+      "ticker": "QQQ",
+      "session": "morning",
+      "date": "March 05",
+      "platforms": {
+        "twitter": "📋 WOLF Top Setup | March 05\n\n$QQQ cleared all filters — Edge Score 73/100 ✅\n5 total qualified today. Also watching: NVDA, XLE.\n\nNot financial advice. Educational only. #OptionsTrading",
+        "linkedin": "📋 WOLF Scan Highlight — March 05\n\nTop setup today: $QQQ\nEdge Score: 73/100 ✅\n\n5 setup(s) cleared all quantitative filters today (IV rank, VRP edge, probability of profit, technicals, news sentiment).\n Also watching: NVDA, XLE.\n\nWOLF runs on a systematic model — no gut calls. Every ticker passes the same rules every day.\n\n⚠️ Educational only. Not financial advice. Options trading involves significant risk of loss. All decisions are yours. Past results ≠ future performance."
+      },
+      "char_count_twitter": 183,
+      "has_full_detail": false
+    },
+    {
+      "post_type": "educational",
+      "topic": "IV_RANK",
+      "session": "morning",
+      "date": "March 05",
+      "platforms": {
+        "twitter": "💡 Why WOLF skipped $TSLA today 📊\n\nIV Rank was too low.\n\nNot financial advice. Educational only. #OptionsTrading",
+        "linkedin": "💡 Why WOLF skipped $TSLA today 📊\n\nIV Rank was too low.\n\nIV Rank tells you where current implied volatility sits relative to the past 52 weeks (0 = lowest, 100 = highest).\n\nWe require IV Rank ≥ 45 before selling premium.\n\nWhy? Because we're selling options — when IV is low, the premium you collect doesn't compensate for the risk. You're selling cheap. Wait for vol to spike.\n\nLow IV = cheap options = no seller's edge.\nHigh IV = expensive options = premium seller's paradise.\n\nWhat's your IV Rank threshold? Drop it below. 👇\n\n—\nWOLF scans 13 tickers every market day. No opinions. Just data.\n\n⚠️ Educational only. Not financial advice. Options trading involves significant risk of loss. All decisions are yours. Past results ≠ future performance."
+      },
+      "char_count_twitter": 111
+    }
+  ],
+  "post_count": 3
+}

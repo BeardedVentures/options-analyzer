@@ -101,12 +101,20 @@ WATCHLIST = [
 ]
 
 # ─────────────────────────────────────────────
+
 # EDGE FILTER THRESHOLDS
 # ─────────────────────────────────────────────
 MIN_EDGE_SCORE = 60               # 0-100 composite score required to appear on tip sheet
 VRP_MIN_THRESHOLD = 0.15          # Implied vol must exceed realized vol by at least 15%
 NEWS_SENTIMENT_BLOCK = True       # Block trades on tickers with strong negative news
-EARNINGS_BLACKOUT_DAYS = 7        # Never sell premium within 7 days of earnings
+EARNINGS_BLACKOUT_DAYS = 7        # Never sell premium within 7 days of earnings (unless volatility crush mode is enabled)
+
+# ─────────────────────────────────────────────
+# VOLATILITY CRUSH MODE
+# ─────────────────────────────────────────────
+# If enabled, system will surface trades with earnings inside the DTE window as volatility crush plays.
+# These will be tagged and flagged with special warnings in the output.
+ENABLE_VOL_CRUSH_MODE = True
 
 # EOD Mean Reversion thresholds (close session)
 EOD_MIN_DROP_PCT = 1.5            # Minimum % down on day to flag for mean reversion

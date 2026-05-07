@@ -1,4 +1,4 @@
-name: Options Intelligence Daily Scan
+name: VEGA Daily Scan
 
 on:
   schedule:
@@ -71,7 +71,7 @@ jobs:
           EMAIL_USER:        ${{ secrets.EMAIL_USER }}
           EMAIL_PASSWORD:    ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECIPIENTS:  ${{ secrets.EMAIL_RECIPIENTS }}
-          # ── WOLF: JARVIS tower endpoint via Tailscale ─────────────────────
+          # ── VEGA: JARVIS tower endpoint via Tailscale ─────────────────────
           # Set JARVIS_HOST to the JARVIS tower's Tailscale IP, e.g.:
           #   http://100.x.x.x:8000
           # Find it: Tailscale admin console → Machines → JARVIS tower IP
@@ -83,7 +83,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tipsheet-morning-${{ github.run_id }}
+          name: vega-tipsheet-morning-${{ github.run_id }}
           path: output/tipsheets/
           retention-days: 30
 
@@ -128,7 +128,7 @@ jobs:
           EMAIL_USER:        ${{ secrets.EMAIL_USER }}
           EMAIL_PASSWORD:    ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECIPIENTS:  ${{ secrets.EMAIL_RECIPIENTS }}
-          # ── WOLF: JARVIS tower endpoint via Tailscale ─────────────────────
+          # ── VEGA: JARVIS tower endpoint via Tailscale ─────────────────────
           JARVIS_HOST:       ${{ secrets.JARVIS_HOST }}
           GITHUB_RUN_ID:     ${{ github.run_id }}
         run: python main.py --session close
@@ -137,6 +137,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tipsheet-close-${{ github.run_id }}
+          name: vega-tipsheet-close-${{ github.run_id }}
           path: output/tipsheets/
           retention-days: 30

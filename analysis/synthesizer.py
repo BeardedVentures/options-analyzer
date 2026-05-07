@@ -126,6 +126,7 @@ def _fallback_synthesis(
         f"{'Elevated volatility favors premium sellers — verify setups carefully.' if vix_current > 20 else 'Low volatility — select only the highest-edge setups.'}"
     )
 
+
     trades_output = []
     for trade in qualified_trades:
         rec = _auto_recommendation(trade)
@@ -133,9 +134,24 @@ def _fallback_synthesis(
         exit_instr = _auto_exit_instruction(trade)
         invalidation = _auto_invalidation(trade)
 
+        trade_type = trade.get("trade_type", "standard_premium")
+        if trade_type == "volatility_crush":
+            type_narrative = (
+                "This is a VOLATILITY CRUSH play: selling premium ahead of earnings to capture IV collapse after the event. "
+                "Expect rapid changes in option prices and manage risk tightly. "
+                "These setups are higher risk and require active management."
+            )
+        else:
+            type_narrative = (
+                "This is a STANDARD PREMIUM SELLING setup: high-probability, high-edge trade with no earnings event risk. "
+                "Focus is on steady premium decay and high win rate."
+            )
+
         trades_output.append({
             "ticker": trade.get("ticker"),
+            "trade_type": trade_type,
             "reasoning": (
+                f"{type_narrative} "
                 f"IV Rank {trade.get('iv_rank', 0):.0f} with VRP of "
                 f"{trade.get('vrp', 0):.1f}pp — options overpriced relative to realized vol. "
                 f"True historical POP {trade.get('true_pop', 0)*100:.0f}% vs "

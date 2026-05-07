@@ -1,7 +1,5 @@
-﻿"""
-options_intelligence/main.py - Entry point for morning and close scans.
-"""
-
+﻿
+import os
 import argparse
 import json
 import logging
@@ -16,8 +14,22 @@ from data import fetcher, technicals, fundamentals, news
 from analysis import edge_calculator, strike_validator, synthesizer
 from output import renderer, emailer
 
+
+# VEGA: JARVIS integration (non-blocking — scan completes even if tower unreachable)
+try:
+    from vega_ingest import post_to_jarvis
+    VEGA_INGEST_ENABLED = True
+except ImportError:
+    VEGA_INGEST_ENABLED = False
+
 logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
+
+
+# ─────────────── MAIN ENTRY BLOCK ───────────────
+# (Moved to end of file to ensure all functions are defined)
+
+
 
 
 def setup_logging() -> Path:
@@ -141,7 +153,9 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         return None, {"reason": "No price history available", "category": "NO_DATA"}, technicals._empty_result(ticker)
 
     current_price = float(price_data["Close"].iloc[-1])
+
     options = fetcher.get_options_chain(ticker, config.MIN_DTE, config.MAX_DTE)
+    print(f"[DEBUG] {ticker}: options chain length = {len(options)}")
     if not options:
         return None, {"reason": "No options chain in DTE range", "category": "NO_OPTIONS"}, technicals._empty_result(ticker)
 
@@ -154,6 +168,7 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         return None, {"reason": "No long strike within max spread width", "category": "NO_LONG_STRIKE"}, technicals._empty_result(ticker)
 
     current_iv = short_put.get("iv") or estimate_current_iv(options, current_price)
+    print(f"[DEBUG] {ticker}: current_iv = {current_iv}")
     tech = technicals.calculate_all(price_data, ticker, current_iv=current_iv, short_strike=short_put["strike"])
 
     if tech.get("iv_rank", 0) < config.MIN_IV_RANK:
@@ -219,6 +234,7 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     option_data = dict(short_put)
     option_data.update(metrics)
 
+
     validation = strike_validator.validate_strike(
         ticker=ticker,
         strategy=strategy,
@@ -241,6 +257,8 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     news_status = "CLEAR" if sentiment_label in ("POSITIVE", "NEUTRAL") else sentiment_label
 
     profit_target_price = round(metrics.get("credit_per_share", 0) * (1 - config.TARGET_PROFIT_PCT), 2)
+
+    trade_type = validation.get("trade_type", "standard_premium")
 
     trade = {
         "ticker": ticker,
@@ -282,6 +300,7 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "news_summary": sentiment.get("market_impact_summary"),
         "warnings": warnings,
         "auto_reasoning": f"IV Rank {tech.get('iv_rank', 0):.0f}, VRP {tech.get('vrp', 0):.1f}pp, edge {edge_points:.1f} pts.",
+        "trade_type": trade_type,
     }
 
     return trade, None, tech
@@ -421,6 +440,7 @@ def run_scan(session_type: str) -> None:
     check_session_window(session_type, ts)
 
     tickers = [w["ticker"].upper() for w in config.WATCHLIST]
+    print(f"[DEBUG] Ticker list after config load: {tickers}")
 
     logger.info(f"Starting {session_type} scan for {len(tickers)} tickers")
 
@@ -432,21 +452,32 @@ def run_scan(session_type: str) -> None:
     tech_map: Dict[str, Dict] = {}
     errors: List[str] = []
 
+
+    print(f"[DEBUG] Tickers to screen: {tickers}")
     for ticker in tickers:
+        print(f"[DEBUG] Screening ticker: {ticker}")
         try:
             trade, avoid, tech = screen_ticker(ticker, sentiment_map)
             tech_map[ticker] = tech
             if trade:
+                print(f"[DEBUG] Qualified trade for {ticker}: {trade}")
                 qualified_trades.append(trade)
             else:
+                print(f"[DEBUG] Avoided {ticker}: {avoid}")
                 avoided.append({
                     "ticker": ticker,
                     "reason": avoid.get("reason") if avoid else "Unknown",
                     "category": avoid.get("category") if avoid else "UNKNOWN",
                 })
         except Exception as e:
+            print(f"[DEBUG] Exception screening {ticker}: {e}")
             errors.append(f"{ticker}: {e}")
             avoided.append({"ticker": ticker, "reason": str(e), "category": "ERROR"})
+
+    print(f"[DEBUG] Qualified trades: {qualified_trades}")
+    print(f"[DEBUG] Avoided tickers: {avoided}")
+    print(f"[DEBUG] Errors: {errors}")
+
 
     synthesis = synthesizer.synthesize_tipsheet(
         session_type=session_type,
@@ -467,6 +498,7 @@ def run_scan(session_type: str) -> None:
 
     weekly_summary = compute_weekly_summary(log_dir, ts) if (session_type == "close" and ts.weekday() == 4) else None
 
+    print("[DEBUG] Calling renderer.render()...")
     output_path = renderer.render(
         session_type=session_type,
         qualified_trades=qualified_trades,
@@ -480,6 +512,7 @@ def run_scan(session_type: str) -> None:
         morning_signals=morning_signals,
         decay_alerts=decay_alerts,
     )
+    print(f"[DEBUG] renderer.render() returned: {output_path}")
 
     scan_entry = {
         "timestamp": ts.isoformat(),
@@ -498,19 +531,29 @@ def run_scan(session_type: str) -> None:
 
     logger.info(f"Scan complete. Tip sheet saved to {output_path}")
 
+    # ── VEGA: Push scan results to JARVIS tower ──────────────────────────
+    if VEGA_INGEST_ENABLED:
+        # Read tipsheet HTML if available
+        tipsheet_html = None
+        if output_path and Path(output_path).exists():
+            try:
+                tipsheet_html = Path(output_path).read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+        # Build full qualified trade dicts (not just ticker/score summaries)
+        full_scan_entry = dict(scan_entry)
+        full_scan_entry["qualified_trades"] = [
+            {k: v for k, v in t.items() if k != "component_breakdown"}
+            for t in qualified_trades
+        ]
+
+        post_to_jarvis(
+            scan_entry=full_scan_entry,
+            session_type=session_type,
+            market_context=market_context,
+            tipsheet_html=tipsheet_html,
+        )
+
     if config.EMAIL_ENABLED:
-        emailer.send_tipsheet(output_path, session_type, ts)
-    else:
-        logger.debug("[main] Email not configured — tip sheet saved to disk only.")
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Options Intelligence tip sheet generator")
-    parser.add_argument("--session", choices=["morning", "close"], required=True)
-    return parser.parse_args()
-
-
-if __name__ == "__main__":
-    setup_logging()
-    args = parse_args()
-    run_scan(args.session)
+        pass  # Email sending not configured

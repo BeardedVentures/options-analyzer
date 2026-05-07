@@ -1,12 +1,12 @@
 """
-wolf_ingest.py — POST scan results to JARVIS /wolf/ingest endpoint.
+vega_ingest.py — POST scan results to JARVIS /vega/ingest endpoint.
 
 Called at the end of run_scan() in main.py. Non-blocking — if the tower
 is unreachable, the scan still completes and logs locally. JARVIS integration
 is additive, never a dependency for the core scan to function.
 
 Usage (in main.py, at end of run_scan):
-    from wolf_ingest import post_to_jarvis
+    from vega_ingest import post_to_jarvis
     post_to_jarvis(scan_entry, session_type, market_context, tipsheet_html)
 """
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # JARVIS tower address — set via .env or GitHub Secret JARVIS_HOST
 JARVIS_HOST = os.environ.get("JARVIS_HOST", "http://192.168.0.222:8000")
-INGEST_ENDPOINT = f"{JARVIS_HOST}/wolf/ingest"
+INGEST_ENDPOINT = f"{JARVIS_HOST}/vega/ingest"
 TIMEOUT_SEC = 10
 MAX_RETRIES = 2
 
@@ -34,7 +34,7 @@ def post_to_jarvis(
     tipsheet_html: Optional[str] = None,
 ) -> bool:
     """
-    POST scan results to JARVIS /wolf/ingest.
+    POST scan results to JARVIS /vega/ingest.
 
     Args:
         scan_entry: the dict appended to scan_log.json (from main.py)
@@ -46,10 +46,10 @@ def post_to_jarvis(
         True if successfully ingested, False on any failure.
     """
     if not JARVIS_HOST:
-        logger.debug("[wolf_ingest] JARVIS_HOST not set — skipping ingest")
+        logger.debug("[vega_ingest] JARVIS_HOST not set — skipping ingest")
         return False
 
-    # Build payload matching IngestPayload schema in wolf_router.py
+    # Build payload matching IngestPayload schema in vega_router.py
     payload = {
         "timestamp": scan_entry.get("timestamp"),
         "session_type": session_type,
@@ -88,7 +88,7 @@ def post_to_jarvis(
             resp.raise_for_status()
             result = resp.json()
             logger.info(
-                f"[wolf_ingest] Ingested to JARVIS: scan_id={result.get('scan_id')} "
+                f"[vega_ingest] Ingested to JARVIS: scan_id={result.get('scan_id')} "
                 f"qualified={result.get('qualified_count')} "
                 f"attempt={attempt}"
             )
@@ -96,16 +96,16 @@ def post_to_jarvis(
 
         except requests.exceptions.ConnectionError:
             logger.warning(
-                f"[wolf_ingest] Cannot reach JARVIS tower at {JARVIS_HOST} "
+                f"[vega_ingest] Cannot reach JARVIS tower at {JARVIS_HOST} "
                 f"(attempt {attempt}/{MAX_RETRIES}). Scan saved locally."
             )
         except requests.exceptions.Timeout:
-            logger.warning(f"[wolf_ingest] Timeout reaching JARVIS (attempt {attempt}/{MAX_RETRIES})")
+            logger.warning(f"[vega_ingest] Timeout reaching JARVIS (attempt {attempt}/{MAX_RETRIES})")
         except requests.exceptions.HTTPError as e:
-            logger.error(f"[wolf_ingest] JARVIS returned error: {e} — {resp.text[:200]}")
+            logger.error(f"[vega_ingest] JARVIS returned error: {e} — {resp.text[:200]}")
             return False  # Don't retry on HTTP errors (4xx/5xx)
         except Exception as e:
-            logger.error(f"[wolf_ingest] Unexpected error: {e}")
+            logger.error(f"[vega_ingest] Unexpected error: {e}")
             return False
 
         if attempt < MAX_RETRIES:

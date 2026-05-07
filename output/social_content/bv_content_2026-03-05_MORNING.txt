@@ -1,0 +1,100 @@
+BEARDEDVENTURES — WOLF Content Package
+Generated: 2026-04-22T21:43:22.612497
+Scan: 2026-03-05T14:25:58.274877-05:00 | Session: MORNING
+Tickers: 13 scanned | 5 qualified | 8 rejected
+
+======================================================================
+
+POST 1 — MARKET CONTEXT
+----------------------------------------------------------------------
+
+[TWITTER (153 chars)]
+🟡 WOLF Morning Scan | March 05
+
+VIX data unavailable
+
+Scanned 13 tickers → 5 qualified setup(s).
+
+Not financial advice. Educational only. #OptionsTrading
+
+[LINKEDIN]
+🟡 WOLF Morning Scan — March 05
+
+Market conditions:
+• SPY data pending
+• VIX data unavailable
+• Bias: NEUTRAL
+
+Scan results:
+• 13 tickers screened
+• 5 setup(s) cleared all filters
+• 8 rejected by quantitative rules
+
+Top qualifier: $QQQ — Edge Score 73/100 ✅
+
+📊 Filter insight: 5 setup(s) cut — VRP was negative. Implied vol below realized vol means options are underpriced. No edge for sellers.
+
+The scanner runs every market day — morning & close. Every setup must clear IV rank, VRP edge, true probability of profit, technicals, and news sentiment before appearing on the sheet.
+
+⚠️ Educational only. Not financial advice. Options trading involves significant risk of loss. All decisions are yours. Past results ≠ future performance.
+
+======================================================================
+
+POST 2 — SETUP HIGHLIGHT
+----------------------------------------------------------------------
+
+[TWITTER (183 chars)]
+📋 WOLF Top Setup | March 05
+
+$QQQ cleared all filters — Edge Score 73/100 ✅
+5 total qualified today. Also watching: NVDA, XLE.
+
+Not financial advice. Educational only. #OptionsTrading
+
+[LINKEDIN]
+📋 WOLF Scan Highlight — March 05
+
+Top setup today: $QQQ
+Edge Score: 73/100 ✅
+
+5 setup(s) cleared all quantitative filters today (IV rank, VRP edge, probability of profit, technicals, news sentiment).
+ Also watching: NVDA, XLE.
+
+WOLF runs on a systematic model — no gut calls. Every ticker passes the same rules every day.
+
+⚠️ Educational only. Not financial advice. Options trading involves significant risk of loss. All decisions are yours. Past results ≠ future performance.
+
+======================================================================
+
+POST 3 — EDUCATIONAL
+----------------------------------------------------------------------
+
+[TWITTER (111 chars)]
+💡 Why WOLF skipped $TSLA today 📊
+
+IV Rank was too low.
+
+Not financial advice. Educational only. #OptionsTrading
+
+[LINKEDIN]
+💡 Why WOLF skipped $TSLA today 📊
+
+IV Rank was too low.
+
+IV Rank tells you where current implied volatility sits relative to the past 52 weeks (0 = lowest, 100 = highest).
+
+We require IV Rank ≥ 45 before selling premium.
+
+Why? Because we're selling options — when IV is low, the premium you collect doesn't compensate for the risk. You're selling cheap. Wait for vol to spike.
+
+Low IV = cheap options = no seller's edge.
+High IV = expensive options = premium seller's paradise.
+
+What's your IV Rank threshold? Drop it below. 👇
+
+—
+WOLF scans 13 tickers every market day. No opinions. Just data.
+
+⚠️ Educational only. Not financial advice. Options trading involves significant risk of loss. All decisions are yours. Past results ≠ future performance.
+
+======================================================================
