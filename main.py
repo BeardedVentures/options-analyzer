@@ -85,7 +85,6 @@ def append_scan_log(log_dir: Path, entry: Dict) -> None:
 
 def build_market_context() -> Dict:
     vix = fetcher.get_vix()
-
     spy_data = fetcher.get_price_data("SPY", period="5d")
     spy = {"price": None, "prev_close": None, "day_change_pct": None}
     if spy_data is not None and not spy_data.empty:
@@ -147,6 +146,138 @@ def select_long_put_strike(options: List[Dict], short_strike: float) -> Optional
     return max(candidates)
 
 
+def select_long_put_contract(options: List[Dict], short_strike: float, short_expiration: Optional[str] = None) -> Optional[Dict]:
+    candidates = []
+    for opt in options:
+        if opt.get("type") != "put":
+            continue
+        if short_expiration and opt.get("expiration") != short_expiration:
+            continue
+        strike = opt.get("strike", 0)
+        if not strike or strike >= short_strike:
+            continue
+        if 0 < (short_strike - strike) <= config.MAX_SPREAD_WIDTH:
+            candidates.append(opt)
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda opt: opt.get("strike", 0), reverse=True)
+    return candidates[0]
+
+
+def select_bull_put_pair(options: List[Dict], current_price: float, ticker: str) -> Optional[Tuple[Dict, Dict, Dict]]:
+    """Pick a short/long put pair that forms a valid same-expiration credit spread."""
+    def _quote_is_tradeable(opt: Dict) -> bool:
+        bid = float(opt.get("bid", 0) or 0)
+        ask = float(opt.get("ask", 0) or 0)
+        mid = float(opt.get("mid", 0) or 0)
+        if bid <= 0 or ask <= 0 or mid <= 0:
+            return False
+        if ask < bid:
+            return False
+        spread_pct = (ask - bid) / mid if mid else 1.0
+        return spread_pct <= config.MAX_QUOTE_SPREAD_PCT
+
+    short_candidates: List[Tuple[float, Dict]] = []
+    target_delta = config.SHORT_STRIKE_TARGET_DELTA
+    is_spy_like = ticker.upper() in config.SPY_BUFFER_TICKERS
+    target_dte = getattr(config, "PREFERRED_DTE_TARGET", 35)
+    dte_tolerance = getattr(config, "PREFERRED_DTE_TOLERANCE", 7)
+    min_vol = getattr(config, "MIN_OPTION_VOLUME", 100)
+    min_oi = getattr(config, "MIN_OPTION_OPEN_INTEREST", 500)
+    min_spread_width = (
+        getattr(config, "MIN_SPREAD_WIDTH_SPY_LIKE", 2.0)
+        if is_spy_like
+        else getattr(config, "MIN_SPREAD_WIDTH_OTHER", 1.0)
+    )
+
+    for opt in options:
+        if opt.get("type") != "put":
+            continue
+
+        strike = opt.get("strike", 0)
+        delta = opt.get("delta")
+        mid = opt.get("mid", 0)
+        if not strike or delta is None or mid <= 0:
+            continue
+        if not _quote_is_tradeable(opt):
+            continue
+        if opt.get("volume", 0) < min_vol and opt.get("open_interest", 0) < min_oi:
+            continue
+
+        abs_delta = abs(delta)
+        if abs_delta > config.SHORT_STRIKE_MAX_DELTA:
+            continue
+
+        if is_spy_like:
+            if (current_price - strike) < config.MIN_STRIKE_BUFFER_SPY:
+                continue
+        else:
+            min_buffer_pct = config.MIN_STRIKE_BUFFER_STOCK  # 5% for individual stocks
+            if (current_price - strike) / current_price < min_buffer_pct:
+                continue
+
+        dte = int(opt.get("dte", 0) or 0)
+        dte_distance = abs(dte - target_dte)
+        dte_outside_target = 0 if dte_distance <= dte_tolerance else 1
+        short_candidates.append(((dte_outside_target, dte_distance, abs(abs_delta - target_delta)), opt))
+
+    short_candidates.sort(key=lambda x: x[0])
+
+    for _, short_put in short_candidates:
+        long_candidates = [
+            opt for opt in options
+            if opt.get("type") == "put"
+            and opt.get("expiration") == short_put.get("expiration")
+            and 0 < (short_put.get("strike", 0) - opt.get("strike", 0)) <= config.MAX_SPREAD_WIDTH
+        ]
+        long_candidates.sort(key=lambda opt: opt.get("strike", 0), reverse=True)
+
+        for long_put in long_candidates:
+            if not _quote_is_tradeable(long_put):
+                continue
+            if long_put.get("volume", 0) < min_vol and long_put.get("open_interest", 0) < min_oi:
+                continue
+
+            spread_width = float(short_put.get("strike", 0) - long_put.get("strike", 0))
+            if spread_width <= 0:
+                continue
+
+            metrics = edge_calculator.calculate_spread_metrics(
+                short_put,
+                long_put.get("strike"),
+                current_price,
+                long_put_mid=long_put.get("mid"),
+            )
+            if not metrics:
+                continue
+            if metrics.get("spread_invalid"):
+                continue
+            if metrics.get("credit_per_share", 0) <= 0:
+                continue
+            if metrics.get("credit_usd", 0) < config.MIN_CREDIT_USD:
+                continue
+
+            # Universal credit-to-width quality gate — applies to ALL spreads regardless of width
+            credit_per_share = float(metrics.get("credit_per_share", 0) or 0)
+            min_ctw = getattr(config, "MIN_CREDIT_TO_WIDTH_PCT", 0.25)
+            if spread_width > 0 and (credit_per_share / spread_width) < min_ctw:
+                continue
+
+            if spread_width < min_spread_width:
+                credit_per_share = float(metrics.get("credit_per_share", 0) or 0)
+                credit_to_width = credit_per_share / spread_width if spread_width > 0 else 0
+                allow_narrow = getattr(config, "ALLOW_NARROW_SPREAD_EXCEPTION", True)
+                min_credit_to_width = getattr(config, "NARROW_SPREAD_MIN_CREDIT_TO_WIDTH", 0.30)
+                if not (allow_narrow and credit_to_width >= min_credit_to_width):
+                    continue
+
+            return short_put, long_put, metrics
+
+    return None
+
+
 def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional[Dict], Optional[Dict], Dict]:
     price_data = fetcher.get_price_data(ticker, period="2y")
     if price_data is None or price_data.empty:
@@ -154,25 +285,37 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
 
     current_price = float(price_data["Close"].iloc[-1])
 
+    fundamentals_data = fundamentals.get_fundamentals(ticker) if getattr(config, "FUNDAMENTALS_ENABLED", True) else {}
+    fundamentals_eval = edge_calculator.calculate_fundamentals_score(
+        fundamentals_data,
+        is_etf=fundamentals_data.get("is_etf", False),
+    ) if fundamentals_data else {"score": None, "blocking": False, "reasons": []}
+
+    def _avoid(reason: str, category: str, tech_payload: Dict) -> Tuple[None, Dict, Dict]:
+        return None, {
+            "reason": reason,
+            "category": category,
+            "fundamentals_score": fundamentals_eval.get("score"),
+            "fundamentals_reasons": fundamentals_eval.get("reasons", []),
+            "fundamentals_blocking": fundamentals_eval.get("blocking", False),
+        }, tech_payload
+
     options = fetcher.get_options_chain(ticker, config.MIN_DTE, config.MAX_DTE)
     print(f"[DEBUG] {ticker}: options chain length = {len(options)}")
     if not options:
-        return None, {"reason": "No options chain in DTE range", "category": "NO_OPTIONS"}, technicals._empty_result(ticker)
+        return _avoid("No options chain in DTE range", "NO_OPTIONS", technicals._empty_result(ticker))
 
-    short_put = edge_calculator.find_target_put(options, current_price, ticker)
-    if not short_put:
-        return None, {"reason": "No put meets delta/OTM/credit filters", "category": "NO_STRIKE"}, technicals._empty_result(ticker)
-
-    long_strike = select_long_put_strike(options, short_put["strike"])
-    if not long_strike:
-        return None, {"reason": "No long strike within max spread width", "category": "NO_LONG_STRIKE"}, technicals._empty_result(ticker)
+    pair = select_bull_put_pair(options, current_price, ticker)
+    if not pair:
+        return _avoid("No valid same-expiration credit spread found", "NO_VALID_SPREAD", technicals._empty_result(ticker))
+    short_put, long_put, metrics = pair
 
     current_iv = short_put.get("iv") or estimate_current_iv(options, current_price)
     print(f"[DEBUG] {ticker}: current_iv = {current_iv}")
     tech = technicals.calculate_all(price_data, ticker, current_iv=current_iv, short_strike=short_put["strike"])
 
     if tech.get("iv_rank", 0) < config.MIN_IV_RANK:
-        return None, {"reason": f"IV Rank {tech.get('iv_rank', 0):.1f} below minimum {config.MIN_IV_RANK}", "category": "IV_RANK"}, tech
+        return _avoid(f"IV Rank {tech.get('iv_rank', 0):.1f} below minimum {config.MIN_IV_RANK}", "IV_RANK", tech)
 
     earnings_dt = fetcher.get_earnings_date(ticker)
     days_to_earnings = fundamentals.days_until_earnings(earnings_dt)
@@ -180,7 +323,19 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     sentiment = sentiment_map.get(ticker, {})
     sentiment_label = (sentiment.get("sentiment") or "NEUTRAL").upper()
     if config.NEWS_SENTIMENT_BLOCK and sentiment_label == "BLOCKING":
-        return None, {"reason": "News BLOCKING event detected", "category": "NEWS_BLOCK"}, tech
+        return _avoid("News BLOCKING event detected", "NEWS_BLOCK", tech)
+
+    if (
+        getattr(config, "FUNDAMENTALS_ENABLED", True)
+        and getattr(config, "FUNDAMENTALS_STRICT_BLOCK", False)
+        and not getattr(config, "FUNDAMENTALS_SHADOW_MODE", True)
+    ):
+        if fundamentals_eval.get("blocking") or (fundamentals_eval.get("score", 10) < getattr(config, "MIN_FUNDAMENTALS_SCORE", 4)):
+            return _avoid(
+                "; ".join(fundamentals_eval.get("reasons", ["Fundamentals stability check failed"])),
+                "FUNDAMENTALS_BLOCK",
+                tech,
+            )
 
     strategy = edge_calculator.select_best_strategy(
         account_balance=config.ACCOUNT_BALANCE,
@@ -192,15 +347,14 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         if "bull_put_spread" in config.ENABLED_STRATEGIES:
             strategy = "bull_put_spread"
         else:
-            return None, {"reason": "No supported strategy enabled", "category": "STRATEGY_DISABLED"}, tech
+            return _avoid("No supported strategy enabled", "STRATEGY_DISABLED", tech)
 
     # Current implementation supports bull put spreads only
     if strategy != "bull_put_spread":
         strategy = "bull_put_spread"
 
-    metrics = edge_calculator.calculate_spread_metrics(short_put, long_strike, current_price)
     if not metrics:
-        return None, {"reason": "Could not compute spread metrics", "category": "SPREAD_ERROR"}, tech
+        return _avoid("Could not compute spread metrics", "SPREAD_ERROR", tech)
 
     strike_distance_pct = metrics.get("strike_distance_pct", 0) / 100 if metrics.get("strike_distance_pct") is not None else 0
     true_pop_res = edge_calculator.calculate_true_pop(
@@ -215,7 +369,11 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     edge_points = edge_res.get("edge_points", 0)
 
     if true_pop is None or true_pop < config.MIN_PROBABILITY_OF_PROFIT:
-        return None, {"reason": f"True POP {0 if true_pop is None else true_pop:.2f} below minimum {config.MIN_PROBABILITY_OF_PROFIT}", "category": "MIN_POP"}, tech
+        return _avoid(
+            f"True POP {0 if true_pop is None else true_pop:.2f} below minimum {config.MIN_PROBABILITY_OF_PROFIT}",
+            "MIN_POP",
+            tech,
+        )
 
     edge_score = edge_calculator.calculate_edge_score(
         ticker=ticker,
@@ -225,11 +383,12 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         edge_points=edge_points,
         news_sentiment=sentiment_label,
         earnings_days_away=days_to_earnings,
+        fundamentals_score=fundamentals_eval.get("score"),
     )
 
     if not edge_score.get("qualified"):
         reason = edge_score.get("disqualification_reason") or "Edge score below minimum"
-        return None, {"reason": reason, "category": "EDGE_SCORE"}, tech
+        return _avoid(reason, "EDGE_SCORE", tech)
 
     option_data = dict(short_put)
     option_data.update(metrics)
@@ -248,11 +407,17 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     )
 
     if not validation.get("valid"):
-        return None, {"reason": validation.get("rejection_reason", "Validation failed"), "category": validation.get("rejection_category", "VALIDATION")}, tech
+        return _avoid(
+            validation.get("rejection_reason", "Validation failed"),
+            validation.get("rejection_category", "VALIDATION"),
+            tech,
+        )
 
     warnings = list(validation.get("warnings", []))
     if sentiment_label == "NEGATIVE":
         warnings.append("Negative news sentiment - monitor closely")
+    if getattr(config, "FUNDAMENTALS_SHADOW_MODE", True) and fundamentals_eval.get("blocking"):
+        warnings.append("Fundamentals warning (shadow mode): " + "; ".join(fundamentals_eval.get("reasons", [])))
 
     news_status = "CLEAR" if sentiment_label in ("POSITIVE", "NEUTRAL") else sentiment_label
 
@@ -265,16 +430,19 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "strategy": strategy,
         "current_price": round(current_price, 2),
         "short_strike": short_put.get("strike"),
-        "long_strike": long_strike,
+        "long_strike": long_put.get("strike"),
+        "long_mid": long_put.get("mid"),
         "expiration": short_put.get("expiration"),
+        "last_trade_date": short_put.get("last_trade_date"),
+        "expiration_display": short_put.get("last_trade_date") or short_put.get("expiration"),
         "dte": short_put.get("dte"),
         "credit_per_share": metrics.get("credit_per_share"),
         "credit_usd": metrics.get("credit_usd"),
         "max_loss_usd": metrics.get("max_loss_usd"),
         "contracts_allowed": metrics.get("contracts_allowed"),
-        "oversized_position": (
-            metrics.get("contracts_allowed") == config.MIN_CONTRACTS
-            and metrics.get("max_loss_usd", 0) > config.MAX_RISK_PER_TRADE_USD
+        "risk_tiers": metrics.get("risk_tiers", []),
+        "oversized_position": all(
+            not t.get("viable", False) for t in metrics.get("risk_tiers", [{"viable": False}])
         ),
         "profit_target_usd": metrics.get("profit_target_usd"),
         "profit_target_price": profit_target_price,
@@ -283,6 +451,9 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "iv_rank": tech.get("iv_rank"),
         "strike_distance_usd": metrics.get("strike_distance_usd"),
         "strike_distance_pct": metrics.get("strike_distance_pct"),
+        "credit_to_width_pct": round(
+            (metrics.get("credit_per_share", 0) / metrics.get("spread_width", 1)) * 100, 1
+        ) if metrics.get("spread_width") else 0,
         "true_pop": true_pop,
         "implied_pop": implied_pop,
         "edge_points": edge_points,
@@ -298,6 +469,12 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "nearest_support": tech.get("nearest_support"),
         "news_sentiment": news_status,
         "news_summary": sentiment.get("market_impact_summary"),
+        "fundamentals_score": fundamentals_eval.get("score"),
+        "fundamentals_reasons": fundamentals_eval.get("reasons", []),
+        "pe_ratio": fundamentals_data.get("pe_ratio"),
+        "market_cap": fundamentals_data.get("market_cap"),
+        "debt_to_equity": fundamentals_data.get("debt_to_equity"),
+        "current_ratio": fundamentals_data.get("current_ratio"),
         "warnings": warnings,
         "auto_reasoning": f"IV Rank {tech.get('iv_rank', 0):.0f}, VRP {tech.get('vrp', 0):.1f}pp, edge {edge_points:.1f} pts.",
         "trade_type": trade_type,
@@ -435,8 +612,98 @@ def compute_weekly_summary(log_dir: Path, ts: datetime) -> Optional[Dict]:
     }
 
 
-def run_scan(session_type: str) -> None:
-    ts = now_et()
+def _compute_regime_context(market_context: Dict) -> Dict:
+    """
+    Determine the current market regime and return a flag + note.
+
+    Returns:
+        regime_flag:  'NORMAL' | 'LOW_VOL' | 'ELEVATED_VOL' | 'HIGH_VOL'
+        regime_note:  Human-readable description injected into scan output and JARVIS
+        trade_suppressed: True when VIX < VIX_MIN_FOR_EDGE (not a hard stop — let
+                          IV Rank gate work, but flag output so silence is explainable)
+    """
+    vix_level = (market_context.get("vix") or {}).get("current") or 0
+    vix_min = getattr(config, "VIX_MIN_FOR_EDGE", 16)
+    vix_max = getattr(config, "VIX_MAX_FOR_TRADES", 30)
+    vix_elevated = getattr(config, "VIX_ELEVATED_THRESHOLD", 25)
+
+    if vix_level <= 0:
+        return {"regime_flag": "NORMAL", "regime_note": None, "trade_suppressed": False}
+
+    if vix_level < vix_min:
+        return {
+            "regime_flag": "LOW_VOL",
+            "regime_note": (
+                f"LOW VOLATILITY REGIME — VIX {vix_level:.1f} is below the minimum edge threshold "
+                f"({vix_min}). Premium is cheap; VRP edge is thin. Expect few or no qualifiers. "
+                f"This is correct behavior — do not chase setups."
+            ),
+            "trade_suppressed": True,
+        }
+    elif vix_level > vix_max:
+        return {
+            "regime_flag": "HIGH_VOL",
+            "regime_note": (
+                f"⚠️ HIGH VOLATILITY REGIME — VIX {vix_level:.1f} exceeds {vix_max}. "
+                f"Gamma risk is elevated. Size ALL positions at 50% or less. "
+                f"Prefer SPY/QQQ over individual names. Consider standing aside."
+            ),
+            "trade_suppressed": False,
+        }
+    elif vix_level > vix_elevated:
+        return {
+            "regime_flag": "ELEVATED_VOL",
+            "regime_note": (
+                f"⚠️ ELEVATED VOLATILITY — VIX {vix_level:.1f}. Size down 50% on new positions."
+            ),
+            "trade_suppressed": False,
+        }
+    else:
+        return {"regime_flag": "NORMAL", "regime_note": None, "trade_suppressed": False}
+
+
+def _apply_sector_limit(qualified_trades: List[Dict]) -> List[Dict]:
+    """
+    Enforce MAX_TRADES_PER_SECTOR to prevent correlated position concentration.
+
+    Tickers in SECTOR_LIMIT_EXEMPT are never capped (broad-market ETFs).
+    Within each capped sector, only the top MAX_TRADES_PER_SECTOR by edge_score
+    are kept. Dropped trades are logged at INFO level.
+    """
+    max_per_sector = getattr(config, "MAX_TRADES_PER_SECTOR", 2)
+    exempt = getattr(config, "SECTOR_LIMIT_EXEMPT", {"broad_market"})
+    sector_map = getattr(config, "TICKER_SECTORS", {})
+
+    sector_counts: Dict[str, int] = {}
+    kept: List[Dict] = []
+    dropped: List[str] = []
+
+    # Sort by edge_score descending so highest-edge trades win within each sector
+    sorted_trades = sorted(qualified_trades, key=lambda t: t.get("edge_score", 0), reverse=True)
+
+    for trade in sorted_trades:
+        ticker = trade.get("ticker", "").upper()
+        sector = sector_map.get(ticker, "other")
+        if sector in exempt:
+            kept.append(trade)
+            continue
+        count = sector_counts.get(sector, 0)
+        if count < max_per_sector:
+            sector_counts[sector] = count + 1
+            kept.append(trade)
+        else:
+            dropped.append(f"{ticker} ({sector})")
+
+    if dropped:
+        logger.info(
+            f"[sector_limit] Dropped {len(dropped)} trade(s) due to sector cap "
+            f"(max {max_per_sector}/sector): {', '.join(dropped)}"
+        )
+
+    return kept
+
+
+def run_scan(session_type: str) -> None:    ts = now_et()
     check_session_window(session_type, ts)
 
     tickers = [w["ticker"].upper() for w in config.WATCHLIST]
@@ -444,8 +711,24 @@ def run_scan(session_type: str) -> None:
 
     logger.info(f"Starting {session_type} scan for {len(tickers)} tickers")
 
+    tradier_health = fetcher.validate_tradier_connection("SPY") if config.TRADIER_API_KEY else {
+        "enabled": False,
+        "healthy": True,
+        "mode": "disabled",
+        "reason": "TRADIER_API_KEY not set",
+    }
+    if not tradier_health.get("healthy", False):
+        logger.warning(
+            f"[scan] Tradier probe degraded: mode={tradier_health.get('mode')} reason={tradier_health.get('reason')}"
+        )
+
     market_context = build_market_context()
     sentiment_map = news.analyze_all_tickers(tickers)
+
+    # ── Regime gate: classify VIX environment, inject note into output ──────
+    regime = _compute_regime_context(market_context)
+    if regime["regime_note"]:
+        logger.info(f"[scan] Regime: {regime['regime_flag']} — {regime['regime_note']}")
 
     qualified_trades: List[Dict] = []
     avoided: List[Dict] = []
@@ -477,6 +760,62 @@ def run_scan(session_type: str) -> None:
     print(f"[DEBUG] Qualified trades: {qualified_trades}")
     print(f"[DEBUG] Avoided tickers: {avoided}")
     print(f"[DEBUG] Errors: {errors}")
+
+    # Build shadow telemetry payload (non-blocking observability data)
+    qualified_by_ticker = {str(t.get("ticker", "")).upper(): t for t in qualified_trades}
+    avoided_by_ticker = {str(a.get("ticker", "")).upper(): a for a in avoided}
+    shadow_evaluations: List[Dict] = []
+    for ticker in tickers:
+        qt = qualified_by_ticker.get(ticker)
+        av = avoided_by_ticker.get(ticker)
+        fundamentals_score = qt.get("fundamentals_score") if qt else av.get("fundamentals_score") if av else None
+        fundamentals_reasons = qt.get("fundamentals_reasons") if qt else av.get("fundamentals_reasons") if av else []
+        shadow_evaluations.append({
+            "ticker": ticker,
+            "evaluation_status": "evaluated" if fundamentals_score is not None else "missing",
+            "qualified": qt is not None,
+            "would_block": bool(av and av.get("fundamentals_blocking")),
+            "fundamentals_score": fundamentals_score,
+            "fundamentals_reasons": fundamentals_reasons or [],
+            "rejection_category": av.get("category") if av else None,
+            "rejection_reason": av.get("reason") if av else None,
+            "edge_score": qt.get("edge_score") if qt else None,
+            "vrp": qt.get("vrp") if qt else None,
+            "iv_rank": qt.get("iv_rank") if qt else None,
+            "true_pop": qt.get("true_pop") if qt else None,
+            "news_sentiment": qt.get("news_sentiment") if qt else None,
+            "component_breakdown": qt.get("component_breakdown") if qt else None,
+        })
+
+    evaluated_count = sum(1 for e in shadow_evaluations if e.get("evaluation_status") == "evaluated")
+    missing_count = len(shadow_evaluations) - evaluated_count
+    would_block_count = sum(1 for e in shadow_evaluations if e.get("would_block"))
+    scored_values = [float(e["fundamentals_score"]) for e in shadow_evaluations if e.get("fundamentals_score") is not None]
+    shadow_run = {
+        "run_timestamp": ts.isoformat(),
+        "session_type": session_type,
+        "shadow_enabled": bool(getattr(config, "FUNDAMENTALS_ENABLED", False)),
+        "strict_mode_enabled": bool(getattr(config, "FUNDAMENTALS_STRICT_BLOCK", False)),
+        "expected_tickers": len(tickers),
+        "evaluated_tickers": evaluated_count,
+        "missing_evals": missing_count,
+        "would_block_count": would_block_count,
+        "coverage_ratio": round(evaluated_count / len(tickers), 4) if tickers else 0.0,
+        "missing_ratio": round(missing_count / len(tickers), 4) if tickers else 0.0,
+        "fallback_used_count": 0,
+        "score_min": min(scored_values) if scored_values else None,
+        "score_max": max(scored_values) if scored_values else None,
+        "score_avg": round(sum(scored_values) / len(scored_values), 2) if scored_values else None,
+        "config_snapshot": {
+            "fundamentals_shadow_mode": getattr(config, "FUNDAMENTALS_SHADOW_MODE", True),
+            "fundamentals_strict_block": getattr(config, "FUNDAMENTALS_STRICT_BLOCK", False),
+            "min_fundamentals_score": getattr(config, "MIN_FUNDAMENTALS_SCORE", 4),
+            "fundamentals_weight": getattr(config, "FUNDAMENTALS_WEIGHT", 10),
+        },
+    }
+
+    # ── Sector correlation bucketing ─────────────────────────────────────
+    qualified_trades = _apply_sector_limit(qualified_trades)
 
 
     synthesis = synthesizer.synthesize_tipsheet(
@@ -526,13 +865,20 @@ def run_scan(session_type: str) -> None:
         "tipsheet_file": str(output_path),
         "account_balance": config.ACCOUNT_BALANCE,
         "errors": errors,
+        "regime_flag": regime["regime_flag"],
+        "regime_note": regime["regime_note"],
+        "source_health": {
+            "tradier": tradier_health,
+        },
+        "shadow_run": shadow_run,
+        "shadow_evaluations": shadow_evaluations,
     }
     append_scan_log(log_dir, scan_entry)
 
     logger.info(f"Scan complete. Tip sheet saved to {output_path}")
 
     # ── VEGA: Push scan results to JARVIS tower ──────────────────────────
-    if VEGA_INGEST_ENABLED:
+    if VEGA_INGEST_ENABLED and tradier_health.get("healthy", False):
         # Read tipsheet HTML if available
         tipsheet_html = None
         if output_path and Path(output_path).exists():
@@ -554,6 +900,20 @@ def run_scan(session_type: str) -> None:
             market_context=market_context,
             tipsheet_html=tipsheet_html,
         )
+    elif VEGA_INGEST_ENABLED:
+        logger.warning("[scan] Skipping JARVIS ingest because source health is degraded")
 
     if config.EMAIL_ENABLED:
         pass  # Email sending not configured
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Options Intelligence tip sheet generator")
+    parser.add_argument("--session", choices=["morning", "close"], required=True)
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    setup_logging()
+    args = parse_args()
+    run_scan(args.session)

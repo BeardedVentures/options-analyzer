@@ -56,6 +56,8 @@ def post_to_jarvis(
         "tickers_scanned": scan_entry.get("tickers_scanned", []),
         "qualified_trades": _enrich_qualified_trades(scan_entry.get("qualified_trades", [])),
         "rejected_trades": scan_entry.get("rejected_trades", []),
+        "shadow_run": scan_entry.get("shadow_run"),
+        "shadow_evaluations": scan_entry.get("shadow_evaluations", []),
         "api_calls": scan_entry.get("api_calls", []),
         "tipsheet_file": scan_entry.get("tipsheet_file"),
         "tipsheet_html": tipsheet_html,

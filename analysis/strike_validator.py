@@ -36,7 +36,7 @@ def validate_strike(
       1. Delta exceeds maximum
       2. Strike too close to current price (OTM buffer)
       3. Earnings within blackout window
-      4. Max loss exceeds account risk limit
+      4. (Risk sizing handled by RISK_TIERS in output layer — not a hard reject here)
       5. Credit below minimum
       6. Insufficient liquidity
 
@@ -87,7 +87,7 @@ def validate_strike(
             logger.debug(f"[validator] REJECT {ticker} {short_strike}: {reason}")
             return _reject(reason, "STRIKE_TOO_CLOSE", warnings)
     else:
-        min_otm_pct = config.SHORT_STRIKE_MIN_OTM_PCT
+        min_otm_pct = config.MIN_STRIKE_BUFFER_STOCK  # 5% for individual stocks
         actual_otm_pct = (current_price - short_strike) / current_price
         if actual_otm_pct < min_otm_pct:
             reason = (
@@ -124,6 +124,14 @@ def validate_strike(
         )
 
     # ── RULE 4: Account sizing / max loss check ──
+    if option_data.get("spread_invalid"):
+        reason = (
+            f"Invalid spread pricing — credit exceeds spread width. "
+            f"This usually means stale or crossed quotes, so the setup is rejected."
+        )
+        logger.debug(f"[validator] REJECT {ticker} {short_strike}: {reason}")
+        return _reject(reason, "INVALID_SPREAD", warnings)
+
     max_loss_usd = option_data.get("max_loss_usd", 0)
     if max_loss_usd <= 0:
         # Try to estimate from spread data
@@ -132,14 +140,9 @@ def validate_strike(
         if spread_width > 0 and credit_usd > 0:
             max_loss_usd = (spread_width * 100) - credit_usd
 
-    if max_loss_usd > config.MAX_RISK_PER_TRADE_USD:
-        warnings.append(
-            f"OVERSIZED: Max loss ${max_loss_usd:.2f} exceeds risk limit "
-            f"${config.MAX_RISK_PER_TRADE_USD:.2f} "
-            f"({config.MAX_RISK_PER_TRADE_PCT*100:.0f}% of ${account_balance:.2f}). "
-            f"Showing as 1-contract setup — size carefully."
-        )
-        logger.debug(f"[validator] OVERSIZED {ticker} ${short_strike:.2f}: max_loss ${max_loss_usd:.2f} > limit ${config.MAX_RISK_PER_TRADE_USD:.2f}")
+    # Risk sizing is now handled by RISK_TIERS in the output layer.
+    # Trades are no longer rejected here based on a single account balance —
+    # the tier table shows viable contract counts for each risk level.
 
     # ── RULE 5: Minimum credit check ──
     credit_usd = option_data.get("credit_usd", 0)
@@ -151,13 +154,35 @@ def validate_strike(
         logger.debug(f"[validator] REJECT {ticker} {short_strike}: {reason}")
         return _reject(reason, "INSUFFICIENT_CREDIT", warnings)
 
+    # ── RULE 5b: Credit-to-width quality gate ──
+    spread_width = option_data.get("spread_width", 0)
+    credit_per_share = option_data.get("credit_per_share", 0)
+    min_ctw = getattr(config, "MIN_CREDIT_TO_WIDTH_PCT", 0.25)
+    if spread_width > 0 and credit_per_share > 0:
+        credit_to_width = credit_per_share / spread_width
+        if credit_to_width < min_ctw:
+            reason = (
+                f"Credit/width ratio {credit_to_width:.1%} below minimum {min_ctw:.0%}. "
+                f"${credit_per_share:.2f} credit on a ${spread_width:.0f}-wide spread offers "
+                f"insufficient edge — adjust strike or wait for higher IV."
+            )
+            logger.debug(f"[validator] REJECT {ticker} {short_strike}: {reason}")
+            return _reject(reason, "POOR_CREDIT_RATIO", warnings)
+        elif credit_to_width < 0.33:
+            warnings.append(
+                f"Credit/width ratio {credit_to_width:.1%} is below the ideal 33% threshold — "
+                f"trade qualifies but edge is thin."
+            )
+
     # ── RULE 6: Liquidity check ──
     volume = option_data.get("volume", 0)
     oi = option_data.get("open_interest", 0)
-    if volume < 100 and oi < 500:
+    min_vol = getattr(config, "MIN_OPTION_VOLUME", 100)
+    min_oi = getattr(config, "MIN_OPTION_OPEN_INTEREST", 500)
+    if volume < min_vol and oi < min_oi:
         reason = (
             f"Insufficient liquidity — volume {volume}, open interest {oi}. "
-            f"Required: volume ≥100 OR open interest ≥500. "
+            f"Required: volume ≥{min_vol} OR open interest ≥{min_oi}. "
             f"Wide bid/ask spreads make execution unfavorable."
         )
         logger.debug(f"[validator] REJECT {ticker} {short_strike}: {reason}")

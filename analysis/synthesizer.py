@@ -45,7 +45,7 @@ def _auto_entry_instruction(trade: Dict) -> str:
     ticker = trade.get("ticker", "")
     short_strike = trade.get("short_strike", 0)
     long_strike = trade.get("long_strike", 0)
-    expiration = trade.get("expiration", "")
+    expiration = trade.get("expiration_display") or trade.get("last_trade_date") or trade.get("expiration", "")
     credit = trade.get("credit_per_share", 0)
     spread_width = trade.get("spread_width", 0)
 
@@ -107,10 +107,14 @@ def _fallback_synthesis(
     """
     vix = market_context.get("vix", {})
     vix_current = vix.get("current", 0)
+    if vix_current is None:
+        vix_current = 0.0
     vix_label = vix.get("label", "UNKNOWN")
 
     spy = market_context.get("spy", {})
     spy_change = spy.get("day_change_pct", 0)
+    if spy_change is None:
+        spy_change = 0.0
 
     if spy_change > 0.5 and vix_current < 20:
         bias = "RISK-ON"
@@ -213,6 +217,8 @@ def synthesize_tipsheet(
                 "short_strike": t.get("short_strike"),
                 "long_strike": t.get("long_strike"),
                 "expiration": t.get("expiration"),
+                "last_trade_date": t.get("last_trade_date"),
+                "expiration_display": t.get("expiration_display") or t.get("last_trade_date") or t.get("expiration"),
                 "dte": t.get("dte"),
                 "current_price": t.get("current_price"),
                 "credit_per_share": t.get("credit_per_share"),

@@ -7,6 +7,7 @@ No paid services required.
 
 import logging
 from typing import Optional, Dict, Any, List, Tuple
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -113,35 +114,113 @@ def _historical_vol(close: pd.Series, period: int) -> float:
 
 
 # ─────────────────────────────────────────────
-# IV RANK APPROXIMATION
+# IV RANK — real percentile from stored IV history
 # ─────────────────────────────────────────────
 
-def _iv_rank_approx(close: pd.Series, current_iv: float) -> float:
+def _iv_rank_hv_approx(close: pd.Series, current_iv: float) -> float:
     """
-    Approximate IV rank using rolling 30-day realized vol distribution.
-    IV rank = percentile of current_iv vs trailing 252-day realized vol windows.
-    Range: 0-100.
+    Legacy fallback: approximate IV rank using rolling HV distribution.
+    Used only during bootstrapping (< IV_HISTORY_MIN_SAMPLES stored per ticker).
+    KNOWN LIMITATION: ranks IV against realized vol history, not IV history.
+    Tends to overstate IV Rank in low-vol trending markets.
     """
     if current_iv <= 0:
         return 0.0
-
     log_returns = np.log(close / close.shift(1)).dropna()
     if len(log_returns) < 60:
-        return 50.0  # insufficient data — return neutral
-
-    # Calculate rolling 30-day HV for past year
+        return 50.0
     rolling_hv = []
     for i in range(30, len(log_returns)):
         window = log_returns.iloc[i - 30:i]
         hv = float(window.std() * np.sqrt(252))
         rolling_hv.append(hv)
-
     if not rolling_hv:
         return 50.0
-
     arr = np.array(rolling_hv)
-    pct = float(np.mean(arr <= current_iv) * 100)
-    return round(pct, 1)
+    return round(float(np.mean(arr <= current_iv) * 100), 1)
+
+
+def calculate_iv_rank(ticker: str, current_iv: float, close: pd.Series) -> dict:
+    """
+    Calculate IV Rank from stored historical IV samples for this ticker.
+
+    Self-bootstrapping: each call appends today's IV to the history file.
+    Once IV_HISTORY_MIN_SAMPLES exist, returns a real percentile.
+    Until then, returns the HV-based approximation with iv_rank_method='APPROX'.
+
+    Returns:
+        iv_rank:        float 0-100
+        iv_rank_method: 'HISTORY' (real) | 'APPROX' (bootstrapping)
+        iv_history_count: number of IV samples on record
+    """
+    import json as _json
+    from datetime import date as _date
+
+    if current_iv <= 0:
+        return {"iv_rank": 0.0, "iv_rank_method": "APPROX", "iv_history_count": 0}
+
+    base_dir = Path(__file__).resolve().parent.parent
+    history_dir = base_dir / config.IV_HISTORY_DIR
+    history_dir.mkdir(parents=True, exist_ok=True)
+    history_file = history_dir / f"{ticker.upper()}.json"
+
+    # Load existing history
+    samples: list = []
+    if history_file.exists():
+        try:
+            samples = _json.loads(history_file.read_text(encoding="utf-8"))
+            if not isinstance(samples, list):
+                samples = []
+        except Exception:
+            samples = []
+
+    # Append today's observation (deduplicate by date)
+    today_str = str(_date.today())
+    existing_dates = {s.get("date") for s in samples if isinstance(s, dict)}
+    if today_str not in existing_dates:
+        samples.append({"date": today_str, "iv": round(current_iv, 6)})
+
+    # Roll to max window
+    max_samples = getattr(config, "IV_HISTORY_MAX_SAMPLES", 504)
+    if len(samples) > max_samples:
+        samples = samples[-max_samples:]
+
+    # Persist updated history
+    try:
+        history_file.write_text(_json.dumps(samples, indent=None), encoding="utf-8")
+    except Exception as exc:
+        logger.warning(f"[iv_rank] Could not write IV history for {ticker}: {exc}")
+
+    min_samples = getattr(config, "IV_HISTORY_MIN_SAMPLES", 30)
+    if len(samples) < min_samples:
+        approx = _iv_rank_hv_approx(close, current_iv)
+        logger.debug(
+            f"[iv_rank] {ticker}: bootstrapping ({len(samples)}/{min_samples} samples) "
+            f"— using HV approx {approx:.1f}"
+        )
+        return {
+            "iv_rank": approx,
+            "iv_rank_method": "APPROX",
+            "iv_history_count": len(samples),
+        }
+
+    # Compute real IV Rank: percentile of current_iv vs stored IV history
+    iv_values = [s["iv"] for s in samples if isinstance(s, dict) and "iv" in s]
+    if not iv_values:
+        return {"iv_rank": 50.0, "iv_rank_method": "APPROX", "iv_history_count": 0}
+
+    arr = np.array(iv_values)
+    iv_rank = round(float(np.mean(arr <= current_iv) * 100), 1)
+    logger.debug(
+        f"[iv_rank] {ticker}: REAL percentile {iv_rank:.1f} "
+        f"(current={current_iv:.4f}, history={len(iv_values)} samples)"
+    )
+    return {
+        "iv_rank": iv_rank,
+        "iv_rank_method": "HISTORY",
+        "iv_history_count": len(iv_values),
+    }
+
 
 
 # ─────────────────────────────────────────────
@@ -408,11 +487,17 @@ def calculate_all(price_data: pd.DataFrame,
         rv_20 = _historical_vol(close, 20)
         rv_30 = _historical_vol(close, 30)
 
-        # ── IV Rank (approximated) ──
-        iv_rank = _iv_rank_approx(close, current_iv) if current_iv > 0 else 0.0
+        # ── IV Rank — real percentile from stored IV history (self-bootstrapping) ──
+        vrp_window = getattr(config, "VRP_HV_WINDOW", 35)
+        iv_rank_result = calculate_iv_rank(ticker, current_iv, close) if current_iv > 0 else {
+            "iv_rank": 0.0, "iv_rank_method": "APPROX", "iv_history_count": 0
+        }
+        iv_rank = iv_rank_result["iv_rank"]
+        iv_rank_method = iv_rank_result["iv_rank_method"]
 
-        # ── VRP ──
-        vrp = round(current_iv - rv_30, 4) if current_iv > 0 and rv_30 > 0 else 0.0
+        # ── VRP — uses window matched to PREFERRED_DTE_TARGET ──
+        rv_vrp = _historical_vol(close, vrp_window)
+        vrp = round(current_iv - rv_vrp, 4) if current_iv > 0 and rv_vrp > 0 else 0.0
         vrp_pct = round(vrp * 100, 2)
 
         # ── Volume analysis ──
@@ -489,7 +574,8 @@ def calculate_all(price_data: pd.DataFrame,
             "rv_30d": round(rv_30 * 100, 2),
             "current_iv": round(current_iv * 100, 2),
             "iv_rank": iv_rank,
-            "vrp": vrp_pct,         # percentage points: IV - RV
+            "iv_rank_method": iv_rank_method,
+            "vrp": vrp_pct,         # percentage points: IV - RV (DTE-matched window)
             "vrp_raw": vrp,         # decimal
             # Volume
             "volume": int(vol_current),
@@ -529,7 +615,7 @@ def _empty_result(ticker: str) -> Dict:
         "bb_width": None, "bb_position": None,
         "atr": None,
         "rv_20d": 0, "rv_30d": 0,
-        "current_iv": 0, "iv_rank": 0,
+        "current_iv": 0, "iv_rank": 0, "iv_rank_method": "APPROX",
         "vrp": 0, "vrp_raw": 0,
         "volume": 0, "vol_20d_avg": None, "vol_ratio": None,
         "day_change_pct": None,

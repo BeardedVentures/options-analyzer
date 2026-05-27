@@ -4678,5 +4678,4440 @@
     "tipsheet_file": "C:\\Users\\jadams\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-03-05.html",
     "account_balance": 500.0,
     "errors": []
+  },
+  {
+    "timestamp": "2026-05-18T10:13:48.294608-04:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [],
+    "rejected_trades": [
+      {
+        "ticker": "SPY",
+        "reason": "Invalid spread pricing \u2014 credit exceeds spread width. This usually means stale or crossed quotes, so the setup is rejected.",
+        "category": "INVALID_SPREAD"
+      },
+      {
+        "ticker": "QQQ",
+        "reason": "Invalid spread pricing \u2014 credit exceeds spread width. This usually means stale or crossed quotes, so the setup is rejected.",
+        "category": "INVALID_SPREAD"
+      },
+      {
+        "ticker": "IWM",
+        "reason": "Invalid spread pricing \u2014 credit exceeds spread width. This usually means stale or crossed quotes, so the setup is rejected.",
+        "category": "INVALID_SPREAD"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "Earnings in 1 days \u2014 within 7-day blackout window",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "Negative VRP (-18.6%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "IV Rank 38.2 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "Negative edge (-2.8 pts) \u2014 market implied POP exceeds historical",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "IV Rank 29.9 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "XLE",
+        "reason": "Credit $8.00 per contract below minimum $25.00. Not worth the trade cost and execution risk.",
+        "category": "INSUFFICIENT_CREDIT"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "KRE",
+        "reason": "Insufficient liquidity \u2014 volume 0, open interest 2. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "Insufficient liquidity \u2014 volume 2, open interest 397. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:49.009441"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:49.523346"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:50.180836"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:50.774608"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:51.327847"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:51.910306"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:52.304821"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:52.879751"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:53.291613"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:53.896568"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:54.298120"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:54.906477"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:55.287289"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:55.844560"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:56.253163"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:56.853950"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:57.300723"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:57.905699"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:58.281463"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:58.957160"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:59.393667"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:13:59.986477"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:00.386340"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:00.948782"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:01.337998"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:01.931676"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:02.309210"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:02.919332"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:03.293766"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:05.819491"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "SPY",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=SPY&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:06.600000"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:08.881670"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:09.540466"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:09.948569"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "QQQ",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=QQQ&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:10.691792"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:12.821648"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:13.518962"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:13.979857"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "IWM",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=IWM&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:14.671239"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:16.410184"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:16.968226"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:17.361492"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "NVDA",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=NVDA&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:18.010318"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:19.435723"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:19.853213"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:20.326925"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:20.849149"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "AMD",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=AMD&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:21.632164"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:23.129529"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:23.551585"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:24.003813"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:24.388612"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "PLTR",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=PLTR&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:25.041476"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:26.304065"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:26.915081"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:27.402901"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "AAPL",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=AAPL&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:28.117132"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:29.323669"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:29.730008"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:30.237151"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:30.650366"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "MSFT",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=MSFT&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:31.315807"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:32.638870"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:33.052985"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:33.459896"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:33.816453"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "TSLA",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=TSLA&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:34.465038"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:35.773559"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:36.460996"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:36.886335"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "XLE",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=XLE&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:37.545807"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:39.276468"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:39.887041"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:40.334396"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "OXY",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=OXY&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:41.108479"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:42.348038"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:42.747635"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:43.352096"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:44.069822"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "KRE",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=KRE&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:44.761948"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:46.281864"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:46.907450"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:47.280052"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "GDX",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=GDX&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:14:47.937102"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:14:49.397921"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\Josh\\AI_OS\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-05-18.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-05-18T10:22:24.325808-04:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [
+      {
+        "ticker": "SPY",
+        "edge_score": 61
+      },
+      {
+        "ticker": "QQQ",
+        "edge_score": 61
+      },
+      {
+        "ticker": "GDX",
+        "edge_score": 60
+      }
+    ],
+    "rejected_trades": [
+      {
+        "ticker": "IWM",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "Earnings in 1 days \u2014 within 7-day blackout window",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "Negative VRP (-18.2%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "IV Rank 38.2 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "Negative edge (-2.7 pts) \u2014 market implied POP exceeds historical",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "IV Rank 29.4 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "XLE",
+        "reason": "Insufficient liquidity \u2014 volume 1, open interest 131. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "KRE",
+        "reason": "Insufficient liquidity \u2014 volume 0, open interest 2. Required: volume \u2265100 OR open interest \u2265500. Wide bid/ask spreads make execution unfavorable.",
+        "category": "LOW_LIQUIDITY"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:24.965595"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:25.455958"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:26.037247"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:26.698716"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:27.139307"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:27.783940"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:28.182500"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:28.848182"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:29.236431"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:29.922708"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:30.318022"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:30.922079"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:31.295494"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:31.883432"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:32.285076"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:32.904079"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:33.284048"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:33.912023"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:34.323535"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:34.984549"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:35.376749"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:35.952533"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:36.353533"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:37.017835"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:37.401026"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:38.002900"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:38.396393"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:39.050316"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:39.424462"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:41.630095"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "SPY",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=SPY&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:22:42.299740"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:44.351378"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:45.050826"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:45.533538"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "QQQ",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=QQQ&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:22:46.405363"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:48.691949"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:49.249941"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:49.687386"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "IWM",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=IWM&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:22:50.427414"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:52.089027"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:52.744221"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:53.146554"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "NVDA",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=NVDA&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:22:53.848849"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:55.221207"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:55.613965"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:56.012919"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:56.358650"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "AMD",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=AMD&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:22:57.190510"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:58.479168"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:58.987167"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:59.386274"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:22:59.811150"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "PLTR",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=PLTR&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:23:00.477206"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:01.708056"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:02.307800"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:02.758450"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "AAPL",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=AAPL&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:23:03.442178"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:04.607100"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:05.017868"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:05.550852"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:05.979033"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "MSFT",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=MSFT&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:23:06.603833"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:07.969522"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:08.381747"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:08.800081"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:09.150009"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "TSLA",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=TSLA&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:23:09.813427"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:11.114599"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:11.658394"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:12.118698"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "XLE",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=XLE&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:23:12.936197"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:14.471370"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:15.035865"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:15.483247"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "OXY",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=OXY&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:23:16.201616"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:17.366647"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:17.774834"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:18.276384"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:18.740986"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "KRE",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=KRE&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:23:19.401234"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:20.895262"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:21.434142"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:21.844132"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "GDX",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=GDX&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:23:22.487520"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:23:23.782871"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\Josh\\AI_OS\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-05-18.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-05-18T10:24:29.512664-04:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [],
+    "rejected_trades": [
+      {
+        "ticker": "SPY",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "QQQ",
+        "reason": "Max loss $260.00 exceeds risk limit $100.00 (20% of $500.00).",
+        "category": "RISK_EXCEEDED"
+      },
+      {
+        "ticker": "IWM",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "Earnings in 1 days \u2014 within 7-day blackout window",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "Negative VRP (-18.1%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "IV Rank 37.1 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "IV Rank 29.4 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "XLE",
+        "reason": "Max loss $170.00 exceeds risk limit $100.00 (20% of $500.00).",
+        "category": "RISK_EXCEEDED"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "Negative VRP (-5.7%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "KRE",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "Negative VRP (-3.6%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:30.266581"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:30.696991"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:31.267698"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:31.853458"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:32.300863"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:32.931648"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:33.423834"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:34.020652"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:34.405528"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:35.080494"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:35.496927"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:36.101778"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:36.474077"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:37.165167"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:37.567899"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:38.193074"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:38.584620"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:39.206338"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:39.580796"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:40.246636"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:40.632344"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:41.209255"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:41.684061"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:42.262567"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:42.640186"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:43.336419"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:43.830998"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:44.455396"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:44.872837"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:47.159058"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "SPY",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=SPY&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:24:47.806464"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:49.738079"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:50.345593"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:50.764928"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "QQQ",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=QQQ&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:24:51.506890"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:53.572574"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:54.135410"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:54.524455"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "IWM",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=IWM&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:24:55.323956"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:57.088234"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:57.828823"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:24:58.257264"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "NVDA",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=NVDA&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:24:58.968945"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:00.467291"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:00.891728"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:01.316454"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:01.726646"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "AMD",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=AMD&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:25:02.404164"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:03.719770"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:04.125444"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:04.610522"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:04.976040"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "PLTR",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=PLTR&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:25:05.621986"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:06.891295"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:07.562028"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:07.978286"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "AAPL",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=AAPL&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:25:08.625732"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:09.801311"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:10.286960"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:10.802397"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:11.190153"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "MSFT",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=MSFT&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:25:11.837379"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:13.097894"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:13.517759"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:13.983183"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:14.644484"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "TSLA",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=TSLA&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:25:15.434613"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:16.741947"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:17.485937"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:18.013672"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "XLE",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=XLE&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:25:18.645505"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:20.267405"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:20.915692"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:21.332893"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "OXY",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=OXY&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:25:22.112241"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:23.339202"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:23.774805"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:24.201997"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:24.637553"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "KRE",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=KRE&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:25:25.295972"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:26.811162"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:27.354022"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:27.793601"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "GDX",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=GDX&includeAllRoots=true",
+        "timestamp": "2026-05-18T09:25:28.457673"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T09:25:29.743068"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\Josh\\AI_OS\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-05-18.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-05-18T14:16:45.958260-04:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [
+      {
+        "ticker": "SPY",
+        "edge_score": 63
+      },
+      {
+        "ticker": "QQQ",
+        "edge_score": 61
+      }
+    ],
+    "rejected_trades": [
+      {
+        "ticker": "IWM",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "XLE",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "KRE",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "Negative VRP (-2.1%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:47.023088"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:47.446999"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:48.020823"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:48.787350"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:49.232727"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:49.887122"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:50.268946"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:50.906120"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:51.290331"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:51.895422"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:52.276036"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:52.874560"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:53.313352"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:53.868246"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:54.318305"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:54.893416"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:55.354234"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:55.960988"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:56.438988"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:57.048469"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:57.433655"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:58.008362"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:58.414183"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:59.031222"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:16:59.425086"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:00.049332"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:00.417476"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:00.991824"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:01.413900"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:03.603921"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "SPY",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=SPY&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:04.243411"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:06.257472"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:06.755098"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:07.205420"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "QQQ",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=QQQ&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:07.922515"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:10.053297"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:10.712870"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:11.138185"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "IWM",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=IWM&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:11.811626"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:13.463948"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:13.921019"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:14.360698"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "NVDA",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=NVDA&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:14.998389"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:16.490376"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:16.902526"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:17.321794"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "AMD",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=AMD&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:18.031709"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:19.484554"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:19.947409"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:20.362975"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "PLTR",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=PLTR&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:21.024082"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:22.234309"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:22.774567"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:23.239887"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "AAPL",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=AAPL&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:23.911819"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:25.081747"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:25.639585"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:26.079835"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "MSFT",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=MSFT&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:26.836764"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:28.068198"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:28.480969"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:28.932164"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "TSLA",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=TSLA&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:29.609498"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:31.008401"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:31.494113"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:31.960388"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "XLE",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=XLE&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:32.602586"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:34.098408"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:34.621996"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:35.053578"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "OXY",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=OXY&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:35.750469"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:36.884284"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:37.523378"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:37.927729"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "KRE",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=KRE&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:38.576851"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:40.107325"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:40.544540"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:40.978666"
+      },
+      {
+        "source": "tradier.expirations",
+        "ticker": "GDX",
+        "success": false,
+        "error": "401 Client Error: Unauthorized for url: https://api.tradier.com/v1/markets/options/expirations?symbol=GDX&includeAllRoots=true",
+        "timestamp": "2026-05-18T13:17:41.731259"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:17:43.005945"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\Josh\\AI_OS\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-05-18.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-05-18T14:36:37.185095-04:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [
+      {
+        "ticker": "SPY",
+        "edge_score": 63
+      },
+      {
+        "ticker": "QQQ",
+        "edge_score": 61
+      }
+    ],
+    "rejected_trades": [
+      {
+        "ticker": "IWM",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "IV Rank 35.8 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "XLE",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "KRE",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "Negative VRP (-0.1%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:37.787769"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:38.227540"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:38.863623"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:39.432310"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:39.944816"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:40.561949"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:40.936636"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:41.494080"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:41.866489"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:42.595997"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:43.036661"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=AMD&from=2026-05-17T18%3A36%3A43&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T13:36:43.662966"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:44.036747"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=PLTR&from=2026-05-17T18%3A36%3A44&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T13:36:44.761011"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:45.191364"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=AAPL&from=2026-05-17T18%3A36%3A45&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T13:36:45.760271"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:46.211172"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=MSFT&from=2026-05-17T18%3A36%3A46&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T13:36:46.793408"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:47.162583"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=TSLA&from=2026-05-17T18%3A36%3A47&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T13:36:47.791057"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:48.189546"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=XLE&from=2026-05-17T18%3A36%3A48&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T13:36:48.776996"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:49.160809"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=OXY&from=2026-05-17T18%3A36%3A49&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T13:36:49.744086"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:50.126724"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=KRE&from=2026-05-17T18%3A36%3A50&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T13:36:50.721317"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:51.206152"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=GDX&from=2026-05-17T18%3A36%3A51&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T13:36:51.813111"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:52.191463"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:36:54.337572"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:01.550018"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:02.307397"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:02.788146"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:09.760887"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:10.365032"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:10.788264"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:16.830127"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:17.426072"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:17.785137"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:23.009510"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:23.514066"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:23.925397"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:29.479573"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:29.929764"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:30.369746"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:34.789861"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:35.353352"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:35.814695"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:40.912801"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:41.406697"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:41.848600"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:46.773117"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:47.519877"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:47.916008"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:53.229822"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:53.853470"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:54.330399"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:37:59.649658"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:38:00.169720"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:38:00.694191"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:38:04.903789"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:38:05.335000"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:38:05.706937"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:38:11.203970"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:38:11.644760"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:38:12.158356"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T13:38:16.777436"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\Josh\\AI_OS\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-05-18.html",
+    "account_balance": 500.0,
+    "errors": []
+  },
+  {
+    "timestamp": "2026-05-18T15:02:19.573740-04:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [
+      {
+        "ticker": "QQQ",
+        "edge_score": 61
+      },
+      {
+        "ticker": "IWM",
+        "edge_score": 63
+      }
+    ],
+    "rejected_trades": [
+      {
+        "ticker": "SPY",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "XLE",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "KRE",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "Negative VRP (-0.5%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:21.569219"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:22.000197"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=%22Federal+Reserve%22+OR+%22inflation+CPI%22+OR+%22GDP%22+OR+%22market+crash%22+OR+%22rate+hike%22&from=2026-05-17T19%3A02%3A22&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=15",
+        "timestamp": "2026-05-18T14:02:22.654097"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=SPY&from=2026-05-17T19%3A02%3A22&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:23.218015"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:24.013528"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=QQQ&from=2026-05-17T19%3A02%3A24&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:24.597780"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:25.093645"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=IWM&from=2026-05-17T19%3A02%3A25&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:25.810236"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:26.391084"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=NVDA&from=2026-05-17T19%3A02%3A26&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:26.943471"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:27.445353"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=AMD&from=2026-05-17T19%3A02%3A27&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:28.023663"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:28.412141"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=PLTR&from=2026-05-17T19%3A02%3A28&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:28.966923"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:29.388050"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=AAPL&from=2026-05-17T19%3A02%3A29&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:29.981657"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:30.382614"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=MSFT&from=2026-05-17T19%3A02%3A30&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:30.924055"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:31.319589"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=TSLA&from=2026-05-17T19%3A02%3A31&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:31.937091"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:32.324659"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=XLE&from=2026-05-17T19%3A02%3A32&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:32.896086"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:33.270234"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=OXY&from=2026-05-17T19%3A02%3A33&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:33.827231"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:34.273634"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=KRE&from=2026-05-17T19%3A02%3A34&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:34.841460"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:35.391649"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": false,
+        "error": "429 Client Error: Too Many Requests for url: https://newsapi.org/v2/everything?q=GDX&from=2026-05-17T19%3A02%3A35&sortBy=publishedAt&language=en&apiKey=9d73fe0dcf2b46c08b05d59e7af8927c&pageSize=10",
+        "timestamp": "2026-05-18T14:02:36.373683"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:36.795058"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:39.115673"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:47.946169"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:48.657088"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:49.038964"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:57.010597"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:57.645223"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:02:58.101431"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:04.664406"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:05.337750"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:05.737661"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:11.054811"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:11.523781"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:11.938281"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:17.271564"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:17.762847"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:18.209584"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:23.121598"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:23.646155"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:24.099489"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:29.663785"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:30.149200"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:30.606280"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:35.337882"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:35.788482"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:36.177084"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:41.693738"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:42.228701"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:42.654307"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:48.403867"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:48.982625"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:49.443173"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:53.660190"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:54.084171"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:03:54.517203"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:04:00.276538"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:04:00.854943"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:04:01.292985"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-18T14:04:06.394158"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\Josh\\AI_OS\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-05-18.html",
+    "account_balance": 500.0,
+    "errors": [],
+    "source_health": {
+      "tradier": {
+        "enabled": true,
+        "mode": "sandbox",
+        "healthy": true,
+        "profile_status": 200,
+        "expirations_status": 200,
+        "reason": "ok"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-05-20T09:19:26.271828-04:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [
+      {
+        "ticker": "SPY",
+        "edge_score": 63
+      },
+      {
+        "ticker": "QQQ",
+        "edge_score": 69
+      },
+      {
+        "ticker": "IWM",
+        "edge_score": 63
+      },
+      {
+        "ticker": "NVDA",
+        "edge_score": 65
+      },
+      {
+        "ticker": "XLE",
+        "edge_score": 61
+      }
+    ],
+    "rejected_trades": [
+      {
+        "ticker": "AMD",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "IV Rank 34.9 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "Negative VRP (-0.6%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "IV Rank 27.9 below minimum 45",
+        "category": "IV_RANK"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "Negative VRP (-8.4%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      },
+      {
+        "ticker": "KRE",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "Negative VRP (-1.6%) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:28.421976"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:28.889544"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:29.459576"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:30.043750"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:30.484372"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:31.143473"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:31.564580"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:32.139850"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:32.515549"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:33.097731"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:33.495015"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:34.103830"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:34.522002"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:35.100782"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:35.525294"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:36.118968"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:36.542678"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:37.086626"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:37.528205"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:38.110193"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:38.585802"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:39.167721"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:39.552592"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:40.096469"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:40.480098"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:41.040753"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:41.498671"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:42.038702"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:42.401028"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:44.483518"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:50.771523"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:51.302121"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:51.712436"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:19:59.463461"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:00.079231"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:00.507410"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:06.598262"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:07.182094"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:07.590205"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:11.739942"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:12.840884"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:13.259286"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:13.636999"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:19.085578"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:19.483975"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:19.859459"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:23.737488"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:24.449009"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:24.928247"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:28.874756"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:29.270198"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:29.711152"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:30.113462"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:34.035102"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:34.499591"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:34.921976"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:35.349339"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:39.406652"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:39.994384"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:40.438749"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:45.433050"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:45.979801"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:46.368004"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:50.083764"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:50.483774"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:51.116550"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:51.545758"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:56.846183"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:57.254862"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:20:57.725170"
+      },
+      {
+        "source": "tradier.chains",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-05-20T08:21:01.653666"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\Josh\\AI_OS\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-05-20.html",
+    "account_balance": 500.0,
+    "errors": [],
+    "source_health": {
+      "tradier": {
+        "enabled": true,
+        "mode": "sandbox",
+        "healthy": true,
+        "profile_status": 200,
+        "expirations_status": 200,
+        "reason": "ok"
+      }
+    }
   }
 ]

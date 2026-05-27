@@ -255,7 +255,7 @@ def generate_setup_highlight_post(scan: Dict) -> Optional[Dict]:
         current_price = top.get("current_price")
         short_strike = top.get("short_strike")
         long_strike = top.get("long_strike")
-        expiration = top.get("expiration", "")
+        expiration = top.get("expiration_display") or top.get("last_trade_date") or top.get("expiration", "")
         dte = top.get("dte")
         credit = top.get("credit_per_share")
         credit_usd = top.get("credit_usd")

@@ -790,7 +790,7 @@ body {
     </div>
     <div class="header-meta">
       {{ timestamp }}<br>
-      Account: ${{ "%.2f"|format(account_balance) }} · Max Risk/Trade: ${{ "%.2f"|format(max_risk_per_trade) }}
+      Risk Tiers: &lt;$100 · &lt;$500 · &lt;$1,000 per trade
     </div>
   </div>
 </div>
@@ -966,6 +966,12 @@ body {
           <div class="stat-val green">${{ trade.credit_usd }}/contract</div>
         </div>
         <div class="stat-box">
+          <div class="stat-name">Credit / Width</div>
+          <div class="stat-val {% if trade.credit_to_width_pct >= 33 %}green{% elif trade.credit_to_width_pct >= 25 %}amber{% else %}red{% endif %}">
+            {{ trade.credit_to_width_pct }}%
+          </div>
+        </div>
+        <div class="stat-box">
           <div class="stat-name">Profit Target</div>
           <div class="stat-val green">${{ trade.profit_target_usd }} (50%)</div>
         </div>
@@ -989,9 +995,33 @@ body {
           <div class="stat-val">${{ "%.2f"|format(trade.nearest_support) }}</div>
         </div>
         {% endif %}
-        <div class="stat-box">
-          <div class="stat-name">Contracts OK</div>
-          <div class="stat-val">{{ trade.contracts_allowed }}</div>
+        <!-- Risk Tier Sizing — spans full width -->
+        <div class="stat-box" style="grid-column: 1 / -1;">
+          <div class="stat-name" style="margin-bottom: 6px;">Position Sizing by Risk Tier</div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            {% for tier in trade.risk_tiers %}
+            <div style="
+              background: var(--bg);
+              border: 1px solid {% if tier.viable %}var(--green){% else %}var(--border){% endif %};
+              border-radius: 4px;
+              padding: 6px 12px;
+              text-align: center;
+              min-width: 90px;
+              flex: 1;
+            ">
+              <div style="font-family: var(--mono); font-size: 0.6rem; color: var(--text3); letter-spacing: 0.06em; margin-bottom: 3px;">{{ tier.label }}</div>
+              {% if tier.viable %}
+                <div style="font-family: var(--mono); font-size: 1.0rem; font-weight: 600; color: var(--green);">{{ tier.contracts }}x</div>
+                <div style="font-family: var(--mono); font-size: 0.62rem; color: var(--text2); margin-top: 2px;">
+                  +${{ "%.0f"|format(tier.credit_total) }} / -${{ "%.0f"|format(tier.max_loss_total) }}
+                </div>
+              {% else %}
+                <div style="font-family: var(--mono); font-size: 1.0rem; font-weight: 600; color: var(--text3);">—</div>
+                <div style="font-family: var(--mono); font-size: 0.62rem; color: var(--text3); margin-top: 2px;">n/a</div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
         </div>
       </div>
 

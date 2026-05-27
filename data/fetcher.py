@@ -44,6 +44,13 @@ def _rate_limit():
     time.sleep(RATE_LIMIT_DELAY)
 
 
+def _last_trade_date(exp_date):
+    """Return the last tradable day for a listed option expiration date."""
+    if exp_date.weekday() == 5:
+        return exp_date - timedelta(days=1)
+    return exp_date
+
+
 def _log_api_call(source: str, ticker: str, success: bool, error: str = ""):
     """Append to the module-level API call log (used by scan_log)."""
     if not hasattr(_log_api_call, "calls"):
@@ -65,6 +72,65 @@ def clear_cache():
     """Clear session cache — call at start of each scan."""
     _cache.clear()
     _log_api_call.calls = []
+
+
+def validate_tradier_connection(symbol: str = "SPY") -> Dict[str, Any]:
+    """Probe the configured Tradier environment and return a health summary."""
+    if not config.TRADIER_API_KEY:
+        return {
+            "enabled": False,
+            "healthy": False,
+            "mode": "disabled",
+            "reason": "TRADIER_API_KEY not set",
+        }
+
+    base = "https://sandbox.tradier.com" if config.TRADIER_SANDBOX else "https://api.tradier.com"
+    headers = {
+        "Authorization": f"Bearer {config.TRADIER_API_KEY}",
+        "Accept": "application/json",
+    }
+
+    health = {
+        "enabled": True,
+        "mode": "sandbox" if config.TRADIER_SANDBOX else "live",
+        "healthy": False,
+        "profile_status": None,
+        "expirations_status": None,
+        "reason": None,
+    }
+
+    try:
+        profile_resp = requests.get(f"{base}/v1/user/profile", headers=headers, timeout=10)
+        health["profile_status"] = profile_resp.status_code
+        if profile_resp.status_code != 200:
+            health["reason"] = f"profile probe failed: {profile_resp.status_code}"
+            return health
+
+        expirations_resp = requests.get(
+            f"{base}/v1/markets/options/expirations",
+            headers=headers,
+            params={"symbol": symbol, "includeAllRoots": "true"},
+            timeout=10,
+        )
+        health["expirations_status"] = expirations_resp.status_code
+        if expirations_resp.status_code != 200:
+            health["reason"] = f"expirations probe failed: {expirations_resp.status_code}"
+            return health
+
+        expirations = expirations_resp.json().get("expirations", {}).get("date", [])
+        if isinstance(expirations, str):
+            expirations = [expirations]
+        if not expirations:
+            health["reason"] = "no expirations returned"
+            return health
+
+        health["healthy"] = True
+        health["reason"] = "ok"
+        return health
+
+    except Exception as exc:
+        health["reason"] = str(exc)
+        return health
 
 
 # ─────────────────────────────────────────────
@@ -172,7 +238,7 @@ def _parse_yfinance_options(ticker: str, current_price: float,
         for exp_str in expirations:
             exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
             dte = (exp_date - today).days
-
+            last_trade_date = _last_trade_date(exp_date)
             if not (min_dte <= dte <= max_dte):
                 continue
 
@@ -207,6 +273,7 @@ def _parse_yfinance_options(ticker: str, current_price: float,
                     "type": "put",
                     "strike": strike,
                     "expiration": exp_str,
+                    "last_trade_date": last_trade_date.isoformat(),
                     "dte": dte,
                     "bid": bid,
                     "ask": ask,
@@ -239,6 +306,7 @@ def _parse_tradier_options(ticker: str, current_price: float,
         "Accept": "application/json",
     }
 
+    last_trade_date = None
     # Step 1: get expiration dates
     today = datetime.now().date()
     records = []
@@ -266,6 +334,7 @@ def _parse_tradier_options(ticker: str, current_price: float,
             if not (min_dte <= dte <= max_dte):
                 continue
 
+            last_trade_date = _last_trade_date(exp_date)
             time.sleep(0.3)
             r = requests.get(
                 f"{base}/v1/markets/options/chains",
@@ -302,6 +371,7 @@ def _parse_tradier_options(ticker: str, current_price: float,
                     "theta": float(greeks.get("theta", 0) or 0),
                     "gamma": float(greeks.get("gamma", 0) or 0),
                     "vega": float(greeks.get("vega", 0) or 0),
+                    "last_trade_date": last_trade_date.isoformat(),
                 })
 
         except Exception as e:
@@ -309,6 +379,56 @@ def _parse_tradier_options(ticker: str, current_price: float,
 
     _log_api_call("tradier.chains", ticker, len(records) > 0)
     return records
+
+
+def _quality_filter_options(records: List[Dict], ticker: str, source: str) -> List[Dict]:
+    """
+    Filter out stale or unusable option records from the yfinance fallback.
+
+    Removes:
+      - Records with both bid=0 AND ask=0 (stale / no market)
+      - Records with ask < bid (data error)
+      - Records with impossibly wide bid/ask spread (> 80% of mid — stale price)
+      - Records with zero volume AND zero open interest (no market activity)
+
+    Logs a warning if more than 30% of records are filtered out.
+    """
+    if not records:
+        return records
+
+    valid = []
+    for opt in records:
+        bid = float(opt.get("bid", 0) or 0)
+        ask = float(opt.get("ask", 0) or 0)
+        mid = float(opt.get("mid", 0) or 0)
+        volume = int(opt.get("volume", 0) or 0)
+        oi = int(opt.get("open_interest", 0) or 0)
+
+        # Both sides zero — no market / stale
+        if bid == 0 and ask == 0:
+            continue
+        # Crossed market — data error
+        if ask > 0 and bid > 0 and ask < bid:
+            continue
+        # Impossibly wide spread — stale pricing (> 80% of mid)
+        if mid > 0 and (ask - bid) / mid > 0.80:
+            continue
+        # No market activity at all — liquidity concern
+        if volume == 0 and oi == 0:
+            continue
+
+        valid.append(opt)
+
+    removed = len(records) - len(valid)
+    if removed > 0:
+        pct = removed / len(records) * 100
+        level = logger.warning if pct > 30 else logger.debug
+        level(
+            f"[fetcher] {source} quality filter: removed {removed}/{len(records)} "
+            f"({pct:.0f}%) stale/invalid option records for {ticker}"
+        )
+
+    return valid
 
 
 def get_options_chain(ticker: str,
@@ -343,6 +463,7 @@ def get_options_chain(ticker: str,
     # Fall back to yfinance
     if not records:
         records = _parse_yfinance_options(ticker, current_price, min_dte, max_dte)
+        records = _quality_filter_options(records, ticker, "yfinance")
         _log_api_call("yfinance.options", ticker, len(records) > 0)
 
     _cache[cache_key] = records

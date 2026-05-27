@@ -72,8 +72,30 @@ MIN_IV_RANK = 45                  # Only trade when IV rank >= 45
 MIN_CREDIT_USD = 25               # Minimum premium worth collecting (per contract)
 MIN_DTE = 21                      # Minimum days to expiration
 MAX_DTE = 45                      # Maximum days to expiration
+PREFERRED_DTE_TARGET = 35         # Prefer contracts near this DTE when multiple are valid
+PREFERRED_DTE_TOLERANCE = 7       # Within +/- this range is considered ideal
 TARGET_PROFIT_PCT = 0.50          # Close winners at 50% of max profit
 STOP_LOSS_MULTIPLIER = 2.0        # Stop if spread reaches 2x credit received
+ALLOW_OVERSIZED_TRADES = True     # Account-agnostic output — risk tiers handle sizing
+MAX_QUOTE_SPREAD_PCT = 0.35       # Reject option legs with (ask-bid)/mid above this threshold
+MIN_SPREAD_WIDTH_SPY_LIKE = 1.0   # Minimum spread width for SPY-like tickers (flat — not account-size dependent)
+MIN_SPREAD_WIDTH_OTHER = 1.0      # Allow 1-point width on non-index symbols
+ALLOW_NARROW_SPREAD_EXCEPTION = True
+NARROW_SPREAD_MIN_CREDIT_TO_WIDTH = 0.30  # Allow narrower spreads only if credit/width is strong
+MIN_OPTION_VOLUME = 100
+MIN_OPTION_OPEN_INTEREST = 500
+MIN_CREDIT_TO_WIDTH_PCT = 0.25    # Credit must be ≥ 25% of spread width — below this, edge is too thin
+
+# ─────────────────────────────────────────────
+# RISK TIERS — account-size-agnostic position sizing
+# Each qualified trade is presented with contracts-per-tier so the output
+# serves accounts of any size. The scanner no longer gates on ACCOUNT_BALANCE.
+# ─────────────────────────────────────────────
+RISK_TIERS = [
+    {"label": "< $100",   "max_risk": 100},
+    {"label": "< $500",   "max_risk": 500},
+    {"label": "< $1,000", "max_risk": 1000},
+]
 
 # ─────────────────────────────────────────────
 # WATCHLIST
@@ -101,13 +123,93 @@ WATCHLIST = [
 ]
 
 # ─────────────────────────────────────────────
+# MARKET REGIME GATES
+# ─────────────────────────────────────────────
+# VIX gates enforce that we only sell premium when VRP edge is real.
+# Below MIN: premium is cheap — IV Rank gate will naturally block most trades,
+#   but we also inject a regime note so the output explains the silence.
+# Above MAX: gamma risk dominates; spreads breach rapidly even at 0.20 delta.
+VIX_MIN_FOR_EDGE = 16            # Below this: premium too cheap, inject LOW_VOL regime warning
+VIX_MAX_FOR_TRADES = 30          # Above this: inject HIGH_VOL aggressive size-down warning
+VIX_ELEVATED_THRESHOLD = 25      # Above this: inject standard size-down caution
 
+# ─────────────────────────────────────────────
+# VRP CALCULATION WINDOW
+# ─────────────────────────────────────────────
+# HV lookback should match expected DTE so VRP is relevant to the holding period.
+# Default matches PREFERRED_DTE_TARGET = 35.
+VRP_HV_WINDOW = 35               # HV lookback days — set equal to PREFERRED_DTE_TARGET
+
+# ─────────────────────────────────────────────
+# IV HISTORY TRACKING — proper IV Rank calculation
+# ─────────────────────────────────────────────
+# Per-ticker IV samples stored in IV_HISTORY_DIR/{ticker}.json.
+# System self-bootstraps: starts with HV-based approximation (labeled APPROX),
+# transitions to real IV percentile once IV_HISTORY_MIN_SAMPLES are collected.
+IV_HISTORY_DIR = "data/iv_history"   # Relative to options_intelligence root
+IV_HISTORY_MIN_SAMPLES = 30          # Minimum IV samples for reliable percentile
+IV_HISTORY_MAX_SAMPLES = 504         # ~2 years of daily samples (rolling window cap)
+
+# ─────────────────────────────────────────────
+# SECTOR CORRELATION LIMITS
+# ─────────────────────────────────────────────
+# Prevents over-concentration when multiple tickers share macro factor exposure.
+# When more than MAX_TRADES_PER_SECTOR qualify from the same sector, only the
+# highest-edge-scoring ones are kept.
+MAX_TRADES_PER_SECTOR = 2        # Max qualified trades surfaced per sector group
+SECTOR_LIMIT_EXEMPT = {"broad_market"}  # These sector keys are never capped
+
+TICKER_SECTORS: dict = {
+    # Broad market — diversified, exempt from cap
+    "SPY":  "broad_market",
+    "QQQ":  "technology_etf",
+    "IWM":  "broad_market",
+    "DIA":  "broad_market",
+    # Technology
+    "NVDA": "technology",
+    "AMD":  "technology",
+    "PLTR": "technology",
+    "AAPL": "technology",
+    "MSFT": "technology",
+    "GOOG": "technology",
+    "GOOGL": "technology",
+    "META": "technology",
+    "CRM":  "technology",
+    # Consumer cyclical
+    "TSLA": "consumer_cyclical",
+    "AMZN": "consumer_cyclical",
+    # Energy
+    "XLE":  "energy",
+    "OXY":  "energy",
+    "XOM":  "energy",
+    "CVX":  "energy",
+    # Financials
+    "KRE":  "financials",
+    "JPM":  "financials",
+    "BAC":  "financials",
+    "GS":   "financials",
+    # Materials / Gold
+    "GDX":  "materials",
+    "GLD":  "commodities",
+    "SLV":  "commodities",
+    # Rates / Fixed income
+    "TLT":  "rates",
+}
+
+# ─────────────────────────────────────────────
 # EDGE FILTER THRESHOLDS
 # ─────────────────────────────────────────────
 MIN_EDGE_SCORE = 60               # 0-100 composite score required to appear on tip sheet
 VRP_MIN_THRESHOLD = 0.15          # Implied vol must exceed realized vol by at least 15%
 NEWS_SENTIMENT_BLOCK = True       # Block trades on tickers with strong negative news
 EARNINGS_BLACKOUT_DAYS = 7        # Never sell premium within 7 days of earnings (unless volatility crush mode is enabled)
+
+# Fundamentals controls
+FUNDAMENTALS_ENABLED = True       # Fetch and score fundamentals in screening flow
+FUNDAMENTALS_SHADOW_MODE = True   # Score/log only; do not hard-block when True
+FUNDAMENTALS_STRICT_BLOCK = False # If True (and shadow mode False), block severe deterioration
+MIN_FUNDAMENTALS_SCORE = 4        # Minimum score required when strict blocking is enabled
+FUNDAMENTALS_WEIGHT = 10          # Component weight in composite score (0-10)
 
 # ─────────────────────────────────────────────
 # VOLATILITY CRUSH MODE
@@ -133,7 +235,12 @@ TRADIER_SANDBOX   = os.environ.get("TRADIER_SANDBOX", "true").lower() == "true"
 
 # AI Model settings
 CLAUDE_MODEL = "claude-sonnet-4-6"
-OPENAI_MODEL = "gpt-4o-mini"     # Cheapest GPT-4 class model for news batch
+# Pinned model string — update this when OpenAI deprecates the model.
+# If OPENAI_MODEL is deprecated, GPT calls will raise a model_not_found error.
+# The news.py module catches this and falls back to keyword sentiment, logging
+# a CRITICAL warning so it is visible in GitHub Actions logs.
+OPENAI_MODEL = "gpt-4o"          # Pinned; update on deprecation
+OPENAI_MODEL_FALLBACK = "gpt-4o-mini"  # Used if primary model returns model_not_found
 
 # ─────────────────────────────────────────────
 # EMAIL DISTRIBUTION — set via .env or GitHub Secrets

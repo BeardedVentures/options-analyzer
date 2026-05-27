@@ -147,7 +147,6 @@ def _gpt4o_batch_sentiment(ticker_headlines: Dict[str, List[str]]) -> Dict[str, 
             max_tokens=1200,
             temperature=0.1,
         )
-
         raw = response.choices[0].message.content.strip()
 
         # Extract JSON from response
@@ -168,7 +167,49 @@ def _gpt4o_batch_sentiment(ticker_headlines: Dict[str, List[str]]) -> Dict[str, 
             return result
 
     except Exception as e:
-        logger.warning(f"[news] GPT-4o batch sentiment error: {e}")
+        err_str = str(e).lower()
+        # Detect model deprecation specifically — this is the signal to update config.OPENAI_MODEL
+        if "model_not_found" in err_str or "model" in err_str and "deprecated" in err_str:
+            logger.critical(
+                f"[news] OPENAI MODEL DEPRECATED — update config.OPENAI_MODEL. "
+                f"Current value: '{config.OPENAI_MODEL}'. Falling back to keyword sentiment. Error: {e}"
+            )
+        elif "model_not_found" not in err_str:
+            # Try fallback model before giving up
+            try:
+                fallback_model = getattr(config, "OPENAI_MODEL_FALLBACK", "gpt-4o-mini")
+                logger.warning(
+                    f"[news] Primary model '{config.OPENAI_MODEL}' failed ({e}). "
+                    f"Trying fallback '{fallback_model}'."
+                )
+                response = client.chat.completions.create(
+                    model=fallback_model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_content},
+                    ],
+                    max_tokens=1200,
+                    temperature=0.1,
+                )
+                raw = response.choices[0].message.content.strip()
+                match = re.search(r"\{.*\}", raw, re.DOTALL)
+                if match:
+                    data = _json.loads(match.group())
+                    result = {}
+                    for ticker, vals in data.items():
+                        result[ticker] = {
+                            "sentiment": vals.get("sentiment", "NEUTRAL"),
+                            "confidence": float(vals.get("confidence", 0.5)),
+                            "key_themes": vals.get("key_themes", []),
+                            "market_impact_summary": vals.get("market_impact_summary", ""),
+                            "blocking": vals.get("sentiment") == "BLOCKING",
+                        }
+                    logger.info(f"[news] Fallback model scored {len(result)} tickers")
+                    return result
+            except Exception as fallback_e:
+                logger.warning(f"[news] Fallback model also failed: {fallback_e}")
+        else:
+            logger.warning(f"[news] GPT batch sentiment error: {e}")
 
     return {}
 

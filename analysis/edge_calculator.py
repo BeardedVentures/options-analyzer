@@ -166,6 +166,75 @@ def calculate_edge_points(true_pop: Optional[float], implied_pop: float) -> Dict
     }
 
 
+def calculate_fundamentals_score(fundamentals: Dict, is_etf: bool = False) -> Dict:
+    """
+    Score fundamentals on a 0-10 stability scale for short-duration premium selling.
+
+    This is intentionally a risk filter (balance sheet / profitability / growth trend),
+    not a long-term intrinsic-value model.
+    """
+    if is_etf:
+        return {
+            "score": 8,
+            "blocking": False,
+            "reasons": ["ETF: diversified fundamentals baseline"],
+        }
+
+    reasons = []
+    penalties = 0
+
+    debt_to_equity = fundamentals.get("debt_to_equity")
+    if debt_to_equity is not None and debt_to_equity > 250:
+        penalties += 2
+        reasons.append("Very high debt-to-equity")
+
+    current_ratio = fundamentals.get("current_ratio")
+    if current_ratio is not None and current_ratio < 1.0:
+        penalties += 1
+        reasons.append("Current ratio below 1.0")
+
+    profit_margin = fundamentals.get("profit_margin")
+    if profit_margin is not None and profit_margin < 0:
+        penalties += 2
+        reasons.append("Negative profit margin")
+
+    operating_margin = fundamentals.get("operating_margin")
+    if operating_margin is not None and operating_margin < 0:
+        penalties += 1
+        reasons.append("Negative operating margin")
+
+    revenue_growth = fundamentals.get("revenue_growth")
+    if revenue_growth is not None and revenue_growth < -0.10:
+        penalties += 1
+        reasons.append("Revenue contracting >10%")
+
+    earnings_growth = fundamentals.get("earnings_growth")
+    if earnings_growth is not None and earnings_growth < -0.20:
+        penalties += 2
+        reasons.append("Earnings contracting >20%")
+
+    free_cashflow = fundamentals.get("free_cashflow")
+    if free_cashflow is not None and free_cashflow < 0:
+        penalties += 1
+        reasons.append("Negative free cash flow")
+
+    recommendation = (fundamentals.get("analyst_recommendation") or "").lower()
+    if recommendation in {"sell", "strong_sell"}:
+        penalties += 1
+        reasons.append(f"Analyst recommendation: {recommendation}")
+
+    score = max(0, 10 - penalties)
+    blocking = score <= 2
+    if not reasons:
+        reasons.append("No major fundamentals stress flags")
+
+    return {
+        "score": score,
+        "blocking": blocking,
+        "reasons": reasons,
+    }
+
+
 # ─────────────────────────────────────────────
 # COMPOSITE EDGE SCORE
 # ─────────────────────────────────────────────
@@ -178,6 +247,7 @@ def calculate_edge_score(
     edge_points: float,
     news_sentiment: str,
     earnings_days_away: int,
+    fundamentals_score: Optional[float] = None,
 ) -> Dict:
     """
     Composite 0-100 edge score combining all factors.
@@ -185,9 +255,10 @@ def calculate_edge_score(
     Components:
       VRP component         (30 points max)
       True POP Edge         (25 points max)
-      Technical Score       (25 points max)
+    Technical Score       (20 points max)
       News Sentiment        (10 points max)
-      Earnings Safety       (10 points max)
+    Earnings Safety       (5 points max)
+    Fundamentals          (10 points max)
 
     Returns:
         total_score: int 0-100
@@ -226,8 +297,8 @@ def calculate_edge_score(
     else:
         breakdown["true_pop_edge"] = 5
 
-    # ── Technical Score Component (25 points max) ──
-    breakdown["technical"] = round(min(technical_score * 0.25, 25))
+    # ── Technical Score Component (20 points max) ──
+    breakdown["technical"] = round(min(technical_score * 0.20, 20))
 
     # ── News Sentiment Component (10 points max) ──
     sentiment_upper = news_sentiment.upper() if news_sentiment else "NEUTRAL"
@@ -243,7 +314,7 @@ def calculate_edge_score(
     else:  # POSITIVE
         breakdown["news"] = 10
 
-    # ── Earnings Safety Component (10 points max) ──
+    # ── Earnings Safety Component (5 points max) ──
     if earnings_days_away < config.EARNINGS_BLACKOUT_DAYS:
         breakdown["earnings_safety"] = 0
         if disqualification_reason is None:
@@ -252,11 +323,21 @@ def calculate_edge_score(
                 f"within {config.EARNINGS_BLACKOUT_DAYS}-day blackout window"
             )
     elif earnings_days_away <= 14:
-        breakdown["earnings_safety"] = 2
+        breakdown["earnings_safety"] = 1
     elif earnings_days_away <= 30:
-        breakdown["earnings_safety"] = 7
+        breakdown["earnings_safety"] = 3
     else:
-        breakdown["earnings_safety"] = 10
+        breakdown["earnings_safety"] = 5
+
+    # ── Fundamentals Component (weight configurable, default 10) ──
+    fundamentals_weight = int(getattr(config, "FUNDAMENTALS_WEIGHT", 10))
+    fundamentals_weight = max(0, min(10, fundamentals_weight))
+    if fundamentals_score is None:
+        # Neutral default when no fundamentals signal is available.
+        breakdown["fundamentals"] = round(fundamentals_weight * 0.5)
+    else:
+        normalized = max(0.0, min(10.0, float(fundamentals_score))) / 10.0
+        breakdown["fundamentals"] = round(normalized * fundamentals_weight)
 
     total = sum(breakdown.values())
     total = min(100, max(0, total))
@@ -352,7 +433,7 @@ def find_target_put(
             if (current_price - strike) < config.MIN_STRIKE_BUFFER_SPY:
                 continue
         else:
-            min_buffer_pct = config.SHORT_STRIKE_MIN_OTM_PCT
+            min_buffer_pct = config.MIN_STRIKE_BUFFER_STOCK  # 5% for individual stocks
             if (current_price - strike) / current_price < min_buffer_pct:
                 continue
 
@@ -375,6 +456,7 @@ def calculate_spread_metrics(
     short_put: dict,
     long_put_strike: float,
     current_price: float,
+    long_put_mid: Optional[float] = None,
 ) -> Dict:
     """
     Calculate spread credit, max loss, and position sizing for a bull put spread.
@@ -396,20 +478,38 @@ def calculate_spread_metrics(
     if spread_width <= 0:
         return {}
 
-    # Estimate long put mid at ~0.30 of short put mid (typical)
-    # In production this would use actual long put price from options chain
-    long_put_mid = short_mid * 0.30
+    # Prefer the actual long-leg mid when available.
+    # Fall back to a conservative estimate only if the quote is missing.
+    if long_put_mid is None:
+        long_put_mid = short_mid * 0.30
     credit_per_share = round(short_mid - long_put_mid, 2)
     credit_usd = round(credit_per_share * 100, 2)  # per contract
 
-    max_loss_per_share = spread_width - credit_per_share
-    max_loss_usd = round(max_loss_per_share * 100, 2)
-
-    # How many contracts can we trade within risk limit?
-    if max_loss_usd > 0:
-        contracts_allowed = max(config.MIN_CONTRACTS, int(config.MAX_RISK_PER_TRADE_USD / max_loss_usd))
+    spread_invalid = credit_per_share >= spread_width
+    if spread_invalid:
+        max_loss_per_share = 0.0
+        max_loss_usd = 0.0
     else:
-        contracts_allowed = config.MIN_CONTRACTS
+        max_loss_per_share = spread_width - credit_per_share
+        max_loss_usd = round(max_loss_per_share * 100, 2)
+
+    # Per-tier position sizing — three risk tiers, account-size agnostic
+    risk_tiers = []
+    for tier in getattr(config, "RISK_TIERS", []):
+        tier_max = tier["max_risk"]
+        viable = max_loss_usd > 0 and max_loss_usd <= tier_max
+        contracts = max(1, int(tier_max / max_loss_usd)) if viable else 0
+        risk_tiers.append({
+            "label":          tier["label"],
+            "max_risk":       tier_max,
+            "contracts":      contracts,
+            "max_loss_total": round(max_loss_usd * contracts, 2) if viable else 0,
+            "credit_total":   round(credit_usd * contracts, 2) if viable else 0,
+            "viable":         viable,
+        })
+    # Backward-compat: smallest viable tier's contract count, or 1
+    viable_tiers = [t for t in risk_tiers if t["viable"]]
+    contracts_allowed = viable_tiers[0]["contracts"] if viable_tiers else config.MIN_CONTRACTS
 
     profit_target_usd = round(credit_usd * config.TARGET_PROFIT_PCT, 2)
     stop_loss_usd = round(credit_usd * config.STOP_LOSS_MULTIPLIER, 2)
@@ -422,7 +522,9 @@ def calculate_spread_metrics(
         "credit_usd": credit_usd,
         "spread_width": spread_width,
         "max_loss_usd": max_loss_usd,
+        "spread_invalid": spread_invalid,
         "contracts_allowed": contracts_allowed,
+        "risk_tiers": risk_tiers,
         "profit_target_usd": profit_target_usd,
         "stop_loss_close_price": round(credit_per_share * (1 + config.STOP_LOSS_MULTIPLIER), 2),
         "stop_loss_usd": stop_loss_usd,

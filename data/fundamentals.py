@@ -26,7 +26,7 @@ def get_fundamentals(ticker: str) -> Dict[str, Any]:
     Fetch fundamental data for a ticker from yfinance.
 
     Returns dict with: sector, market_cap, pe_ratio, beta, earnings_date,
-    dividend_yield, short_float, description.
+    dividend_yield, short_float, balance-sheet health, growth, and analyst trend.
     """
     cache_key = f"fundamentals_{ticker}"
     if cache_key in _cache:
@@ -42,6 +42,14 @@ def get_fundamentals(ticker: str) -> Dict[str, Any]:
         "beta": None,
         "dividend_yield": None,
         "short_float": None,
+        "debt_to_equity": None,
+        "current_ratio": None,
+        "profit_margin": None,
+        "operating_margin": None,
+        "revenue_growth": None,
+        "earnings_growth": None,
+        "free_cashflow": None,
+        "analyst_recommendation": None,
         "earnings_date": None,
         "description": None,
         "is_etf": False,
@@ -63,6 +71,14 @@ def get_fundamentals(ticker: str) -> Dict[str, Any]:
         result["beta"] = info.get("beta")
         result["dividend_yield"] = info.get("dividendYield")
         result["short_float"] = info.get("shortPercentOfFloat")
+        result["debt_to_equity"] = info.get("debtToEquity")
+        result["current_ratio"] = info.get("currentRatio")
+        result["profit_margin"] = info.get("profitMargins")
+        result["operating_margin"] = info.get("operatingMargins")
+        result["revenue_growth"] = info.get("revenueGrowth")
+        result["earnings_growth"] = info.get("earningsGrowth")
+        result["free_cashflow"] = info.get("freeCashflow")
+        result["analyst_recommendation"] = info.get("recommendationKey")
         result["description"] = (info.get("longBusinessSummary") or "")[:300]
 
         logger.debug(f"[fundamentals] Fetched data for {ticker}")
