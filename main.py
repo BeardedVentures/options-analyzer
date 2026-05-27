@@ -703,7 +703,8 @@ def _apply_sector_limit(qualified_trades: List[Dict]) -> List[Dict]:
     return kept
 
 
-def run_scan(session_type: str) -> None:    ts = now_et()
+def run_scan(session_type: str) -> None:
+    ts = now_et()
     check_session_window(session_type, ts)
 
     tickers = [w["ticker"].upper() for w in config.WATCHLIST]
