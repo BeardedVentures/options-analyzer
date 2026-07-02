@@ -718,6 +718,9 @@ def run_scan(session_type: str) -> None:
         "mode": "yfinance_only",
         "reason": "POLYGON_API_KEY not set — using yfinance fallback",
     }
+    logger.info(
+        f"[scan] Data source mode={source_health.get('mode')} healthy={source_health.get('healthy')} reason={source_health.get('reason')}"
+    )
     if not source_health.get("healthy", False):
         logger.warning(
             f"[scan] Data source probe degraded: mode={source_health.get('mode')} reason={source_health.get('reason')}"
