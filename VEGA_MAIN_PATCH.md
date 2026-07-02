@@ -1,4 +1,4 @@
-# main.py — WOLF Ingest Patch
+# main.py — VEGA Ingest Patch
 
 Apply these two changes to `options_intelligence/main.py` to enable JARVIS ingest.
 
@@ -9,12 +9,12 @@ Apply these two changes to `options_intelligence/main.py` to enable JARVIS inges
 After the existing imports block (around line 17), add:
 
 ```python
-# WOLF: JARVIS integration (non-blocking — scan completes even if tower unreachable)
+# VEGA: JARVIS integration (non-blocking — scan completes even if tower unreachable)
 try:
-    from wolf_ingest import post_to_jarvis
-    WOLF_INGEST_ENABLED = True
+    from vega_ingest import post_to_jarvis
+    VEGA_INGEST_ENABLED = True
 except ImportError:
-    WOLF_INGEST_ENABLED = False
+    VEGA_INGEST_ENABLED = False
 ```
 
 ---
@@ -24,8 +24,8 @@ except ImportError:
 In `run_scan()`, after `append_scan_log(log_dir, scan_entry)` (around line 497), add:
 
 ```python
-    # ── WOLF: Push scan results to JARVIS tower ──────────────────────────
-    if WOLF_INGEST_ENABLED:
+    # ── VEGA: Push scan results to JARVIS tower ──────────────────────────
+    if VEGA_INGEST_ENABLED:
         # Read tipsheet HTML if available
         tipsheet_html = None
         if output_path and Path(output_path).exists():
@@ -57,4 +57,4 @@ In `run_scan()`, after `append_scan_log(log_dir, scan_entry)` (around line 497),
   completes, logs locally, and emails normally. Zero risk to existing functionality.
 - The `JARVIS_HOST` env variable must be set in GitHub Secrets (or `.env`).
 - See networking options for reaching the home tower from GitHub Actions in the
-  WOLF Integration Review document.
+  VEGA Integration Review document.

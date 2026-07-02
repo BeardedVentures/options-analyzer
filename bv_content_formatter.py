@@ -1,7 +1,7 @@
 """
 bv_content_formatter.py — BeardedVentures Social Media Content Generator
 
-Reads a WOLF scan result and produces ready-to-review social media posts
+Reads a VEGA scan result and produces ready-to-review social media posts
 for the BeardedVentures trading channel.
 
 TWO INPUT MODES:
@@ -168,7 +168,7 @@ def generate_market_context_post(scan: Dict) -> Dict:
 
     # Short version (Twitter/X — target ~240 chars)
     short = (
-        f"{bias_emoji} WOLF {session} Scan | {date_display}\n\n"
+        f"{bias_emoji} VEGA {session} Scan | {date_display}\n\n"
         f"{spy_txt}{vix_txt}\n\n"
         f"Scanned {tickers_scanned} tickers → {n_qualified} qualified setup(s).\n\n"
         f"{DISCLAIMER_SHORT}"
@@ -189,7 +189,7 @@ def generate_market_context_post(scan: Dict) -> Dict:
             rejection_note = f"\n📊 Filter insight: {insight}\n"
 
     long = (
-        f"{bias_emoji} WOLF {session} Scan — {date_display}\n\n"
+        f"{bias_emoji} VEGA {session} Scan — {date_display}\n\n"
         f"Market conditions:\n"
         f"• {spy_txt.strip() or 'SPY data pending'}\n"
         f"• {vix_txt}\n"
@@ -291,7 +291,7 @@ def generate_setup_highlight_post(scan: Dict) -> Optional[Dict]:
             )
 
         short = (
-            f"📋 WOLF Setup | {ticker} — {date_display}\n\n"
+            f"📋 VEGA Setup | {ticker} — {date_display}\n\n"
             f"{rec_emoji} {recommendation} | Edge {_format_edge_score(edge_score)}\n"
             f"{strategy} {spread_line}\n"
             f"Credit: {credit_line}\n"
@@ -300,7 +300,7 @@ def generate_setup_highlight_post(scan: Dict) -> Optional[Dict]:
         )
 
         long = (
-            f"📋 WOLF Setup Highlight — {ticker} | {date_display}\n\n"
+            f"📋 VEGA Setup Highlight — {ticker} | {date_display}\n\n"
             f"{rec_emoji} Recommendation: {recommendation}\n"
             f"Strategy: {strategy}\n"
             f"Structure: {spread_line} exp {expiration} ({dte}d)\n"
@@ -311,7 +311,7 @@ def generate_setup_highlight_post(scan: Dict) -> Optional[Dict]:
             f"• {pop_line}\n"
             f"• Trend: {trend} | RSI: {rsi:.0f}\n"
             f"• Edge Score: {_format_edge_score(edge_score)}\n\n"
-            f"This is the kind of setup WOLF is built to find — "
+            f"This is the kind of setup VEGA is built to find — "
             f"IV elevated above realized vol, probability edge confirmed historically, "
             f"trend aligned. Not every day has one. Today it does.\n\n"
             f"{DISCLAIMER}"
@@ -324,20 +324,20 @@ def generate_setup_highlight_post(scan: Dict) -> Optional[Dict]:
         others_line = f" Also watching: {', '.join(others)}." if others else ""
 
         short = (
-            f"📋 WOLF Top Setup | {date_display}\n\n"
+            f"📋 VEGA Top Setup | {date_display}\n\n"
             f"${ticker} cleared all filters — Edge Score {_format_edge_score(edge_score)}\n"
             f"{n_qualified} total qualified today.{others_line}\n\n"
             f"{DISCLAIMER_SHORT}"
         )
 
         long = (
-            f"📋 WOLF Scan Highlight — {date_display}\n\n"
+            f"📋 VEGA Scan Highlight — {date_display}\n\n"
             f"Top setup today: ${ticker}\n"
             f"Edge Score: {_format_edge_score(edge_score)}\n\n"
             f"{n_qualified} setup(s) cleared all quantitative filters today "
             f"(IV rank, VRP edge, probability of profit, technicals, news sentiment).\n"
             f"{others_line}\n\n"
-            f"WOLF runs on a systematic model — no gut calls. "
+            f"VEGA runs on a systematic model — no gut calls. "
             f"Every ticker passes the same rules every day.\n\n"
             f"{DISCLAIMER}"
         )
@@ -403,7 +403,7 @@ def generate_educational_post(scan: Dict) -> Dict:
     # Educational content library
     lessons = {
         "IV_RANK": {
-            "hook": "Why WOLF skipped {tickers} today 📊",
+            "hook": "Why VEGA skipped {tickers} today 📊",
             "body": (
                 "IV Rank was too low.\n\n"
                 "IV Rank tells you where current implied volatility sits "
@@ -427,7 +427,7 @@ def generate_educational_post(scan: Dict) -> Dict:
                 "Negative VRP means the opposite: options are priced BELOW "
                 "what the stock has actually moved. Selling in that environment "
                 "means collecting less than fair value.\n\n"
-                "WOLF requires positive VRP before any trade qualifies. "
+                "VEGA requires positive VRP before any trade qualifies. "
                 "No edge = no trade. Simple."
             ),
             "cta": "VRP is one of the most overlooked edges in retail options. Follow for more. 👇",
@@ -438,7 +438,7 @@ def generate_educational_post(scan: Dict) -> Dict:
                 "A wide bid/ask spread is a hidden tax on every options trade.\n\n"
                 "Example: If the bid is $0.90 and the ask is $1.20, "
                 "you're starting underwater the moment you fill.\n\n"
-                "WOLF requires:\n"
+                "VEGA requires:\n"
                 "• Volume ≥ 100 OR open interest ≥ 500 at the target strike\n"
                 "• Reasonable bid/ask spread\n\n"
                 "Retail traders lose millions every year on illiquid options. "
@@ -455,18 +455,18 @@ def generate_educational_post(scan: Dict) -> Dict:
                 "which is what the market THINKS will happen.\n\n"
                 "True POP uses actual historical price distributions: "
                 "how often has this stock moved past this strike over the same time period?\n\n"
-                "WOLF requires True POP ≥ 72%. Several tickers today "
+                "VEGA requires True POP ≥ 72%. Several tickers today "
                 "looked great on delta but failed on historical probability.\n\n"
                 "The model doesn't care about narratives. Only evidence."
             ),
             "cta": "True POP > delta shortcut. Every time. 👇",
         },
         "NEWS_BLOCK": {
-            "hook": "WOLF blocked {tickers} on news today 📰",
+            "hook": "VEGA blocked {tickers} on news today 📰",
             "body": (
                 "Selling premium before a major news catalyst is a coin flip — "
                 "except the coin is weighted against you.\n\n"
-                "WOLF scans news sentiment for every ticker on every scan. "
+                "VEGA scans news sentiment for every ticker on every scan. "
                 "If there's a blocking event (pending earnings, FDA decision, "
                 "merger announcement, or strongly negative macro signal), "
                 "the ticker gets pulled regardless of how good the setup looks.\n\n"
@@ -474,12 +474,12 @@ def generate_educational_post(scan: Dict) -> Dict:
                 "through your short strike overnight.\n\n"
                 "Discipline means skipping good setups at bad times."
             ),
-            "cta": "Risk management > setup quality. Follow for daily WOLF updates. 👇",
+            "cta": "Risk management > setup quality. Follow for daily VEGA updates. 👇",
         },
         "NO_STRIKE": {
             "hook": "Why we don't force trades that don't fit 🎯",
             "body": (
-                "Today WOLF couldn't find a valid strike for some tickers.\n\n"
+                "Today VEGA couldn't find a valid strike for some tickers.\n\n"
                 "Our rules:\n"
                 "• Short strike must be ≥ 3% OTM from current price\n"
                 "• Delta must be between 0.15 and 0.30\n"
@@ -495,9 +495,9 @@ def generate_educational_post(scan: Dict) -> Dict:
 
     # Default educational content if no specific rejection
     default_lesson = {
-        "hook": f"How WOLF screens options every market day 🔍",
+        "hook": f"How VEGA screens options every market day 🔍",
         "body": (
-            "Every morning and close, WOLF runs 13 tickers through a 5-layer filter:\n\n"
+            "Every morning and close, VEGA runs 13 tickers through a 5-layer filter:\n\n"
             "1️⃣ IV Rank ≥ 45 — only trade elevated volatility\n"
             "2️⃣ Positive VRP — implied vol must exceed realized vol\n"
             "3️⃣ True POP ≥ 72% — historical probability, not delta shortcut\n"
@@ -526,7 +526,7 @@ def generate_educational_post(scan: Dict) -> Dict:
         f"{lesson['body']}\n\n"
         f"{lesson['cta']}\n\n"
         f"—\n"
-        f"WOLF scans {len(scan.get('tickers_scanned', []))} tickers every market day. "
+        f"VEGA scans {len(scan.get('tickers_scanned', []))} tickers every market day. "
         f"No opinions. Just data.\n\n"
         f"{DISCLAIMER}"
     )
@@ -607,7 +607,7 @@ def write_txt(package: Dict, output_dir: Path) -> Path:
     path = output_dir / filename
 
     lines = [
-        f"BEARDEDVENTURES — WOLF Content Package",
+        f"BEARDEDVENTURES — VEGA Content Package",
         f"Generated: {package['generated_at']}",
         f"Scan: {package['scan_timestamp']} | Session: {package['session_type'].upper()}",
         f"Tickers: {package['scan_summary']['tickers_scanned']} scanned | "
@@ -677,10 +677,10 @@ def load_from_stdin() -> Dict:
 
 
 def load_from_jarvis(host: str) -> Dict:
-    """Fetch the latest scan from JARVIS /wolf/latest endpoint."""
+    """Fetch the latest scan from JARVIS /vega/latest endpoint."""
     if not REQUESTS_AVAILABLE:
         raise RuntimeError("requests library not available — pip install requests")
-    url = f"{host.rstrip('/')}/wolf/latest"
+    url = f"{host.rstrip('/')}/vega/latest"
     resp = requests.get(url, timeout=10)
     resp.raise_for_status()
     data = resp.json()
@@ -694,7 +694,7 @@ def load_from_jarvis(host: str) -> Dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BeardedVentures WOLF → Social Media Content Formatter",
+        description="BeardedVentures VEGA → Social Media Content Formatter",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -724,7 +724,7 @@ def main():
     parser.add_argument(
         "--from-jarvis",
         action="store_true",
-        help="Fetch latest scan from JARVIS tower via /wolf/latest",
+        help="Fetch latest scan from JARVIS tower via /vega/latest",
     )
     parser.add_argument(
         "--jarvis-host",

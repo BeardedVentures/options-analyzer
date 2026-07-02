@@ -1,8 +1,8 @@
 # BeardedVentures Content Formatter
 
-`bv_content_formatter.py` — WOLF scan → social media posts
+`bv_content_formatter.py` — VEGA scan → social media posts
 
-Converts each WOLF scan result into 3 ready-to-review social posts for the BeardedVentures trading channel. Run after every scan, manually or via n8n.
+Converts each VEGA scan result into 3 ready-to-review social posts for the BeardedVentures trading channel. Run after every scan, manually or via n8n.
 
 ---
 
@@ -96,7 +96,7 @@ echo '{{ $json.body }}' | python bv_content_formatter.py --stdin
 
 Once the `/build-queue` action bridge exists:
 
-1. WOLF scan completes → POSTs to `/vega/ingest`
+1. VEGA scan completes → POSTs to `/vega/ingest`
 2. n8n VEGA ingest node fires → also calls formatter
 3. Formatter writes JSON to `output/social_content/`
 4. Review node (optional): route JSON to JARVIS `/chat` for approval

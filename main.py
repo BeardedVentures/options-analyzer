@@ -712,15 +712,15 @@ def run_scan(session_type: str) -> None:
 
     logger.info(f"Starting {session_type} scan for {len(tickers)} tickers")
 
-    tradier_health = fetcher.validate_tradier_connection("SPY") if config.TRADIER_API_KEY else {
+    source_health = fetcher.validate_polygon_connection("SPY") if config.POLYGON_API_KEY else {
         "enabled": False,
         "healthy": True,
-        "mode": "disabled",
-        "reason": "TRADIER_API_KEY not set",
+        "mode": "yfinance_only",
+        "reason": "POLYGON_API_KEY not set — using yfinance fallback",
     }
-    if not tradier_health.get("healthy", False):
+    if not source_health.get("healthy", False):
         logger.warning(
-            f"[scan] Tradier probe degraded: mode={tradier_health.get('mode')} reason={tradier_health.get('reason')}"
+            f"[scan] Data source probe degraded: mode={source_health.get('mode')} reason={source_health.get('reason')}"
         )
 
     market_context = build_market_context()
@@ -869,7 +869,7 @@ def run_scan(session_type: str) -> None:
         "regime_flag": regime["regime_flag"],
         "regime_note": regime["regime_note"],
         "source_health": {
-            "tradier": tradier_health,
+            "polygon": source_health,
         },
         "shadow_run": shadow_run,
         "shadow_evaluations": shadow_evaluations,
@@ -879,7 +879,7 @@ def run_scan(session_type: str) -> None:
     logger.info(f"Scan complete. Tip sheet saved to {output_path}")
 
     # ── VEGA: Push scan results to JARVIS tower ──────────────────────────
-    if VEGA_INGEST_ENABLED and tradier_health.get("healthy", False):
+    if VEGA_INGEST_ENABLED and source_health.get("healthy", False):
         # Read tipsheet HTML if available
         tipsheet_html = None
         if output_path and Path(output_path).exists():

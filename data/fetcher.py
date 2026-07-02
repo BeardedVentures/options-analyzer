@@ -1,13 +1,14 @@
 """
-data/fetcher.py — All API calls and data retrieval.
+data/fetcher.py -- All API calls and data retrieval.
 
 Data source priority:
-  1. yfinance (primary, free, no key required)
-  2. Tradier API (secondary, free sandbox tier, better Greeks)
+  1. Polygon.io (primary, free tier, 15-min delayed, real Greeks)
+  2. yfinance (fallback, free, no key required, BS-calculated Greeks)
   3. NewsAPI (news headlines)
+  4. Tradier API (legacy -- inactive, kept for reference)
 
 All functions cache results for the session to avoid redundant API calls.
-All functions degrade gracefully — log and continue, never crash.
+All functions degrade gracefully -- log and continue, never crash.
 """
 
 import time
@@ -40,7 +41,7 @@ MIN_CALL_INTERVAL = 0.1   # minimum seconds between any API call
 
 
 def _rate_limit():
-    """Simple rate limiter — sleep between calls."""
+    """Simple rate limiter -- sleep between calls."""
     time.sleep(RATE_LIMIT_DELAY)
 
 
@@ -69,9 +70,46 @@ def get_api_call_log() -> List[Dict]:
 
 
 def clear_cache():
-    """Clear session cache — call at start of each scan."""
+    """Clear session cache -- call at start of each scan."""
     _cache.clear()
     _log_api_call.calls = []
+
+
+# ─────────────────────────────────────────────
+# DATA SOURCE HEALTH CHECKS
+# ─────────────────────────────────────────────
+
+def validate_polygon_connection(symbol: str = "SPY") -> Dict[str, Any]:
+    """Probe Polygon.io free tier and return a health summary."""
+    if not config.POLYGON_API_KEY:
+        return {
+            "enabled": False,
+            "healthy": True,   # no key = graceful yfinance fallback, not a failure
+            "mode": "yfinance_only",
+            "reason": "POLYGON_API_KEY not set -- using yfinance fallback",
+        }
+
+    health = {
+        "enabled": True,
+        "mode": "polygon_delayed_15m",
+        "healthy": False,
+        "reason": None,
+    }
+    try:
+        r = requests.get(
+            f"https://api.polygon.io/v3/snapshot/options/{symbol}",
+            params={"limit": 1, "contract_type": "put", "apiKey": config.POLYGON_API_KEY},
+            timeout=10,
+        )
+        body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        if r.status_code == 200 and body.get("status") in ("OK", "DELAYED"):
+            health["healthy"] = True
+            health["reason"] = "ok"
+        else:
+            health["reason"] = f"HTTP {r.status_code}: {body.get('message', body.get('error', ''))}"
+    except Exception as exc:
+        health["reason"] = str(exc)
+    return health
 
 
 def validate_tradier_connection(symbol: str = "SPY") -> Dict[str, Any]:
@@ -295,7 +333,7 @@ def _parse_yfinance_options(ticker: str, current_price: float,
 
 def _parse_tradier_options(ticker: str, current_price: float,
                            min_dte: int, max_dte: int) -> List[Dict]:
-    """Fetch options with Greeks from Tradier API."""
+    """Fetch options with Greeks from Tradier API (legacy)."""
     if not config.TRADIER_API_KEY:
         return []
 
@@ -307,7 +345,6 @@ def _parse_tradier_options(ticker: str, current_price: float,
     }
 
     last_trade_date = None
-    # Step 1: get expiration dates
     today = datetime.now().date()
     records = []
 
@@ -381,6 +418,102 @@ def _parse_tradier_options(ticker: str, current_price: float,
     return records
 
 
+def _parse_polygon_options(ticker: str, current_price: float,
+                            min_dte: int, max_dte: int) -> List[Dict]:
+    """
+    Fetch puts from Polygon /v3/snapshot/options -- real Greeks, 15-min delayed.
+    Uses cursor-based pagination; caps at 10 pages (~2,500 contracts) per ticker.
+    """
+    if not config.POLYGON_API_KEY:
+        return []
+
+    today = datetime.now().date()
+    from_date = today + timedelta(days=min_dte)
+    to_date = today + timedelta(days=max_dte)
+
+    base_url = f"https://api.polygon.io/v3/snapshot/options/{ticker}"
+    params = {
+        "contract_type": "put",
+        "expiration_date.gte": from_date.isoformat(),
+        "expiration_date.lte": to_date.isoformat(),
+        "limit": 250,
+        "apiKey": config.POLYGON_API_KEY,
+    }
+
+    records: List[Dict] = []
+    pages = 0
+
+    while True:
+        try:
+            r = requests.get(base_url, params=params, timeout=15)
+            if r.status_code != 200:
+                _log_api_call("polygon.options", ticker, False, f"HTTP {r.status_code}")
+                return records
+            data = r.json()
+            pages += 1
+
+            for opt in data.get("results", []) or []:
+                details    = opt.get("details") or {}
+                greeks     = opt.get("greeks") or {}
+                last_quote = opt.get("last_quote") or {}
+                day_data   = opt.get("day") or {}
+
+                exp_str = details.get("expiration_date", "")
+                if not exp_str:
+                    continue
+                exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
+                dte = (exp_date - today).days
+                if not (min_dte <= dte <= max_dte):
+                    continue
+
+                strike = float(details.get("strike_price", 0) or 0)
+                if strike <= 0:
+                    continue
+
+                bid = float(last_quote.get("bid", 0) or 0)
+                ask = float(last_quote.get("ask", 0) or 0)
+                mid = float(last_quote.get("midpoint", 0) or 0)
+                if mid == 0 and (bid + ask) > 0:
+                    mid = round((bid + ask) / 2, 2)
+                if bid == 0 and ask == 0 and mid == 0:
+                    continue
+
+                records.append({
+                    "ticker":          ticker,
+                    "type":            "put",
+                    "strike":          strike,
+                    "expiration":      exp_str,
+                    "last_trade_date": _last_trade_date(exp_date).isoformat(),
+                    "dte":             dte,
+                    "bid":             bid,
+                    "ask":             ask,
+                    "mid":             mid,
+                    "iv":              float(opt.get("implied_volatility", 0) or 0),
+                    "volume":          int(day_data.get("volume", 0) or 0),
+                    "open_interest":   int(opt.get("open_interest", 0) or 0),
+                    "delta":           float(greeks.get("delta", 0) or 0),
+                    "theta":           float(greeks.get("theta", 0) or 0),
+                    "gamma":           float(greeks.get("gamma", 0) or 0),
+                    "vega":            float(greeks.get("vega", 0) or 0),
+                })
+
+            next_url = data.get("next_url")
+            if not next_url or pages >= 10:
+                break
+            # Follow cursor -- apiKey must be re-appended
+            base_url = next_url
+            params = {"apiKey": config.POLYGON_API_KEY}
+            time.sleep(0.12)   # stay within free-tier rate limit (5 req/min)
+
+        except Exception as e:
+            _log_api_call("polygon.options", ticker, False, str(e))
+            return records
+
+    _log_api_call("polygon.options", ticker, len(records) > 0)
+    logger.debug(f"[fetcher] Polygon options for {ticker}: {len(records)} puts in DTE {min_dte}-{max_dte} ({pages} pages)")
+    return records
+
+
 def _quality_filter_options(records: List[Dict], ticker: str, source: str) -> List[Dict]:
     """
     Filter out stale or unusable option records from the yfinance fallback.
@@ -388,7 +521,7 @@ def _quality_filter_options(records: List[Dict], ticker: str, source: str) -> Li
     Removes:
       - Records with both bid=0 AND ask=0 (stale / no market)
       - Records with ask < bid (data error)
-      - Records with impossibly wide bid/ask spread (> 80% of mid — stale price)
+      - Records with impossibly wide bid/ask spread (> 80% of mid -- stale price)
       - Records with zero volume AND zero open interest (no market activity)
 
     Logs a warning if more than 30% of records are filtered out.
@@ -404,16 +537,16 @@ def _quality_filter_options(records: List[Dict], ticker: str, source: str) -> Li
         volume = int(opt.get("volume", 0) or 0)
         oi = int(opt.get("open_interest", 0) or 0)
 
-        # Both sides zero — no market / stale
+        # Both sides zero -- no market / stale
         if bid == 0 and ask == 0:
             continue
-        # Crossed market — data error
+        # Crossed market -- data error
         if ask > 0 and bid > 0 and ask < bid:
             continue
-        # Impossibly wide spread — stale pricing (> 80% of mid)
+        # Impossibly wide spread -- stale pricing (> 80% of mid)
         if mid > 0 and (ask - bid) / mid > 0.80:
             continue
-        # No market activity at all — liquidity concern
+        # No market activity at all -- liquidity concern
         if volume == 0 and oi == 0:
             continue
 
@@ -436,7 +569,10 @@ def get_options_chain(ticker: str,
                       max_dte: int = None) -> List[Dict]:
     """
     Get options chain for a ticker within the DTE range.
-    Tries Tradier first (has real Greeks), falls back to yfinance + BS delta.
+
+    Priority:
+      1. Polygon.io -- real Greeks, 15-min delayed, free tier
+      2. yfinance   -- fallback, Black-Scholes Greeks
 
     Returns list of standardized option dicts.
     """
@@ -455,13 +591,14 @@ def get_options_chain(ticker: str,
         logger.error(f"[fetcher] Cannot get options for {ticker}: no current price")
         return []
 
-    # Try Tradier first
-    records = []
-    if config.TRADIER_API_KEY:
-        records = _parse_tradier_options(ticker, current_price, min_dte, max_dte)
+    # Tier 1: Polygon.io (real Greeks, 15-min delayed)
+    records: List[Dict] = []
+    if config.POLYGON_API_KEY:
+        records = _parse_polygon_options(ticker, current_price, min_dte, max_dte)
 
-    # Fall back to yfinance
+    # Tier 2: yfinance fallback (BS-calculated Greeks)
     if not records:
+        logger.debug(f"[fetcher] Polygon returned no data for {ticker} -- falling back to yfinance")
         records = _parse_yfinance_options(ticker, current_price, min_dte, max_dte)
         records = _quality_filter_options(records, ticker, "yfinance")
         _log_api_call("yfinance.options", ticker, len(records) > 0)
@@ -591,9 +728,9 @@ def get_vix() -> Dict:
         return result
 
 
-# ─────────────────────────────────────────────
+# -------------------------------------------------
 # NEWS
-# ─────────────────────────────────────────────
+# -------------------------------------------------
 
 def get_news(ticker: str, hours: int = 24) -> List[Dict]:
     """

@@ -230,6 +230,11 @@ EOD_MIN_VOLUME_RATIO = 1.5        # Volume must be 1.5x 20-day average
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY    = os.environ.get("OPENAI_API_KEY", "")
 NEWS_API_KEY      = os.environ.get("NEWS_API_KEY", "")
+POLYGON_API_KEY   = os.environ.get("POLYGON_API_KEY", "")   # Free tier — 15-min delayed options data
+
+# ── Tradier (legacy — inactive; kept for reference) ──────────────────────
+# Tradier requires a funded brokerage account for live API access.
+# VEGA now uses Polygon.io as primary data source.
 TRADIER_API_KEY   = os.environ.get("TRADIER_API_KEY", "")
 TRADIER_SANDBOX   = os.environ.get("TRADIER_SANDBOX", "true").lower() == "true"
 

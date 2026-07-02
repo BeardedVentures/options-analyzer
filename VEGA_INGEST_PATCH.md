@@ -46,4 +46,4 @@ except ImportError:
 - `post_to_jarvis` is non-blocking. Scan completes even if JARVIS tower is unreachable.
 - `JARVIS_HOST` must be set to the tower's Tailscale IP in GitHub Secrets.
 - `TRADIER_SANDBOX` must be `false` in GitHub Secrets for real options data.
-- Renamed from `WOLF_MAIN_PATCH.md` — patch is complete, this file is the record.
+- Renamed from `VEGA_MAIN_PATCH.md` — patch is complete, this file is the record.
