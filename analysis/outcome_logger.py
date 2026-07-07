@@ -88,6 +88,11 @@ def record_modeled_trades(scan_ts: str, session_type: str, qualified_trades: Lis
                 # Modeled expectations (what the engine believed at scan time)
                 "modeled_credit_per_share": t.get("credit_per_share"),
                 "modeled_credit_usd": t.get("credit_usd"),
+                "modeled_net_credit_per_share": t.get("net_credit_per_share"),
+                "modeled_net_credit_usd": t.get("net_credit_usd"),
+                "estimated_entry_cost_per_contract": t.get("estimated_entry_cost_per_contract"),
+                "estimated_exit_cost_per_contract": t.get("estimated_exit_cost_per_contract"),
+                "estimated_round_trip_cost_per_contract": t.get("estimated_round_trip_cost_per_contract"),
                 "spread_width": t.get("spread_width") or (
                     (t.get("short_strike") or 0) - (t.get("long_strike") or 0)
                 ),
@@ -102,6 +107,8 @@ def record_modeled_trades(scan_ts: str, session_type: str, qualified_trades: Lis
                 # Ground truth (filled in later by you via log_outcome.py)
                 "actual_fill_credit": None,     # real credit per share you collected
                 "exit_price": None,             # spread mark per share when you closed
+                "realized_gross_pl_per_contract": None,
+                "realized_net_pl_per_contract": None,
                 "realized_pl_per_contract": None,
                 "outcome": None,                # win | loss | scratch
                 "exit_reason": None,
@@ -135,7 +142,8 @@ def set_close(trade_id: str, exit_price: float, outcome: str,
               reason: Optional[str] = None) -> bool:
     """
     Close a trade. exit_price = spread mark per share when you exited (what you paid to close).
-    realized P/L per contract = (actual_fill_credit - exit_price) * 100.
+    realized gross P/L per contract = (actual_fill_credit - exit_price) * 100.
+    realized net P/L per contract = gross P/L - estimated round-trip costs.
     Returns True if the id was found.
     """
     rows = _read_all()
@@ -145,7 +153,13 @@ def set_close(trade_id: str, exit_price: float, outcome: str,
             if fill is None:
                 fill = r.get("modeled_credit_per_share") or 0.0
             r["exit_price"] = round(float(exit_price), 2)
-            r["realized_pl_per_contract"] = round((float(fill) - float(exit_price)) * 100, 2)
+            gross_pl = round((float(fill) - float(exit_price)) * 100, 2)
+            est_cost = float(r.get("estimated_round_trip_cost_per_contract") or 0.0)
+            net_pl = round(gross_pl - est_cost, 2)
+            r["realized_gross_pl_per_contract"] = gross_pl
+            r["realized_net_pl_per_contract"] = net_pl
+            # Backward-compatible field now points to net P/L.
+            r["realized_pl_per_contract"] = net_pl
             r["outcome"] = (outcome or "").lower()
             r["exit_reason"] = reason
             r["status"] = "closed"

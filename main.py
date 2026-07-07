@@ -435,6 +435,19 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     profit_target_price = round(metrics.get("credit_per_share", 0) * (1 - config.TARGET_PROFIT_PCT), 2)
 
     trade_type = validation.get("trade_type", "standard_premium")
+    commission_per_contract = float(getattr(config, "COMMISSION_PER_CONTRACT_PER_LEG", 0.65) or 0.0) * 2
+    entry_slippage_ps = float(getattr(config, "ASSUMED_ENTRY_SLIPPAGE_PER_SHARE", 0.02) or 0.0)
+    exit_slippage_ps = float(getattr(config, "ASSUMED_EXIT_SLIPPAGE_PER_SHARE", 0.02) or 0.0)
+    estimated_entry_cost_per_contract = round(entry_slippage_ps * 100 + commission_per_contract, 2)
+    estimated_exit_cost_per_contract = round(exit_slippage_ps * 100 + commission_per_contract, 2)
+    estimated_round_trip_cost_per_contract = round(
+        estimated_entry_cost_per_contract + estimated_exit_cost_per_contract, 2
+    )
+    gross_credit_per_share = float(metrics.get("credit_per_share", 0) or 0.0)
+    net_credit_per_share = round(
+        max(0.0, gross_credit_per_share - entry_slippage_ps - (commission_per_contract / 100.0)), 2
+    )
+    net_credit_usd = round(net_credit_per_share * 100, 2)
 
     trade = {
         "ticker": ticker,
@@ -449,6 +462,11 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "dte": short_put.get("dte"),
         "credit_per_share": metrics.get("credit_per_share"),
         "credit_usd": metrics.get("credit_usd"),
+        "net_credit_per_share": net_credit_per_share,
+        "net_credit_usd": net_credit_usd,
+        "estimated_entry_cost_per_contract": estimated_entry_cost_per_contract,
+        "estimated_exit_cost_per_contract": estimated_exit_cost_per_contract,
+        "estimated_round_trip_cost_per_contract": estimated_round_trip_cost_per_contract,
         "max_loss_usd": metrics.get("max_loss_usd"),
         "contracts_allowed": metrics.get("contracts_allowed"),
         "risk_tiers": metrics.get("risk_tiers", []),
@@ -687,8 +705,11 @@ def _apply_sector_limit(qualified_trades: List[Dict]) -> List[Dict]:
     max_per_sector = getattr(config, "MAX_TRADES_PER_SECTOR", 2)
     exempt = getattr(config, "SECTOR_LIMIT_EXEMPT", {"broad_market"})
     sector_map = getattr(config, "TICKER_SECTORS", {})
+    broad_corr_cap = getattr(config, "MAX_CORRELATED_BROAD_MARKET_TRADES", 1)
+    broad_corr_tickers = getattr(config, "CORRELATED_BROAD_MARKET_TICKERS", {"SPY", "QQQ", "IWM"})
 
     sector_counts: Dict[str, int] = {}
+    broad_corr_count = 0
     kept: List[Dict] = []
     dropped: List[str] = []
 
@@ -697,6 +718,13 @@ def _apply_sector_limit(qualified_trades: List[Dict]) -> List[Dict]:
 
     for trade in sorted_trades:
         ticker = trade.get("ticker", "").upper()
+
+        if ticker in broad_corr_tickers:
+            if broad_corr_count >= broad_corr_cap:
+                dropped.append(f"{ticker} (broad_corr_cap)")
+                continue
+            broad_corr_count += 1
+
         sector = sector_map.get(ticker, "other")
         if sector in exempt:
             kept.append(trade)
@@ -855,7 +883,7 @@ def run_scan(session_type: str) -> None:
 
     weekly_summary = compute_weekly_summary(log_dir, ts) if (session_type == "close" and ts.weekday() == 4) else None
 
-    print("[DEBUG] Calling renderer.render()...")
+    logger.debug("[scan] Calling renderer.render()")
     output_path = renderer.render(
         session_type=session_type,
         qualified_trades=qualified_trades,

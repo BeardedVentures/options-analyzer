@@ -56,6 +56,14 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Restore IV history cache
+        uses: actions/cache@v4
+        with:
+          path: data/iv_history
+          key: vega-iv-history-${{ github.ref_name }}
+          restore-keys: |
+            vega-iv-history-
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 
@@ -113,6 +121,14 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+
+      - name: Restore IV history cache
+        uses: actions/cache@v4
+        with:
+          path: data/iv_history
+          key: vega-iv-history-${{ github.ref_name }}
+          restore-keys: |
+            vega-iv-history-
 
       - name: Install dependencies
         run: pip install -r requirements.txt

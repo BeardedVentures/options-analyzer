@@ -92,6 +92,16 @@ MIN_OPTION_OPEN_INTEREST = 500
 MIN_CREDIT_TO_WIDTH_PCT = 0.15
 
 # ─────────────────────────────────────────────
+# EXECUTION COST MODEL (Gate 1 realism)
+# ─────────────────────────────────────────────
+# Conservative defaults for a 1-contract vertical:
+# - Commission assumed per contract per leg (open and close)
+# - Slippage assumed per share at entry and exit (mark vs. fill friction)
+COMMISSION_PER_CONTRACT_PER_LEG = 0.65  # USD
+ASSUMED_ENTRY_SLIPPAGE_PER_SHARE = 0.02 # USD/share
+ASSUMED_EXIT_SLIPPAGE_PER_SHARE = 0.02  # USD/share
+
+# ─────────────────────────────────────────────
 # RISK TIERS — account-size-agnostic position sizing
 # Each qualified trade is presented with contracts-per-tier so the output
 # serves accounts of any size. The scanner no longer gates on ACCOUNT_BALANCE.
@@ -178,6 +188,11 @@ TRUE_POP_DRIFT_MODE = "risk_free"
 # highest-edge-scoring ones are kept.
 MAX_TRADES_PER_SECTOR = 2        # Max qualified trades surfaced per sector group
 SECTOR_LIMIT_EXEMPT = {"broad_market"}  # These sector keys are never capped
+
+# Additional macro correlation guard: cap simultaneous broad-market exposures
+# across highly correlated index ETFs.
+MAX_CORRELATED_BROAD_MARKET_TRADES = 1
+CORRELATED_BROAD_MARKET_TICKERS = {"SPY", "QQQ", "IWM"}
 
 TICKER_SECTORS: dict = {
     # Broad market — diversified, exempt from cap
