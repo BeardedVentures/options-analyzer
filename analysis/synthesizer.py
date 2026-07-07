@@ -312,7 +312,11 @@ Return this exact JSON structure:
         return fallback
 
     except Exception as e:
-        logger.error(f"[synthesizer] Claude API error: {e}")
+        msg = str(e)
+        if "credit balance is too low" in msg.lower():
+            logger.warning("[synthesizer] Claude credits unavailable — using fallback synthesis")
+        else:
+            logger.error(f"[synthesizer] Claude API error: {e}")
         fallback = _fallback_synthesis(session_type, qualified_trades, market_context, account_balance)
         fallback["source"] = f"claude_api_error: {type(e).__name__}"
         return fallback
