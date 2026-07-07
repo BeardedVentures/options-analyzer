@@ -9113,5 +9113,1787 @@
         "reason": "ok"
       }
     }
+  },
+  {
+    "timestamp": "2026-07-07T09:28:59.031417-04:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [],
+    "rejected_trades": [
+      {
+        "ticker": "SPY",
+        "reason": "No options chain in DTE range",
+        "category": "NO_OPTIONS"
+      },
+      {
+        "ticker": "QQQ",
+        "reason": "No options chain in DTE range",
+        "category": "NO_OPTIONS"
+      },
+      {
+        "ticker": "IWM",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "AMD",
+        "reason": "No options chain in DTE range",
+        "category": "NO_OPTIONS"
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "XLE",
+        "reason": "No options chain in DTE range",
+        "category": "NO_OPTIONS"
+      },
+      {
+        "ticker": "OXY",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      },
+      {
+        "ticker": "KRE",
+        "reason": "No options chain in DTE range",
+        "category": "NO_OPTIONS"
+      },
+      {
+        "ticker": "GDX",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD"
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:28:59.578967"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:28:59.962718"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:00.629610"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:01.242510"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:01.866458"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:02.447428"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:02.830879"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:03.407727"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:03.775666"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:04.392226"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:04.800487"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:05.393440"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:05.811091"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:06.397452"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:06.875162"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:07.454875"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:07.843352"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:08.409284"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:08.781665"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:09.380502"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:09.805018"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:10.356189"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:10.769523"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:11.379788"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:11.786637"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:12.368237"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:12.794348"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:13.374601"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:13.794992"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:15.612758"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": false,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:17.555929"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:17.951943"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:18.591584"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": false,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:20.180400"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:20.600058"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:21.329799"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:22.921920"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:23.336788"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:23.976388"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:25.457856"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:25.854381"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:26.539322"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AMD",
+        "success": false,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:28.168550"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:28.531918"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:29.133634"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:30.656951"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:31.116628"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:31.802712"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:33.310083"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:33.687727"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:34.293850"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:35.879891"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:36.311926"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:37.030505"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:38.640243"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:39.059586"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:39.676701"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "XLE",
+        "success": false,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:41.136458"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:41.571977"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:42.294572"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:43.755662"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:44.152519"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:44.744075"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "KRE",
+        "success": false,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:46.268672"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:46.802025"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:47.470742"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T08:29:48.962803"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\Josh\\AI_OS\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-07-07.html",
+    "account_balance": 500.0,
+    "errors": [],
+    "regime_flag": "LOW_VOL",
+    "regime_note": "LOW VOLATILITY REGIME \u2014 VIX 15.9 is below the minimum edge threshold (16). Premium is cheap; VRP edge is thin. Expect few or no qualifiers. This is correct behavior \u2014 do not chase setups.",
+    "source_health": {
+      "polygon": {
+        "enabled": false,
+        "healthy": true,
+        "mode": "yfinance_only",
+        "reason": "POLYGON_API_KEY not set \u2014 using yfinance fallback"
+      }
+    },
+    "shadow_run": {
+      "run_timestamp": "2026-07-07T09:28:59.031417-04:00",
+      "session_type": "morning",
+      "shadow_enabled": true,
+      "strict_mode_enabled": false,
+      "expected_tickers": 13,
+      "evaluated_tickers": 0,
+      "missing_evals": 13,
+      "would_block_count": 0,
+      "coverage_ratio": 0.0,
+      "missing_ratio": 1.0,
+      "fallback_used_count": 0,
+      "score_min": null,
+      "score_max": null,
+      "score_avg": null,
+      "config_snapshot": {
+        "fundamentals_shadow_mode": true,
+        "fundamentals_strict_block": false,
+        "min_fundamentals_score": 4,
+        "fundamentals_weight": 10
+      }
+    },
+    "shadow_evaluations": [
+      {
+        "ticker": "SPY",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_OPTIONS",
+        "rejection_reason": "No options chain in DTE range",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "QQQ",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_OPTIONS",
+        "rejection_reason": "No options chain in DTE range",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "IWM",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_VALID_SPREAD",
+        "rejection_reason": "No valid same-expiration credit spread found",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "NVDA",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_VALID_SPREAD",
+        "rejection_reason": "No valid same-expiration credit spread found",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "AMD",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_OPTIONS",
+        "rejection_reason": "No options chain in DTE range",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "PLTR",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_VALID_SPREAD",
+        "rejection_reason": "No valid same-expiration credit spread found",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "AAPL",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_VALID_SPREAD",
+        "rejection_reason": "No valid same-expiration credit spread found",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "MSFT",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_VALID_SPREAD",
+        "rejection_reason": "No valid same-expiration credit spread found",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "TSLA",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_VALID_SPREAD",
+        "rejection_reason": "No valid same-expiration credit spread found",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "XLE",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_OPTIONS",
+        "rejection_reason": "No options chain in DTE range",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "OXY",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_VALID_SPREAD",
+        "rejection_reason": "No valid same-expiration credit spread found",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "KRE",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_OPTIONS",
+        "rejection_reason": "No options chain in DTE range",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "GDX",
+        "evaluation_status": "missing",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": null,
+        "fundamentals_reasons": [],
+        "rejection_category": "NO_VALID_SPREAD",
+        "rejection_reason": "No valid same-expiration credit spread found",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-07-07T10:08:58.141553-04:00",
+    "session_type": "morning",
+    "tickers_scanned": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "NVDA",
+      "AMD",
+      "PLTR",
+      "AAPL",
+      "MSFT",
+      "TSLA",
+      "XLE",
+      "OXY",
+      "KRE",
+      "GDX"
+    ],
+    "qualified_trades": [],
+    "rejected_trades": [
+      {
+        "ticker": "SPY",
+        "reason": "IV Rank 30.0 below minimum 45",
+        "category": "IV_RANK",
+        "fundamentals_score": 8,
+        "fundamentals_reasons": [
+          "ETF: diversified fundamentals baseline"
+        ],
+        "fundamentals_blocking": false
+      },
+      {
+        "ticker": "QQQ",
+        "reason": "Negative VRP (-1.7pp) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE",
+        "fundamentals_score": 8,
+        "fundamentals_reasons": [
+          "ETF: diversified fundamentals baseline"
+        ],
+        "fundamentals_blocking": false
+      },
+      {
+        "ticker": "IWM",
+        "reason": "IV Rank 11.5 below minimum 45",
+        "category": "IV_RANK",
+        "fundamentals_score": 8,
+        "fundamentals_reasons": [
+          "ETF: diversified fundamentals baseline"
+        ],
+        "fundamentals_blocking": false
+      },
+      {
+        "ticker": "NVDA",
+        "reason": "IV Rank 34.0 below minimum 45",
+        "category": "IV_RANK",
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "fundamentals_blocking": false
+      },
+      {
+        "ticker": "AMD",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD",
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "fundamentals_blocking": false,
+        "pair_selection_diagnostics": {
+          "short_candidates_count": 24,
+          "top_reasons": [
+            [
+              "short_liquidity_below_floor",
+              150
+            ],
+            [
+              "short_quote_not_tradeable",
+              33
+            ],
+            [
+              "short_delta_too_high",
+              15
+            ],
+            [
+              "long_liquidity_below_floor",
+              5
+            ],
+            [
+              "long_quote_not_tradeable",
+              2
+            ]
+          ]
+        }
+      },
+      {
+        "ticker": "PLTR",
+        "reason": "IV Rank 34.5 below minimum 45",
+        "category": "IV_RANK",
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "fundamentals_blocking": false
+      },
+      {
+        "ticker": "AAPL",
+        "reason": "Negative VRP (-2.4pp) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE",
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "fundamentals_blocking": false
+      },
+      {
+        "ticker": "MSFT",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE",
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "fundamentals_blocking": false
+      },
+      {
+        "ticker": "TSLA",
+        "reason": "IV Rank 17.0 below minimum 45",
+        "category": "IV_RANK",
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "fundamentals_blocking": false
+      },
+      {
+        "ticker": "XLE",
+        "reason": "Edge score below minimum",
+        "category": "EDGE_SCORE",
+        "fundamentals_score": 8,
+        "fundamentals_reasons": [
+          "ETF: diversified fundamentals baseline"
+        ],
+        "fundamentals_blocking": false
+      },
+      {
+        "ticker": "OXY",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD",
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "fundamentals_blocking": false,
+        "pair_selection_diagnostics": {
+          "short_candidates_count": 0,
+          "top_reasons": [
+            [
+              "short_liquidity_below_floor",
+              20
+            ],
+            [
+              "short_quote_not_tradeable",
+              13
+            ],
+            [
+              "short_delta_too_high",
+              8
+            ]
+          ]
+        }
+      },
+      {
+        "ticker": "KRE",
+        "reason": "No valid same-expiration credit spread found",
+        "category": "NO_VALID_SPREAD",
+        "fundamentals_score": 8,
+        "fundamentals_reasons": [
+          "ETF: diversified fundamentals baseline"
+        ],
+        "fundamentals_blocking": false,
+        "pair_selection_diagnostics": {
+          "short_candidates_count": 2,
+          "top_reasons": [
+            [
+              "short_quote_not_tradeable",
+              18
+            ],
+            [
+              "short_liquidity_below_floor",
+              10
+            ],
+            [
+              "long_quote_not_tradeable",
+              9
+            ],
+            [
+              "short_delta_too_high",
+              4
+            ],
+            [
+              "short_buffer_too_tight",
+              1
+            ],
+            [
+              "credit_below_min_usd",
+              1
+            ]
+          ]
+        }
+      },
+      {
+        "ticker": "GDX",
+        "reason": "Negative VRP (-12.0pp) \u2014 options underpriced, no seller edge",
+        "category": "EDGE_SCORE",
+        "fundamentals_score": 8,
+        "fundamentals_reasons": [
+          "ETF: diversified fundamentals baseline"
+        ],
+        "fundamentals_blocking": false
+      }
+    ],
+    "api_calls": [
+      {
+        "source": "yfinance.vix",
+        "ticker": "^VIX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:08:58.756277"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:08:59.171495"
+      },
+      {
+        "source": "newsapi.macro",
+        "ticker": "MACRO",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:08:59.863172"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:00.455275"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:00.989493"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:01.765864"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:02.182115"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:02.787429"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:03.161928"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:03.759338"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:04.341884"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:04.938068"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:05.323644"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:05.906732"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:06.327999"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:06.909657"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:07.290851"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:07.843709"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:08.250389"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:08.878518"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:09.271391"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:09.959052"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:10.331675"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:10.953764"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:11.382237"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:11.997790"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:12.370309"
+      },
+      {
+        "source": "newsapi",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:12.936896"
+      },
+      {
+        "source": "yfinance.news",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:13.318415"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:15.278938"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "SPY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:17.409755"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:17.956130"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:18.574766"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "QQQ",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:20.401499"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:20.878130"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:21.677400"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "IWM",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:23.280992"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:23.753381"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:24.511632"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "NVDA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:26.119868"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:26.564017"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:27.280909"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AMD",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:29.127479"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:29.516745"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:30.116412"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "PLTR",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:31.858813"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:32.452157"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:33.094647"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:34.608475"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "AAPL",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:35.014242"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:35.428748"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:36.063792"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:37.611306"
+      },
+      {
+        "source": "yfinance.earnings",
+        "ticker": "MSFT",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:38.041721"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:38.446847"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:39.014245"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "TSLA",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:40.635398"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:41.242164"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:41.975594"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "XLE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:43.452207"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:44.048611"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:44.707384"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "OXY",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:46.210836"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:46.690300"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:47.285462"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "KRE",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:48.842485"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:49.225825"
+      },
+      {
+        "source": "yfinance.price",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:49.868110"
+      },
+      {
+        "source": "yfinance.options",
+        "ticker": "GDX",
+        "success": true,
+        "error": "",
+        "timestamp": "2026-07-07T09:09:51.462564"
+      }
+    ],
+    "tipsheet_file": "C:\\Users\\Josh\\AI_OS\\AI_OS\\projects\\Stock Market Tools\\options_intelligence\\output\\tipsheets\\tipsheet_MORNING_2026-07-07.html",
+    "account_balance": 500.0,
+    "errors": [],
+    "regime_flag": "NORMAL",
+    "regime_note": null,
+    "source_health": {
+      "polygon": {
+        "enabled": false,
+        "healthy": true,
+        "mode": "yfinance_only",
+        "reason": "POLYGON_API_KEY not set \u2014 using yfinance fallback"
+      }
+    },
+    "shadow_run": {
+      "run_timestamp": "2026-07-07T10:08:58.141553-04:00",
+      "session_type": "morning",
+      "shadow_enabled": true,
+      "strict_mode_enabled": false,
+      "expected_tickers": 13,
+      "evaluated_tickers": 13,
+      "missing_evals": 0,
+      "would_block_count": 0,
+      "coverage_ratio": 1.0,
+      "missing_ratio": 0.0,
+      "fallback_used_count": 0,
+      "score_min": 8.0,
+      "score_max": 10.0,
+      "score_avg": 9.08,
+      "config_snapshot": {
+        "fundamentals_shadow_mode": true,
+        "fundamentals_strict_block": false,
+        "min_fundamentals_score": 4,
+        "fundamentals_weight": 10
+      }
+    },
+    "shadow_evaluations": [
+      {
+        "ticker": "SPY",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 8,
+        "fundamentals_reasons": [
+          "ETF: diversified fundamentals baseline"
+        ],
+        "rejection_category": "IV_RANK",
+        "rejection_reason": "IV Rank 30.0 below minimum 45",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "QQQ",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 8,
+        "fundamentals_reasons": [
+          "ETF: diversified fundamentals baseline"
+        ],
+        "rejection_category": "EDGE_SCORE",
+        "rejection_reason": "Negative VRP (-1.7pp) \u2014 options underpriced, no seller edge",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "IWM",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 8,
+        "fundamentals_reasons": [
+          "ETF: diversified fundamentals baseline"
+        ],
+        "rejection_category": "IV_RANK",
+        "rejection_reason": "IV Rank 11.5 below minimum 45",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "NVDA",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "rejection_category": "IV_RANK",
+        "rejection_reason": "IV Rank 34.0 below minimum 45",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "AMD",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "rejection_category": "NO_VALID_SPREAD",
+        "rejection_reason": "No valid same-expiration credit spread found",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "PLTR",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "rejection_category": "IV_RANK",
+        "rejection_reason": "IV Rank 34.5 below minimum 45",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "AAPL",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "rejection_category": "EDGE_SCORE",
+        "rejection_reason": "Negative VRP (-2.4pp) \u2014 options underpriced, no seller edge",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "MSFT",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "rejection_category": "EDGE_SCORE",
+        "rejection_reason": "Edge score below minimum",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "TSLA",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "rejection_category": "IV_RANK",
+        "rejection_reason": "IV Rank 17.0 below minimum 45",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "XLE",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 8,
+        "fundamentals_reasons": [
+          "ETF: diversified fundamentals baseline"
+        ],
+        "rejection_category": "EDGE_SCORE",
+        "rejection_reason": "Edge score below minimum",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "OXY",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 10,
+        "fundamentals_reasons": [
+          "No major fundamentals stress flags"
+        ],
+        "rejection_category": "NO_VALID_SPREAD",
+        "rejection_reason": "No valid same-expiration credit spread found",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "KRE",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 8,
+        "fundamentals_reasons": [
+          "ETF: diversified fundamentals baseline"
+        ],
+        "rejection_category": "NO_VALID_SPREAD",
+        "rejection_reason": "No valid same-expiration credit spread found",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      },
+      {
+        "ticker": "GDX",
+        "evaluation_status": "evaluated",
+        "qualified": false,
+        "would_block": false,
+        "fundamentals_score": 8,
+        "fundamentals_reasons": [
+          "ETF: diversified fundamentals baseline"
+        ],
+        "rejection_category": "EDGE_SCORE",
+        "rejection_reason": "Negative VRP (-12.0pp) \u2014 options underpriced, no seller edge",
+        "edge_score": null,
+        "vrp": null,
+        "iv_rank": null,
+        "true_pop": null,
+        "news_sentiment": null,
+        "component_breakdown": null
+      }
+    ]
   }
 ]

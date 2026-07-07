@@ -166,8 +166,18 @@ def select_long_put_contract(options: List[Dict], short_strike: float, short_exp
     return candidates[0]
 
 
-def select_bull_put_pair(options: List[Dict], current_price: float, ticker: str) -> Optional[Tuple[Dict, Dict, Dict]]:
+def select_bull_put_pair(
+    options: List[Dict],
+    current_price: float,
+    ticker: str,
+    diagnostics: Optional[Dict] = None,
+) -> Optional[Tuple[Dict, Dict, Dict]]:
     """Pick a short/long put pair that forms a valid same-expiration credit spread."""
+    diag_counts: Dict[str, int] = {}
+
+    def _bump(reason: str) -> None:
+        diag_counts[reason] = diag_counts.get(reason, 0) + 1
+
     def _quote_is_tradeable(opt: Dict) -> bool:
         bid = float(opt.get("bid", 0) or 0)
         ask = float(opt.get("ask", 0) or 0)
@@ -200,22 +210,28 @@ def select_bull_put_pair(options: List[Dict], current_price: float, ticker: str)
         delta = opt.get("delta")
         mid = opt.get("mid", 0)
         if not strike or delta is None or mid <= 0:
+            _bump("short_missing_price_delta")
             continue
         if not _quote_is_tradeable(opt):
+            _bump("short_quote_not_tradeable")
             continue
         if opt.get("volume", 0) < min_vol and opt.get("open_interest", 0) < min_oi:
+            _bump("short_liquidity_below_floor")
             continue
 
         abs_delta = abs(delta)
         if abs_delta > config.SHORT_STRIKE_MAX_DELTA:
+            _bump("short_delta_too_high")
             continue
 
         if is_spy_like:
             if (current_price - strike) < config.MIN_STRIKE_BUFFER_SPY:
+                _bump("short_buffer_too_tight")
                 continue
         else:
             min_buffer_pct = config.MIN_STRIKE_BUFFER_STOCK  # 5% for individual stocks
             if (current_price - strike) / current_price < min_buffer_pct:
+                _bump("short_buffer_too_tight")
                 continue
 
         dte = int(opt.get("dte", 0) or 0)
@@ -236,12 +252,15 @@ def select_bull_put_pair(options: List[Dict], current_price: float, ticker: str)
 
         for long_put in long_candidates:
             if not _quote_is_tradeable(long_put):
+                _bump("long_quote_not_tradeable")
                 continue
             if long_put.get("volume", 0) < min_vol and long_put.get("open_interest", 0) < min_oi:
+                _bump("long_liquidity_below_floor")
                 continue
 
             spread_width = float(short_put.get("strike", 0) - long_put.get("strike", 0))
             if spread_width <= 0:
+                _bump("spread_width_invalid")
                 continue
 
             metrics = edge_calculator.calculate_spread_metrics(
@@ -251,18 +270,23 @@ def select_bull_put_pair(options: List[Dict], current_price: float, ticker: str)
                 long_put_mid=long_put.get("mid"),
             )
             if not metrics:
+                _bump("metrics_missing")
                 continue
             if metrics.get("spread_invalid"):
+                _bump("spread_pricing_invalid")
                 continue
             if metrics.get("credit_per_share", 0) <= 0:
+                _bump("credit_non_positive")
                 continue
             if metrics.get("credit_usd", 0) < config.MIN_CREDIT_USD:
+                _bump("credit_below_min_usd")
                 continue
 
             # Universal credit-to-width quality gate — applies to ALL spreads regardless of width
             credit_per_share = float(metrics.get("credit_per_share", 0) or 0)
             min_ctw = getattr(config, "MIN_CREDIT_TO_WIDTH_PCT", 0.25)
             if spread_width > 0 and (credit_per_share / spread_width) < min_ctw:
+                _bump("credit_to_width_below_min")
                 continue
 
             if spread_width < min_spread_width:
@@ -271,10 +295,17 @@ def select_bull_put_pair(options: List[Dict], current_price: float, ticker: str)
                 allow_narrow = getattr(config, "ALLOW_NARROW_SPREAD_EXCEPTION", True)
                 min_credit_to_width = getattr(config, "NARROW_SPREAD_MIN_CREDIT_TO_WIDTH", 0.30)
                 if not (allow_narrow and credit_to_width >= min_credit_to_width):
+                    _bump("narrow_spread_exception_failed")
                     continue
 
+            if diagnostics is not None:
+                diagnostics["short_candidates_count"] = len(short_candidates)
+                diagnostics["top_reasons"] = sorted(diag_counts.items(), key=lambda x: x[1], reverse=True)[:6]
             return short_put, long_put, metrics
 
+    if diagnostics is not None:
+        diagnostics["short_candidates_count"] = len(short_candidates)
+        diagnostics["top_reasons"] = sorted(diag_counts.items(), key=lambda x: x[1], reverse=True)[:6]
     return None
 
 
@@ -291,23 +322,32 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         is_etf=fundamentals_data.get("is_etf", False),
     ) if fundamentals_data else {"score": None, "blocking": False, "reasons": []}
 
-    def _avoid(reason: str, category: str, tech_payload: Dict) -> Tuple[None, Dict, Dict]:
-        return None, {
+    def _avoid(reason: str, category: str, tech_payload: Dict, extra: Optional[Dict] = None) -> Tuple[None, Dict, Dict]:
+        payload = {
             "reason": reason,
             "category": category,
             "fundamentals_score": fundamentals_eval.get("score"),
             "fundamentals_reasons": fundamentals_eval.get("reasons", []),
             "fundamentals_blocking": fundamentals_eval.get("blocking", False),
-        }, tech_payload
+        }
+        if extra:
+            payload.update(extra)
+        return None, payload, tech_payload
 
     options = fetcher.get_options_chain(ticker, config.MIN_DTE, config.MAX_DTE)
     logger.debug(f"[screen] {ticker}: options chain length = {len(options)}")
     if not options:
         return _avoid("No options chain in DTE range", "NO_OPTIONS", technicals._empty_result(ticker))
 
-    pair = select_bull_put_pair(options, current_price, ticker)
+    pair_diag: Dict = {}
+    pair = select_bull_put_pair(options, current_price, ticker, diagnostics=pair_diag)
     if not pair:
-        return _avoid("No valid same-expiration credit spread found", "NO_VALID_SPREAD", technicals._empty_result(ticker))
+        return _avoid(
+            "No valid same-expiration credit spread found",
+            "NO_VALID_SPREAD",
+            technicals._empty_result(ticker),
+            extra={"pair_selection_diagnostics": pair_diag},
+        )
     short_put, long_put, metrics = pair
 
     current_iv = short_put.get("iv") or estimate_current_iv(options, current_price)
@@ -793,11 +833,16 @@ def run_scan(session_type: str) -> None:
                 qualified_trades.append(trade)
             else:
                 logger.debug(f"[scan] Avoided {ticker}: {avoid.get('category') if avoid else 'UNKNOWN'}")
-                avoided.append({
+                avoid_payload = {
                     "ticker": ticker,
                     "reason": avoid.get("reason") if avoid else "Unknown",
                     "category": avoid.get("category") if avoid else "UNKNOWN",
-                })
+                }
+                if avoid:
+                    for k, v in avoid.items():
+                        if k not in avoid_payload:
+                            avoid_payload[k] = v
+                avoided.append(avoid_payload)
         except Exception as e:
             logger.warning(f"[scan] Exception screening {ticker}: {e}")
             errors.append(f"{ticker}: {e}")
