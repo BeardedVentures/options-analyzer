@@ -20,6 +20,9 @@ output/tipsheets/
 # ── Logs (keep scan_log.json tracked; ignore run log) ──
 logs/run.log
 
+# ── Runtime model state (cached in CI; do not commit) ──
+data/iv_history/*.json
+
 # ── OS / IDE ─────────────────────────────────────
 .DS_Store
 Thumbs.db
