@@ -63,31 +63,40 @@ def calculate_true_pop(
     strike_distance_pct: float,
     expiration_days: int,
     historical_prices: pd.Series,
+    drift: Optional[str] = None,
 ) -> Dict:
     """
-    Calculate the true historical probability of profit for a bull put spread.
+    Historical probability that price stays above a threshold [strike_distance_pct] below
+    current, over [expiration_days], based on the stock's realized volatility structure.
 
-    Methodology (mirrors sharp sports betting edge model):
-      1. Get 2+ years of daily price history
-      2. For each rolling window of [expiration_days] length in history:
-         - Start price = price at window start
-         - Strike = start_price * (1 - strike_distance_pct)
-         - Success = end price > strike at window end
-      3. True POP = successes / total windows
+    C1 FIX — drift removed. Previously this replayed RAW prices, so the result was dominated by
+    the sample period's directional drift: the same OTM put scored strong positive edge in a
+    bull sample and negative edge in a flat/down sample. That measures trend, not the volatility
+    risk premium the system claims to harvest. We now work in log-return space, subtract the
+    realized mean drift, and add back a small risk-free drift (config.TRUE_POP_DRIFT_MODE):
 
-    This gives the ACTUAL historical frequency, not the market's implied probability.
+        "risk_free" (default): demean, then add RISK_FREE_RATE/252  → near-risk-neutral, directly
+                               comparable to the option's implied probability (1 − |delta|)
+        "zero":                demean only (pure zero-drift dispersion)
+        "raw":                 legacy behavior (keeps drift — for A/B comparison only)
+
+    M3 FIX — confidence is now based on the number of INDEPENDENT (non-overlapping) windows
+    (total / expiration_days), not the raw overlapping-window count which overstated significance.
 
     Args:
-        strike_distance_pct: decimal (e.g., 0.05 for 5% below current price)
-        expiration_days: DTE
+        strike_distance_pct: decimal (e.g., 0.05 for a threshold 5% below current price)
+        expiration_days: holding horizon in calendar/trading days
         historical_prices: pd.Series of close prices (2+ years preferred)
+        drift: override for config.TRUE_POP_DRIFT_MODE
 
     Returns:
-        true_pop: float 0-1
-        windows_tested: int
+        true_pop: float 0-1  (probability end value exceeds the threshold)
+        windows_tested: int  (overlapping windows sampled)
+        independent_windows: float
         confidence: "HIGH" | "MEDIUM" | "LOW"
+        drift_mode: str
     """
-    prices = historical_prices.dropna().values
+    prices = historical_prices.dropna().values.astype(float)
     n = len(prices)
 
     if n < expiration_days + 30:
@@ -95,35 +104,50 @@ def calculate_true_pop(
         return {
             "true_pop": None,
             "windows_tested": 0,
+            "independent_windows": 0,
             "confidence": "LOW",
+            "drift_mode": drift or getattr(config, "TRUE_POP_DRIFT_MODE", "risk_free"),
         }
 
+    mode = drift or getattr(config, "TRUE_POP_DRIFT_MODE", "risk_free")
+
+    # Work in log-return space so drift can be removed cleanly.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_returns = np.diff(np.log(prices))
+    log_returns = log_returns[np.isfinite(log_returns)]
+    if log_returns.size < expiration_days:
+        return {"true_pop": None, "windows_tested": 0, "independent_windows": 0,
+                "confidence": "LOW", "drift_mode": mode}
+
+    if mode == "raw":
+        adj = log_returns
+    else:
+        adj = log_returns - log_returns.mean()          # remove realized drift
+        if mode == "risk_free":
+            adj = adj + (getattr(config, "RISK_FREE_RATE", 0.04) / 252.0)
+
+    # Cumulative product over each rolling window == end/start growth ratio under the chosen drift.
+    threshold = 1.0 - strike_distance_pct
+    cumsum = np.concatenate(([0.0], np.cumsum(adj)))
+    m = adj.size
     successes = 0
     total = 0
-
-    for i in range(n - expiration_days):
-        start_price = prices[i]
-        if start_price <= 0:
-            continue
-
-        # Strike equivalent for this historical window
-        strike = start_price * (1 - strike_distance_pct)
-
-        # Check end-of-window price (European-style — final price only)
-        end_price = prices[i + expiration_days]
-        if end_price > strike:
+    for i in range(m - expiration_days + 1):
+        growth = np.exp(cumsum[i + expiration_days] - cumsum[i])
+        if growth > threshold:
             successes += 1
         total += 1
 
     if total == 0:
-        return {"true_pop": None, "windows_tested": 0, "confidence": "LOW"}
+        return {"true_pop": None, "windows_tested": 0, "independent_windows": 0,
+                "confidence": "LOW", "drift_mode": mode}
 
     true_pop = successes / total
+    independent = total / max(1, expiration_days)   # M3: effective non-overlapping sample size
 
-    # Confidence based on sample size
-    if total >= 400:
+    if independent >= 12:
         confidence = "HIGH"
-    elif total >= 150:
+    elif independent >= 5:
         confidence = "MEDIUM"
     else:
         confidence = "LOW"
@@ -131,7 +155,9 @@ def calculate_true_pop(
     return {
         "true_pop": round(true_pop, 4),
         "windows_tested": total,
+        "independent_windows": round(independent, 1),
         "confidence": confidence,
+        "drift_mode": mode,
     }
 
 
@@ -270,18 +296,24 @@ def calculate_edge_score(
     disqualification_reason = None
 
     # ── VRP Component (30 points max) ──
+    # H1 FIX — bands recalibrated to the REAL VRP distribution. Historical S&P VRP averages
+    # ~4.2pp (1990–2018) and ~6.5pp since 2020 (Cboe/CAIA); it essentially never reaches the old
+    # 10/20/30pp thresholds, so this 30-point component was permanently pinned at its 5-pt floor.
+    # New bands reward the realistic 2–10pp range where the premium-selling edge actually lives.
     if vrp_pct < 0:
         # Negative VRP = options cheap = no edge for sellers
         breakdown["vrp"] = 0
-        disqualification_reason = f"Negative VRP ({vrp_pct:.1f}%) — options underpriced, no seller edge"
-    elif vrp_pct >= 30:
-        breakdown["vrp"] = 30
-    elif vrp_pct >= 20:
-        breakdown["vrp"] = 22
+        disqualification_reason = f"Negative VRP ({vrp_pct:.1f}pp) — options underpriced, no seller edge"
     elif vrp_pct >= 10:
+        breakdown["vrp"] = 30
+    elif vrp_pct >= 6:
+        breakdown["vrp"] = 27
+    elif vrp_pct >= 4:
+        breakdown["vrp"] = 22
+    elif vrp_pct >= 2:
         breakdown["vrp"] = 15
     else:
-        breakdown["vrp"] = 5
+        breakdown["vrp"] = 8   # 0–2pp: thin but positive premium
 
     # ── True POP Edge Component (25 points max) ──
     if edge_points < 0:
@@ -389,67 +421,6 @@ def select_best_strategy(
         return "bear_call_spread"
     else:
         return "bull_put_spread"  # default neutral
-
-
-# ─────────────────────────────────────────────
-# STRIKE SELECTION
-# ─────────────────────────────────────────────
-
-def find_target_put(
-    options: list,
-    current_price: float,
-    ticker: str,
-    target_delta: float = None,
-) -> Optional[dict]:
-    """
-    From an options chain list, find the put closest to the target delta.
-    Only considers puts that meet the minimum OTM buffer.
-
-    Returns the best option dict or None.
-    """
-    if target_delta is None:
-        target_delta = config.SHORT_STRIKE_TARGET_DELTA
-
-    is_spy_like = ticker.upper() in config.SPY_BUFFER_TICKERS
-
-    candidates = []
-    for opt in options:
-        if opt.get("type") != "put":
-            continue
-
-        strike = opt.get("strike", 0)
-        delta = opt.get("delta")
-        if delta is None:
-            continue
-
-        abs_delta = abs(delta)
-
-        # Enforce absolute max delta
-        if abs_delta > config.SHORT_STRIKE_MAX_DELTA:
-            continue
-
-        # Enforce OTM buffer
-        if is_spy_like:
-            if (current_price - strike) < config.MIN_STRIKE_BUFFER_SPY:
-                continue
-        else:
-            min_buffer_pct = config.MIN_STRIKE_BUFFER_STOCK  # 5% for individual stocks
-            if (current_price - strike) / current_price < min_buffer_pct:
-                continue
-
-        # Must have meaningful premium
-        mid = opt.get("mid", 0)
-        if mid * 100 < config.MIN_CREDIT_USD:
-            continue
-
-        candidates.append((abs(abs_delta - target_delta), opt))
-
-    if not candidates:
-        return None
-
-    # Return candidate closest to target delta
-    candidates.sort(key=lambda x: x[0])
-    return candidates[0][1]
 
 
 def calculate_spread_metrics(

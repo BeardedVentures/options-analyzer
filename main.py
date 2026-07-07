@@ -301,7 +301,7 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         }, tech_payload
 
     options = fetcher.get_options_chain(ticker, config.MIN_DTE, config.MAX_DTE)
-    print(f"[DEBUG] {ticker}: options chain length = {len(options)}")
+    logger.debug(f"[screen] {ticker}: options chain length = {len(options)}")
     if not options:
         return _avoid("No options chain in DTE range", "NO_OPTIONS", technicals._empty_result(ticker))
 
@@ -311,7 +311,7 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     short_put, long_put, metrics = pair
 
     current_iv = short_put.get("iv") or estimate_current_iv(options, current_price)
-    print(f"[DEBUG] {ticker}: current_iv = {current_iv}")
+    logger.debug(f"[screen] {ticker}: current_iv = {current_iv}")
     tech = technicals.calculate_all(price_data, ticker, current_iv=current_iv, short_strike=short_put["strike"])
 
     if tech.get("iv_rank", 0) < config.MIN_IV_RANK:
@@ -337,40 +337,51 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
                 tech,
             )
 
-    strategy = edge_calculator.select_best_strategy(
-        account_balance=config.ACCOUNT_BALANCE,
-        trend=tech.get("trend", "NEUTRAL"),
-        iv_rank=tech.get("iv_rank", 0),
-        vix_level=tech.get("vrp", 0),
-    )
+    # Only bull_put_spread is currently implemented; roadmap strategies are disabled in config.
+    strategy = "bull_put_spread"
     if strategy not in config.ENABLED_STRATEGIES:
-        if "bull_put_spread" in config.ENABLED_STRATEGIES:
-            strategy = "bull_put_spread"
-        else:
-            return _avoid("No supported strategy enabled", "STRATEGY_DISABLED", tech)
-
-    # Current implementation supports bull put spreads only
-    if strategy != "bull_put_spread":
-        strategy = "bull_put_spread"
+        return _avoid("No supported strategy enabled", "STRATEGY_DISABLED", tech)
 
     if not metrics:
         return _avoid("Could not compute spread metrics", "SPREAD_ERROR", tech)
 
-    strike_distance_pct = metrics.get("strike_distance_pct", 0) / 100 if metrics.get("strike_distance_pct") is not None else 0
-    true_pop_res = edge_calculator.calculate_true_pop(
-        strike_distance_pct=strike_distance_pct,
-        expiration_days=short_put.get("dte", 0),
-        historical_prices=price_data["Close"],
+    # C2 FIX — two distinct probabilities instead of one mislabeled "true_pop":
+    #   p_max_profit : P(price > short strike) = probability the short leg expires worthless
+    #                  (FULL profit). Compared to the option's implied P(OTM)=1−|delta| to score edge.
+    #   p_profit     : P(price > breakeven), breakeven = short strike − net credit. This is the REAL
+    #                  probability of profit and is what MIN_PROBABILITY_OF_PROFIT should gate on.
+    short_strike_val = short_put["strike"]
+    credit_ps = float(metrics.get("credit_per_share", 0) or 0)
+    breakeven_price = short_strike_val - credit_ps
+    dte_val = short_put.get("dte", 0) or 0
+    prices_hist = price_data["Close"]
+
+    otm_distance_pct = (current_price - short_strike_val) / current_price if current_price else 0
+    be_distance_pct = (current_price - breakeven_price) / current_price if current_price else 0
+
+    p_maxprofit_res = edge_calculator.calculate_true_pop(
+        strike_distance_pct=otm_distance_pct,
+        expiration_days=dte_val,
+        historical_prices=prices_hist,
     )
-    true_pop = true_pop_res.get("true_pop")
+    p_profit_res = edge_calculator.calculate_true_pop(
+        strike_distance_pct=be_distance_pct,
+        expiration_days=dte_val,
+        historical_prices=prices_hist,
+    )
+    p_max_profit = p_maxprofit_res.get("true_pop")
+    p_profit = p_profit_res.get("true_pop")
+
     implied_pop = 1 - abs(short_put.get("delta", 0) or 0)
 
-    edge_res = edge_calculator.calculate_edge_points(true_pop, implied_pop)
+    # Edge measured at the short strike (apples-to-apples with delta-implied P(OTM)).
+    edge_res = edge_calculator.calculate_edge_points(p_max_profit, implied_pop)
     edge_points = edge_res.get("edge_points", 0)
 
-    if true_pop is None or true_pop < config.MIN_PROBABILITY_OF_PROFIT:
+    # Gate on the REAL probability of profit (at breakeven), not P(max profit).
+    if p_profit is None or p_profit < config.MIN_PROBABILITY_OF_PROFIT:
         return _avoid(
-            f"True POP {0 if true_pop is None else true_pop:.2f} below minimum {config.MIN_PROBABILITY_OF_PROFIT}",
+            f"POP {0 if p_profit is None else p_profit:.2f} (at breakeven) below minimum {config.MIN_PROBABILITY_OF_PROFIT}",
             "MIN_POP",
             tech,
         )
@@ -454,7 +465,10 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "credit_to_width_pct": round(
             (metrics.get("credit_per_share", 0) / metrics.get("spread_width", 1)) * 100, 1
         ) if metrics.get("spread_width") else 0,
-        "true_pop": true_pop,
+        "true_pop": p_profit,                       # C2: real probability of profit (at breakeven)
+        "p_max_profit": p_max_profit,               # P(short expires OTM) — used for edge scoring
+        "true_pop_confidence": p_profit_res.get("confidence"),
+        "true_pop_drift_mode": p_profit_res.get("drift_mode"),
         "implied_pop": implied_pop,
         "edge_points": edge_points,
         "edge_score": edge_score.get("total_score"),
@@ -708,7 +722,7 @@ def run_scan(session_type: str) -> None:
     check_session_window(session_type, ts)
 
     tickers = [w["ticker"].upper() for w in config.WATCHLIST]
-    print(f"[DEBUG] Ticker list after config load: {tickers}")
+    logger.debug(f"[scan] Ticker list: {tickers}")
 
     logger.info(f"Starting {session_type} scan for {len(tickers)} tickers")
 
@@ -740,30 +754,30 @@ def run_scan(session_type: str) -> None:
     errors: List[str] = []
 
 
-    print(f"[DEBUG] Tickers to screen: {tickers}")
+    logger.debug(f"[scan] Tickers to screen: {tickers}")
     for ticker in tickers:
-        print(f"[DEBUG] Screening ticker: {ticker}")
+        logger.debug(f"[scan] Screening ticker: {ticker}")
         try:
             trade, avoid, tech = screen_ticker(ticker, sentiment_map)
             tech_map[ticker] = tech
             if trade:
-                print(f"[DEBUG] Qualified trade for {ticker}: {trade}")
+                logger.debug(f"[scan] Qualified trade for {ticker}: edge={trade.get('edge_score')}")
                 qualified_trades.append(trade)
             else:
-                print(f"[DEBUG] Avoided {ticker}: {avoid}")
+                logger.debug(f"[scan] Avoided {ticker}: {avoid.get('category') if avoid else 'UNKNOWN'}")
                 avoided.append({
                     "ticker": ticker,
                     "reason": avoid.get("reason") if avoid else "Unknown",
                     "category": avoid.get("category") if avoid else "UNKNOWN",
                 })
         except Exception as e:
-            print(f"[DEBUG] Exception screening {ticker}: {e}")
+            logger.warning(f"[scan] Exception screening {ticker}: {e}")
             errors.append(f"{ticker}: {e}")
             avoided.append({"ticker": ticker, "reason": str(e), "category": "ERROR"})
 
-    print(f"[DEBUG] Qualified trades: {qualified_trades}")
-    print(f"[DEBUG] Avoided tickers: {avoided}")
-    print(f"[DEBUG] Errors: {errors}")
+    logger.debug(f"[scan] Qualified: {[t.get('ticker') for t in qualified_trades]}")
+    logger.debug(f"[scan] Avoided: {[a.get('ticker') for a in avoided]}")
+    logger.debug(f"[scan] Errors: {errors}")
 
     # Build shadow telemetry payload (non-blocking observability data)
     qualified_by_ticker = {str(t.get("ticker", "")).upper(): t for t in qualified_trades}
@@ -855,7 +869,7 @@ def run_scan(session_type: str) -> None:
         morning_signals=morning_signals,
         decay_alerts=decay_alerts,
     )
-    print(f"[DEBUG] renderer.render() returned: {output_path}")
+    logger.debug(f"[scan] renderer.render() returned: {output_path}")
 
     scan_entry = {
         "timestamp": ts.isoformat(),
@@ -878,6 +892,14 @@ def run_scan(session_type: str) -> None:
         "shadow_evaluations": shadow_evaluations,
     }
     append_scan_log(log_dir, scan_entry)
+
+    # ── Gate 1: record each qualified trade as a "modeled" outcome row (non-blocking).
+    # You later add the real fill + close via log_outcome.py; the report measures calibration.
+    try:
+        from analysis.outcome_logger import record_modeled_trades
+        record_modeled_trades(ts.isoformat(), session_type, qualified_trades)
+    except Exception as e:
+        logger.warning(f"[scan] Outcome logging skipped (non-blocking): {e}")
 
     logger.info(f"Scan complete. Tip sheet saved to {output_path}")
 

@@ -119,10 +119,14 @@ def _historical_vol(close: pd.Series, period: int) -> float:
 
 def _iv_rank_hv_approx(close: pd.Series, current_iv: float) -> float:
     """
-    Legacy fallback: approximate IV rank using rolling HV distribution.
-    Used only during bootstrapping (< IV_HISTORY_MIN_SAMPLES stored per ticker).
-    KNOWN LIMITATION: ranks IV against realized vol history, not IV history.
-    Tends to overstate IV Rank in low-vol trending markets.
+    Bootstrapping fallback: approximate IV rank using the rolling HV distribution.
+    Used only until IV_HISTORY_MIN_SAMPLES real IV points are stored per ticker.
+
+    M1 fix: IV structurally sits above realized vol (that gap IS the volatility risk premium),
+    so ranking current IV directly against the raw HV distribution returned ~100 almost every
+    time and made the MIN_IV_RANK gate meaningless. We scale the HV distribution up by
+    config.IV_HV_INFLATOR (typical IV/HV ratio) so a normal IV lands mid-distribution.
+    This remains an approximation — the real percentile only kicks in once IV history accumulates.
     """
     if current_iv <= 0:
         return 0.0
@@ -136,7 +140,8 @@ def _iv_rank_hv_approx(close: pd.Series, current_iv: float) -> float:
         rolling_hv.append(hv)
     if not rolling_hv:
         return 50.0
-    arr = np.array(rolling_hv)
+    inflator = getattr(config, "IV_HV_INFLATOR", 1.2)
+    arr = np.array(rolling_hv) * inflator
     return round(float(np.mean(arr <= current_iv) * 100), 1)
 
 

@@ -1,0 +1,35 @@
+===== VEGA VERIFY START ===== 
+ 
+Python 3.14.3
+ 
+===== PY_COMPILE ===== 
+COMPILE_OK 
+ 
+===== SMOKE TEST (live yfinance) ===== 
+[fetcher] yfinance quality filter: removed 32/92 (35%) stale/invalid option records for AAPL
+[fetcher] yfinance quality filter: removed 25/44 (57%) stale/invalid option records for KRE
+VEGA data smoke test — 13 tickers, DTE 21-45, source=fetcher (yfinance unless POLYGON key set)
+
+TICKER RESULT  #opt  quote   vol     OI   IV  delta  cand  note
+--------------------------------------------------------------------------------------------
+SPY    PASS     390    390   383    366  390    390    55  55 target-delta candidate(s) in 21-45 DTE
+QQQ    PASS     341    341   336    334  341    341    54  54 target-delta candidate(s) in 21-45 DTE
+IWM    PASS     169    169   164    168  169    169    34  34 target-delta candidate(s) in 21-45 DTE
+NVDA   PASS      81     81    79     79   81     81     8  8 target-delta candidate(s) in 21-45 DTE
+AMD    PASS     171    171   153    170  171    171    32  32 target-delta candidate(s) in 21-45 DTE
+PLTR   PASS     138    138   138    136  138    138    34  34 target-delta candidate(s) in 21-45 DTE
+AAPL   PASS      60     60    60     56   60     60    10  10 target-delta candidate(s) in 21-45 DTE
+MSFT   PASS      98     98    96     97   98     98    16  16 target-delta candidate(s) in 21-45 DTE
+TSLA   PASS     134    134   131    132  134    134    19  19 target-delta candidate(s) in 21-45 DTE
+XLE    PASS      38     38    34     38   38     38     6  6 target-delta candidate(s) in 21-45 DTE
+OXY    PASS      30     30    29     27   30     30     6  6 target-delta candidate(s) in 21-45 DTE
+KRE    PASS      19     19    15     19   19     19     5  5 target-delta candidate(s) in 21-45 DTE
+GDX    PASS      74     74    69     72   74     74    21  21 target-delta candidate(s) in 21-45 DTE
+--------------------------------------------------------------------------------------------
+PASS 13   WARN 0   FAIL 0
+
+Reading it: PASS = tradable candidates exist on free data. WARN = chain returns but
+thin/missing Greeks (Black-Scholes fallback may fill deltas). FAIL for many tickers
+means the free source can't support Gate 1 — consider Polygon Options Starter (paid).
+ 
+===== VEGA VERIFY DONE ===== 

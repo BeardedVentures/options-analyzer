@@ -56,12 +56,12 @@ SPY_BUFFER_TICKERS = {"SPY", "QQQ", "IWM", "DIA", "GLD", "TLT"}
 # ─────────────────────────────────────────────
 # STRATEGY PREFERENCES
 # ─────────────────────────────────────────────
+# L2 fix: the engine only implements bull_put_spread (main.py hard-forces it, and
+# select_best_strategy's result is overridden). The previous 5-item list was aspirational and
+# misleading. Keep the roadmap in a comment; enable only what actually runs.
+#   Roadmap (NOT yet implemented): bear_call_spread, iron_condor, pmcc, csp
 ENABLED_STRATEGIES = [
     "bull_put_spread",
-    "bear_call_spread",
-    "iron_condor",
-    "pmcc",
-    "csp",
 ]
 
 # ─────────────────────────────────────────────
@@ -81,10 +81,15 @@ MAX_QUOTE_SPREAD_PCT = 0.35       # Reject option legs with (ask-bid)/mid above 
 MIN_SPREAD_WIDTH_SPY_LIKE = 1.0   # Minimum spread width for SPY-like tickers (flat — not account-size dependent)
 MIN_SPREAD_WIDTH_OTHER = 1.0      # Allow 1-point width on non-index symbols
 ALLOW_NARROW_SPREAD_EXCEPTION = True
-NARROW_SPREAD_MIN_CREDIT_TO_WIDTH = 0.30  # Allow narrower spreads only if credit/width is strong
+NARROW_SPREAD_MIN_CREDIT_TO_WIDTH = 0.20  # H2 fix: was 0.30 — a 0.20Δ spread pays ~13–20% of width
 MIN_OPTION_VOLUME = 100
 MIN_OPTION_OPEN_INTEREST = 500
-MIN_CREDIT_TO_WIDTH_PCT = 0.25    # Credit must be ≥ 25% of spread width — below this, edge is too thin
+# H2 fix: hard floor lowered 0.25 → 0.15. A 0.20-delta short strike structurally collects
+# ~13–20% of width in normal vol (Cboe/industry), so a 25% floor was mutually exclusive with
+# the 0.20Δ strike target and silently rejected most valid index spreads. 0.15 is the true floor;
+# 0.33 remains the "ideal" warning threshold in strike_validator. Safety now leans on the OTM
+# buffer + the probability-of-profit gate, which is the correct place for it.
+MIN_CREDIT_TO_WIDTH_PCT = 0.15
 
 # ─────────────────────────────────────────────
 # RISK TIERS — account-size-agnostic position sizing
@@ -149,6 +154,21 @@ VRP_HV_WINDOW = 35               # HV lookback days — set equal to PREFERRED_D
 IV_HISTORY_DIR = "data/iv_history"   # Relative to options_intelligence root
 IV_HISTORY_MIN_SAMPLES = 30          # Minimum IV samples for reliable percentile
 IV_HISTORY_MAX_SAMPLES = 504         # ~2 years of daily samples (rolling window cap)
+# M1 fix: while bootstrapping (< MIN_SAMPLES real IV points) the fallback ranks current IV against
+# the realized-HV distribution. Because IV structurally sits ABOVE realized vol (that IS the VRP),
+# the raw comparison returned ~100 almost every time. We inflate the HV distribution by this factor
+# (typical IV/HV ratio ≈ 1.2) so a normal IV lands near the middle of the distribution, not the top.
+IV_HV_INFLATOR = 1.2
+
+# ─────────────────────────────────────────────
+# TRUE-POP DRIFT HANDLING (C1 fix)
+# ─────────────────────────────────────────────
+# The historical probability-of-profit backtest must NOT inherit the sample period's directional
+# drift, or every trade looks like edge in a bull market and none in a flat/down market. We remove
+# the realized mean drift and replace it with a small risk-free drift so the statistic reflects the
+# stock's VOLATILITY structure under a near-risk-neutral assumption — directly comparable to the
+# option's implied probability (1 − |delta|). Modes: "risk_free" (default), "zero", "raw" (legacy).
+TRUE_POP_DRIFT_MODE = "risk_free"
 
 # ─────────────────────────────────────────────
 # SECTOR CORRELATION LIMITS
@@ -200,7 +220,10 @@ TICKER_SECTORS: dict = {
 # EDGE FILTER THRESHOLDS
 # ─────────────────────────────────────────────
 MIN_EDGE_SCORE = 60               # 0-100 composite score required to appear on tip sheet
-VRP_MIN_THRESHOLD = 0.15          # Implied vol must exceed realized vol by at least 15%
+# H1 fix: was 0.15 (15 vol points) — ~3.5x the historical average VRP, so it essentially never
+# triggered. Real S&P VRP averages ~4.2pp (1990–2018) and ~6.5pp since 2020 (Cboe/CAIA). 0.02 =
+# require IV to exceed RV by at least 2 vol points, a realistic minimum edge.
+VRP_MIN_THRESHOLD = 0.02          # Implied vol must exceed realized vol by at least 2 vol points
 NEWS_SENTIMENT_BLOCK = True       # Block trades on tickers with strong negative news
 EARNINGS_BLACKOUT_DAYS = 7        # Never sell premium within 7 days of earnings (unless volatility crush mode is enabled)
 
