@@ -113,28 +113,90 @@ RISK_TIERS = [
 ]
 
 # ─────────────────────────────────────────────
-# WATCHLIST
+# WATCHLIST — 50 tickers across all major sectors for maximum coverage
 # ─────────────────────────────────────────────
 WATCHLIST = [
-    # ── Broad Market (existing) ──
-    {"ticker": "SPY",  "type": "ETF",   "note": "S&P 500 Core"},
+    # ── Broad Market Indices (3) ──
+    {"ticker": "SPY",  "type": "ETF",   "note": "S&P 500"},
     {"ticker": "QQQ",  "type": "ETF",   "note": "Nasdaq 100"},
     {"ticker": "IWM",  "type": "ETF",   "note": "Russell 2000"},
-    # ── Technology (existing + additions) ──
-    {"ticker": "NVDA", "type": "Stock", "note": "NVIDIA — post-split, high IV"},
-    {"ticker": "AMD",  "type": "Stock", "note": "Semiconductor — consistent high IV"},
-    {"ticker": "PLTR", "type": "Stock", "note": "Palantir — highest IV large-cap"},
-    {"ticker": "AAPL", "type": "Stock", "note": "Apple"},
-    {"ticker": "MSFT", "type": "Stock", "note": "Microsoft"},
-    # ── Consumer ──
-    {"ticker": "TSLA", "type": "Stock", "note": "Tesla — extreme IV, top premium"},
-    # ── Energy ──
+    
+    # ── Mega-Cap Technology (6) ──
+    {"ticker": "NVDA", "type": "Stock", "note": "NVIDIA — chip design, extreme IV"},
+    {"ticker": "AAPL", "type": "Stock", "note": "Apple — tech leader"},
+    {"ticker": "MSFT", "type": "Stock", "note": "Microsoft — cloud/AI"},
+    {"ticker": "GOOG", "type": "Stock", "note": "Alphabet — search/cloud"},
+    {"ticker": "META", "type": "Stock", "note": "Meta — social/AI, high IV"},
+    {"ticker": "AMD",  "type": "Stock", "note": "AMD — semiconductor competitor"},
+    
+    # ── Mid-Cap Technology (2) ──
+    {"ticker": "PLTR", "type": "Stock", "note": "Palantir — data/analytics, high IV"},
+    {"ticker": "MU",   "type": "Stock", "note": "Micron — memory chips"},
+    
+    # ── Semiconductors (1) ──
+    {"ticker": "QCOM", "type": "Stock", "note": "Qualcomm — mobile/wireless"},
+    
+    # ── Software & Services (2) ──
+    {"ticker": "CRM",  "type": "Stock", "note": "Salesforce — enterprise CRM"},
+    {"ticker": "ADBE", "type": "Stock", "note": "Adobe — creative software"},
+    
+    # ── Communications (1) ──
+    {"ticker": "NFLX", "type": "Stock", "note": "Netflix — streaming, growth"},
+    
+    # ── Healthcare (5) ──
+    {"ticker": "JNJ",  "type": "Stock", "note": "Johnson & Johnson — diversified health"},
+    {"ticker": "PFE",  "type": "Stock", "note": "Pfizer — pharma giant"},
+    {"ticker": "UNH",  "type": "Stock", "note": "UnitedHealth — insurance/healthcare"},
+    {"ticker": "ABBV", "type": "Stock", "note": "AbbVie — biopharm"},
+    {"ticker": "AMGN", "type": "Stock", "note": "Amgen — biotech"},
+    
+    # ── Financials (5) ──
+    {"ticker": "JPM",  "type": "Stock", "note": "JPMorgan — banking giant"},
+    {"ticker": "BAC",  "type": "Stock", "note": "Bank of America"},
+    {"ticker": "GS",   "type": "Stock", "note": "Goldman Sachs — investment banking"},
+    {"ticker": "BLK",  "type": "Stock", "note": "BlackRock — asset management"},
+    {"ticker": "USB",  "type": "Stock", "note": "U.S. Bancorp — regional bank"},
+    
+    # ── Consumer Discretionary (6) ──
+    {"ticker": "TSLA", "type": "Stock", "note": "Tesla — EVs, extreme IV"},
+    {"ticker": "AMZN", "type": "Stock", "note": "Amazon — e-commerce/cloud"},
+    {"ticker": "RCL",  "type": "Stock", "note": "Royal Caribbean — cruise/cyclical"},
+    {"ticker": "MAR",  "type": "Stock", "note": "Marriott — hospitality"},
+    {"ticker": "NKE",  "type": "Stock", "note": "Nike — apparel/athletic"},
+    {"ticker": "WMT",  "type": "Stock", "note": "Walmart — retail leader"},
+    
+    # ── Consumer Staples (2) ──
+    {"ticker": "KO",   "type": "Stock", "note": "Coca-Cola — beverages"},
+    {"ticker": "PEP",  "type": "Stock", "note": "PepsiCo — food/beverage"},
+    
+    # ── Energy (4) ──
+    {"ticker": "XOM",  "type": "Stock", "note": "ExxonMobil — integrated energy"},
+    {"ticker": "CVX",  "type": "Stock", "note": "Chevron — oil/gas major"},
+    {"ticker": "COP",  "type": "Stock", "note": "ConocoPhillips — exploration"},
+    {"ticker": "PSX",  "type": "Stock", "note": "Phillips 66 — refining"},
+    
+    # ── Materials & Metals (3) ──
+    {"ticker": "FCX",  "type": "Stock", "note": "Freeport-McMoRan — copper/gold"},
+    {"ticker": "CLF",  "type": "Stock", "note": "Cleveland-Cliffs — steel"},
+    {"ticker": "SCCO", "type": "Stock", "note": "Southern Copper — mining"},
+    
+    # ── Industrials (3) ──
+    {"ticker": "BA",   "type": "Stock", "note": "Boeing — aerospace/defense"},
+    {"ticker": "GE",   "type": "Stock", "note": "General Electric — diversified"},
+    {"ticker": "LMT",  "type": "Stock", "note": "Lockheed Martin — defense"},
+    
+    # ── Utilities (1) ──
+    {"ticker": "NEE",  "type": "Stock", "note": "NextEra Energy — utilities/renewable"},
+    
+    # ── Real Estate & REITs (2) ──
+    {"ticker": "PLD",  "type": "Stock", "note": "Prologis — industrial REIT"},
+    {"ticker": "AMT",  "type": "Stock", "note": "American Tower — tower REIT"},
+    
+    # ── Sector & Commodity ETFs (4) ──
     {"ticker": "XLE",  "type": "ETF",   "note": "Energy Sector ETF"},
-    {"ticker": "OXY",  "type": "Stock", "note": "Occidental Petroleum — high IV"},
-    # ── Financials ──
-    {"ticker": "KRE",  "type": "ETF",   "note": "Regional Banks — elevated IV"},
-    # ── Materials ──
-    {"ticker": "GDX",  "type": "ETF",   "note": "Gold Miners — strong VRP"},
+    {"ticker": "GDX",  "type": "ETF",   "note": "Gold Miners ETF — strong VRP"},
+    {"ticker": "XLV",  "type": "ETF",   "note": "Healthcare Sector ETF"},
+    {"ticker": "ARKK", "type": "ETF",   "note": "ARK Innovation — disruptive tech, high IV"},
 ]
 
 # ─────────────────────────────────────────────
@@ -195,40 +257,102 @@ MAX_CORRELATED_BROAD_MARKET_TRADES = 1
 CORRELATED_BROAD_MARKET_TICKERS = {"SPY", "QQQ", "IWM"}
 
 TICKER_SECTORS: dict = {
-    # Broad market — diversified, exempt from cap
+    # ── Broad Market ──
     "SPY":  "broad_market",
-    "QQQ":  "technology_etf",
+    "QQQ":  "broad_market",
     "IWM":  "broad_market",
-    "DIA":  "broad_market",
-    # Technology
+    
+    # ── Mega-Cap Technology ──
     "NVDA": "technology",
-    "AMD":  "technology",
-    "PLTR": "technology",
     "AAPL": "technology",
     "MSFT": "technology",
     "GOOG": "technology",
     "GOOGL": "technology",
     "META": "technology",
+    "AMD":  "technology",
+    
+    # ── Mid-Cap Technology ──
+    "PLTR": "technology",
+    "MU":   "technology",
+    
+    # ── Semiconductors ──
+    "QCOM": "technology",
+    
+    # ── Software ──
     "CRM":  "technology",
-    # Consumer cyclical
+    "ADBE": "technology",
+    
+    # ── Communications ──
+    "NFLX": "communications",
+    "DIS":  "communications",
+    
+    # ── Healthcare ──
+    "JNJ":  "healthcare",
+    "PFE":  "healthcare",
+    "UNH":  "healthcare",
+    "ABBV": "healthcare",
+    "AMGN": "healthcare",
+    "VRTX": "healthcare",
+    
+    # ── Financials ──
+    "JPM":  "financials",
+    "BAC":  "financials",
+    "GS":   "financials",
+    "BLK":  "financials",
+    "AIG":  "financials",
+    "USB":  "financials",
+    "KRE":  "financials",
+    
+    # ── Consumer Discretionary ──
     "TSLA": "consumer_cyclical",
     "AMZN": "consumer_cyclical",
-    # Energy
+    "RCL":  "consumer_cyclical",
+    "MAR":  "consumer_cyclical",
+    "NKE":  "consumer_cyclical",
+    "WMT":  "consumer_cyclical",
+    
+    # ── Consumer Staples ──
+    "KO":   "consumer_staples",
+    "PEP":  "consumer_staples",
+    "PG":   "consumer_staples",
+    
+    # ── Energy ──
     "XLE":  "energy",
     "OXY":  "energy",
     "XOM":  "energy",
     "CVX":  "energy",
-    # Financials
-    "KRE":  "financials",
-    "JPM":  "financials",
-    "BAC":  "financials",
-    "GS":   "financials",
-    # Materials / Gold
+    "COP":  "energy",
+    "PSX":  "energy",
+    "MPC":  "energy",
+    
+    # ── Materials / Mining ──
     "GDX":  "materials",
+    "FCX":  "materials",
+    "CLF":  "materials",
+    "SCCO": "materials",
+    
+    # ── Industrials ──
+    "BA":   "industrials",
+    "GE":   "industrials",
+    "LMT":  "industrials",
+    "DAL":  "industrials",
+    
+    # ── Utilities ──
+    "NEE":  "utilities",
+    "DUK":  "utilities",
+    
+    # ── REITs ──
+    "PLD":  "reits",
+    "AMT":  "reits",
+    "O":    "reits",
+    
+    # ── Commodities ──
     "GLD":  "commodities",
     "SLV":  "commodities",
-    # Rates / Fixed income
-    "TLT":  "rates",
+    
+    # ── Sector/Broad ETFs ──
+    "XLV":  "healthcare_etf",
+    "ARKK": "tech_etf",
 }
 
 # ─────────────────────────────────────────────
