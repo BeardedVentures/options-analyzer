@@ -59,9 +59,13 @@ jobs:
       - name: Restore IV history cache
         uses: actions/cache@v4
         with:
+          # Primary key rotates per run so actions/cache always SAVES a fresh
+          # copy (an exact-key hit skips the save, which would freeze the cache).
+          # restore-keys loads the most recent prior cache for this branch.
           path: data/iv_history
-          key: vega-iv-history-${{ github.ref_name }}
+          key: vega-iv-history-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
+            vega-iv-history-${{ github.ref_name }}-
             vega-iv-history-
 
       - name: Install dependencies
@@ -88,36 +92,36 @@ jobs:
           GITHUB_RUN_ID:     ${{ github.run_id }}
         run: python main.py --session morning
 
-          - name: Validate morning scan outputs
-          run: |
-            python - <<'PY'
-            import glob
-            import json
-            import os
-            import sys
+      - name: Validate morning scan outputs
+        run: |
+          python - <<'PY'
+          import glob
+          import json
+          import os
+          import sys
 
-            tips = sorted(glob.glob("output/tipsheets/*.html"))
-            if not tips:
+          tips = sorted(glob.glob("output/tipsheets/*.html"))
+          if not tips:
               print("[healthcheck] ERROR: no tipsheet HTML generated")
               sys.exit(1)
 
-            if not os.path.exists("logs/scan_log.json"):
+          if not os.path.exists("logs/scan_log.json"):
               print("[healthcheck] ERROR: logs/scan_log.json missing")
               sys.exit(1)
 
-            with open("logs/scan_log.json", "r", encoding="utf-8") as f:
+          with open("logs/scan_log.json", "r", encoding="utf-8") as f:
               data = json.load(f)
-            if not isinstance(data, list) or not data:
+          if not isinstance(data, list) or not data:
               print("[healthcheck] ERROR: scan_log.json empty or invalid")
               sys.exit(1)
 
-            last = data[-1]
-            if last.get("session_type") != "morning":
+          last = data[-1]
+          if last.get("session_type") != "morning":
               print(f"[healthcheck] ERROR: expected last session_type='morning', got {last.get('session_type')}")
               sys.exit(1)
 
-            print(f"[healthcheck] OK: {len(tips)} tipsheet(s), scan_id entry timestamp={last.get('timestamp')}")
-            PY
+          print(f"[healthcheck] OK: {len(tips)} tipsheet(s), last entry timestamp={last.get('timestamp')}")
+          PY
 
       - name: Upload tip sheet artifact
         if: always()
@@ -157,8 +161,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: data/iv_history
-          key: vega-iv-history-${{ github.ref_name }}
+          key: vega-iv-history-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
+            vega-iv-history-${{ github.ref_name }}-
             vega-iv-history-
 
       - name: Install dependencies
@@ -182,36 +187,36 @@ jobs:
           GITHUB_RUN_ID:     ${{ github.run_id }}
         run: python main.py --session close
 
-          - name: Validate close scan outputs
-          run: |
-            python - <<'PY'
-            import glob
-            import json
-            import os
-            import sys
+      - name: Validate close scan outputs
+        run: |
+          python - <<'PY'
+          import glob
+          import json
+          import os
+          import sys
 
-            tips = sorted(glob.glob("output/tipsheets/*.html"))
-            if not tips:
+          tips = sorted(glob.glob("output/tipsheets/*.html"))
+          if not tips:
               print("[healthcheck] ERROR: no tipsheet HTML generated")
               sys.exit(1)
 
-            if not os.path.exists("logs/scan_log.json"):
+          if not os.path.exists("logs/scan_log.json"):
               print("[healthcheck] ERROR: logs/scan_log.json missing")
               sys.exit(1)
 
-            with open("logs/scan_log.json", "r", encoding="utf-8") as f:
+          with open("logs/scan_log.json", "r", encoding="utf-8") as f:
               data = json.load(f)
-            if not isinstance(data, list) or not data:
+          if not isinstance(data, list) or not data:
               print("[healthcheck] ERROR: scan_log.json empty or invalid")
               sys.exit(1)
 
-            last = data[-1]
-            if last.get("session_type") != "close":
+          last = data[-1]
+          if last.get("session_type") != "close":
               print(f"[healthcheck] ERROR: expected last session_type='close', got {last.get('session_type')}")
               sys.exit(1)
 
-            print(f"[healthcheck] OK: {len(tips)} tipsheet(s), scan_id entry timestamp={last.get('timestamp')}")
-            PY
+          print(f"[healthcheck] OK: {len(tips)} tipsheet(s), last entry timestamp={last.get('timestamp')}")
+          PY
 
       - name: Upload tip sheet artifact
         if: always()

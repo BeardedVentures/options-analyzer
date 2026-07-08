@@ -70,7 +70,7 @@ ENABLED_STRATEGIES = [
 MIN_PROBABILITY_OF_PROFIT = 0.72  # 72% minimum — true probability not just delta
 MIN_IV_RANK = 45                  # Only trade when IV rank >= 45
 MIN_CREDIT_USD = 25               # Minimum premium worth collecting (per contract)
-MIN_DTE = 21                      # Minimum days to expiration
+MIN_DTE = 25                      # Minimum days to expiration (targets the 25–45 DTE window)
 MAX_DTE = 45                      # Maximum days to expiration
 PREFERRED_DTE_TARGET = 35         # Prefer contracts near this DTE when multiple are valid
 PREFERRED_DTE_TOLERANCE = 7       # Within +/- this range is considered ideal
