@@ -201,6 +201,27 @@ def get_price_data(ticker: str, period: str = "2y") -> Optional[pd.DataFrame]:
         data = data[["Open", "High", "Low", "Close", "Volume"]].copy()
         data.dropna(subset=["Close"], inplace=True)
 
+        # Sanity check: reject obvious data glitches before they can flow into the scan.
+        # The most common failure mode is a wildly incorrect last close (for example, a
+        # single-digit print on a four-digit ticker). Compare the most recent close to the
+        # recent median and previous close; if both disagree badly, treat the series as bad.
+        closes = data["Close"].dropna()
+        if len(closes) >= 3:
+            last_close = float(closes.iloc[-1])
+            prev_close = float(closes.iloc[-2])
+            recent_median = float(closes.tail(min(len(closes), 20)).median())
+            if last_close > 0 and recent_median > 0 and prev_close > 0:
+                median_gap = abs(last_close - recent_median) / recent_median
+                prev_gap = abs(last_close - prev_close) / prev_close
+                if median_gap >= 0.75 and prev_gap >= 0.50:
+                    logger.warning(
+                        f"[fetcher] Suspicious price series for {ticker}: "
+                        f"last={last_close:.2f}, prev={prev_close:.2f}, median={recent_median:.2f} "
+                        f"-- rejecting as likely data glitch"
+                    )
+                    _log_api_call("yfinance.price", ticker, False, "Suspicious price glitch")
+                    return None
+
         _cache[cache_key] = data
         _log_api_call("yfinance.price", ticker, True)
         logger.debug(f"[fetcher] Price data for {ticker}: {len(data)} rows")

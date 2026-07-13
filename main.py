@@ -78,9 +78,20 @@ def append_scan_log(log_dir: Path, entry: Dict) -> None:
     path = log_dir / "scan_log.json"
     data = load_json(path, [])
     if not isinstance(data, list):
+        # Corrupt/interrupted prior write — preserve it for forensics, start clean rather
+        # than compounding the corruption.
+        try:
+            if path.exists():
+                path.replace(path.with_suffix(".json.corrupt.bak"))
+        except Exception:
+            pass
         data = []
     data.append(entry)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    # Atomic write: serialize to a temp file in the same dir, then os.replace (atomic on
+    # Windows + POSIX). An interrupted write can no longer truncate scan_log.json.
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def build_market_context() -> Dict:
@@ -354,8 +365,15 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     logger.debug(f"[screen] {ticker}: current_iv = {current_iv}")
     tech = technicals.calculate_all(price_data, ticker, current_iv=current_iv, short_strike=short_put["strike"])
 
-    if tech.get("iv_rank", 0) < config.MIN_IV_RANK:
-        return _avoid(f"IV Rank {tech.get('iv_rank', 0):.1f} below minimum {config.MIN_IV_RANK}", "IV_RANK", tech)
+    iv_rank = tech.get("iv_rank", 0)
+    iv_rank_method = (tech.get("iv_rank_method") or "").upper()
+    if iv_rank_method == "HISTORY" and iv_rank < config.MIN_IV_RANK:
+        return _avoid(f"IV Rank {iv_rank:.1f} below minimum {config.MIN_IV_RANK}", "IV_RANK", tech)
+    if iv_rank_method != "HISTORY" and iv_rank < config.MIN_IV_RANK:
+        tech["iv_rank_warning"] = (
+            f"Estimated IV Rank {iv_rank:.1f} below minimum {config.MIN_IV_RANK} "
+            f"(method={iv_rank_method or 'APPROX'}) — treated as a confidence warning, not a hard block"
+        )
 
     earnings_dt = fetcher.get_earnings_date(ticker)
     days_to_earnings = fundamentals.days_until_earnings(earnings_dt)

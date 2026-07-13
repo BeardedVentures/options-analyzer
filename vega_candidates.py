@@ -170,6 +170,7 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                     "credit_to_width": ctw, "breakeven": breakeven, "roi": roi,
                     "short_delta": round(float(short.get("delta") or 0), 3), "pop_implied": pop_implied,
                     "short_iv": round(float(short.get("iv") or 0), 4),
+                    "short_theta": round(float(short.get("theta") or 0), 4),
                     "short_volume": int(short.get("volume") or 0), "short_oi": int(short.get("open_interest") or 0),
                 }
                 # keep the widest credit/width per short leg (best premium efficiency)
@@ -217,7 +218,9 @@ def render_html(rows: list, meta: dict) -> str:
     for tk in rows:
         ctx = tk["ctx"]
         ivr = ctx.get("iv_rank")
-        ivr_txt = f'{ivr:.0f} <span class="dim">({ctx.get("iv_rank_method","?")})</span>' if ivr is not None else "—"
+        ivm = (ctx.get("iv_rank_method") or "?").upper()
+        ivr_tag = "Est" if ivm == "APPROX" else "Hist"
+        ivr_txt = f'{ivr:.0f} <span class="dim">({ivr_tag})</span>' if ivr is not None else "—"
         vrp = ctx.get("vrp_pp")
         vrp_txt = f'{vrp:+.1f}pp' if vrp is not None else "—"
         atm = ctx.get("atm_iv")
