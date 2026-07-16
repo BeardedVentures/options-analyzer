@@ -858,3 +858,82 @@ def get_macro_news(hours: int = 24) -> List[Dict]:
 
     _cache[cache_key] = articles
     return articles
+
+
+# ─────────────────────────────────────────────
+# CALL OPTIONS (for bear-call spreads, iron condors, lottery) — yfinance
+# ─────────────────────────────────────────────
+def _parse_yfinance_calls(ticker: str, current_price: float,
+                          min_dte: int, max_dte: int) -> List[Dict]:
+    """Parse yfinance CALL chain into standardized records (mirror of the puts parser).
+    Delta positive for calls. 15-min delayed, BS Greeks."""
+    records = []
+    today = datetime.now().date()
+    try:
+        yticker = yf.Ticker(ticker)
+        expirations = yticker.options
+        if not expirations:
+            return []
+        for exp_str in expirations:
+            exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
+            dte = (exp_date - today).days
+            last_trade_date = _last_trade_date(exp_date)
+            if not (min_dte <= dte <= max_dte):
+                continue
+            _rate_limit()
+            try:
+                chain = yticker.option_chain(exp_str)
+            except Exception as e:
+                logger.warning(f"[fetcher] Could not load call chain {ticker} {exp_str}: {e}")
+                continue
+            T = dte / 365.25
+            for _, row in chain.calls.iterrows():
+                strike = float(row.get("strike", 0))
+                bid = float(row.get("bid", 0) or 0)
+                ask = float(row.get("ask", 0) or 0)
+                iv = float(row.get("impliedVolatility", 0) or 0)
+                raw_vol = row.get("volume", 0)
+                volume = int(raw_vol) if pd.notna(raw_vol) else 0
+                raw_oi = row.get("openInterest", 0)
+                oi = int(raw_oi) if pd.notna(raw_oi) else 0
+                mid = round((bid + ask) / 2, 2) if (bid + ask) > 0 else 0
+                if strike <= 0 or mid <= 0:
+                    continue
+                delta = _bs_delta(current_price, strike, T, iv, "call")
+                theta = _bs_theta(current_price, strike, T, iv, "call")
+                records.append({
+                    "ticker": ticker, "type": "call", "strike": strike, "expiration": exp_str,
+                    "last_trade_date": last_trade_date.isoformat(), "dte": dte,
+                    "bid": bid, "ask": ask, "mid": mid, "iv": iv,
+                    "volume": volume, "open_interest": oi, "delta": delta, "theta": theta,
+                })
+        logger.debug(f"[fetcher] Calls for {ticker}: {len(records)} in DTE {min_dte}-{max_dte}")
+        return records
+    except Exception as e:
+        logger.error(f"[fetcher] yfinance calls error for {ticker}: {e}")
+        return []
+
+
+def get_call_options_chain(ticker: str, min_dte: int = None, max_dte: int = None) -> List[Dict]:
+    """Live call chain within DTE (yfinance, 15-min delayed). Session-cached.
+    Used by bear-call / iron-condor / lottery generators. NOTE: first live use should be
+    spot-checked against your broker (new code path, not yet validated on live calls data)."""
+    if min_dte is None:
+        min_dte = config.MIN_DTE
+    if max_dte is None:
+        max_dte = config.MAX_DTE
+    cache_key = f"calls_{ticker}_{min_dte}_{max_dte}"
+    if cache_key in _cache:
+        return _cache[cache_key]
+    price_data = get_price_data(ticker, period="5d")
+    current_price = float(price_data["Close"].iloc[-1]) if price_data is not None and not price_data.empty else None
+    if not current_price:
+        return []
+    records = _parse_yfinance_calls(ticker, current_price, min_dte, max_dte)
+    try:
+        records = _quality_filter_options(records, ticker, "yfinance")
+    except Exception:
+        pass
+    _log_api_call("yfinance.calls", ticker, len(records) > 0)
+    _cache[cache_key] = records
+    return records

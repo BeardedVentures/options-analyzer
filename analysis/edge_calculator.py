@@ -161,6 +161,95 @@ def calculate_true_pop(
     }
 
 
+def calculate_pop_between(
+    expiration_days: int,
+    historical_prices: pd.Series,
+    lower_move_pct: Optional[float] = None,
+    upper_move_pct: Optional[float] = None,
+    drift: Optional[str] = None,
+) -> Dict:
+    """
+    Historical probability that price ends INSIDE a signed band around spot, over
+    [expiration_days]. Generalizes calculate_true_pop to the call side and to two-sided
+    (iron condor) structures.
+
+    Bounds are SIGNED moves from spot as decimals, either of which may be None (unbounded):
+        P(stay above 5% below spot)   → lower_move_pct=-0.05, upper_move_pct=None
+        P(stay below 5% above spot)   → lower_move_pct=None,  upper_move_pct=+0.05
+        P(between -5% and +6%)        → lower_move_pct=-0.05, upper_move_pct=+0.06
+
+    Why this exists: the call side must NOT be derived by mirroring the downside result.
+    Under TRUE_POP_DRIFT_MODE="risk_free" the series carries a deliberate +r/252 drift, so a
+    reflected downside probability applies that drift in the favorable direction for BOTH
+    sides and overstates call-side POP (measured ~+5 POP points at 30 DTE / 25% vol — enough
+    to push a sub-threshold trade through a 0.70 min_pop gate). Measuring the actual event on
+    the actual windows keeps drift pointing the one true way and assumes no distributional
+    symmetry.
+
+    Returns the same shape as calculate_true_pop (true_pop = P(inside the band)).
+    """
+    mode = drift or getattr(config, "TRUE_POP_DRIFT_MODE", "risk_free")
+    empty = {"true_pop": None, "windows_tested": 0, "independent_windows": 0,
+             "confidence": "LOW", "drift_mode": mode}
+
+    if lower_move_pct is None and upper_move_pct is None:
+        logger.warning("[edge] calculate_pop_between called with no bounds")
+        return empty
+
+    prices = historical_prices.dropna().values.astype(float)
+    if len(prices) < expiration_days + 30:
+        logger.warning("[edge] Insufficient history for POP calculation")
+        return empty
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_returns = np.diff(np.log(prices))
+    log_returns = log_returns[np.isfinite(log_returns)]
+    if log_returns.size < expiration_days:
+        return empty
+
+    # Same drift convention as calculate_true_pop (C1 FIX) — see that docstring.
+    if mode == "raw":
+        adj = log_returns
+    else:
+        adj = log_returns - log_returns.mean()
+        if mode == "risk_free":
+            adj = adj + (getattr(config, "RISK_FREE_RATE", 0.04) / 252.0)
+
+    # Growth ratio thresholds: a +6% bound is breached when end/start growth exceeds 1.06.
+    lo_g = (1.0 + lower_move_pct) if lower_move_pct is not None else -np.inf
+    hi_g = (1.0 + upper_move_pct) if upper_move_pct is not None else np.inf
+    if lo_g >= hi_g:
+        logger.warning("[edge] calculate_pop_between: inverted band (%s, %s)", lo_g, hi_g)
+        return empty
+
+    cumsum = np.concatenate(([0.0], np.cumsum(adj)))
+    m = adj.size
+    total = m - expiration_days + 1
+    if total <= 0:
+        return empty
+
+    growth = np.exp(cumsum[expiration_days:expiration_days + total] - cumsum[:total])
+    successes = int(np.count_nonzero((growth > lo_g) & (growth < hi_g)))
+
+    true_pop = successes / total
+    independent = total / max(1, expiration_days)   # M3: non-overlapping effective sample size
+
+    if independent >= 12:
+        confidence = "HIGH"
+    elif independent >= 5:
+        confidence = "MEDIUM"
+    else:
+        confidence = "LOW"
+
+    return {
+        "true_pop": round(true_pop, 4),
+        "windows_tested": total,
+        "independent_windows": round(independent, 1),
+        "confidence": confidence,
+        "drift_mode": mode,
+    }
+
+
 def calculate_edge_points(true_pop: Optional[float], implied_pop: float) -> Dict:
     """
     Calculate the edge in probability points.

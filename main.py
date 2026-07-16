@@ -13,6 +13,8 @@ import config
 from data import fetcher, technicals, fundamentals, news
 from analysis import edge_calculator, strike_validator, synthesizer
 from output import renderer, emailer
+import strategies
+import multi_strategy
 
 
 # VEGA: JARVIS integration (non-blocking — scan completes even if tower unreachable)
@@ -91,6 +93,14 @@ def append_scan_log(log_dir: Path, entry: Dict) -> None:
     # Windows + POSIX). An interrupted write can no longer truncate scan_log.json.
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def write_scan_latest(log_dir: Path, entry: Dict) -> None:
+    """Write the latest full scan payload atomically for cockpit consumers."""
+    path = log_dir / "scan_latest.json"
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(entry, indent=2), encoding="utf-8")
     os.replace(tmp, path)
 
 
@@ -846,8 +856,25 @@ def run_scan(session_type: str) -> None:
         try:
             trade, avoid, tech = screen_ticker(ticker, sentiment_map)
             tech_map[ticker] = tech
+            # Additive: call-side defined-risk strategies (bear call / iron condor) — live, flagged for spot-check
+            try:
+                for _et in multi_strategy.scan_extra(ticker, sentiment_map):
+                    qualified_trades.append(_et)
+            except Exception as _e:
+                logger.warning(f"[scan] multi_strategy {ticker}: {_e}")
             if trade:
                 logger.debug(f"[scan] Qualified trade for {ticker}: edge={trade.get('edge_score')}")
+                try:
+                    _ev = strategies.evaluate("bull_put", {
+                        "dte": trade.get("dte"), "short_delta": trade.get("delta"),
+                        "credit_to_width": (trade.get("credit_to_width_pct") or 0) / 100.0,
+                        "iv_rank": trade.get("iv_rank"), "trend": trade.get("trend"),
+                        "pop": trade.get("true_pop"),
+                        "sentiment": (sentiment_map.get(ticker, {}) or {}).get("sentiment")})
+                    trade["criteria"] = _ev["criteria"]; trade["news_check"] = _ev["news_check"]
+                    trade["needs_validation"] = False
+                except Exception:
+                    pass
                 qualified_trades.append(trade)
             else:
                 logger.debug(f"[scan] Avoided {ticker}: {avoid.get('category') if avoid else 'UNKNOWN'}")
@@ -984,6 +1011,18 @@ def run_scan(session_type: str) -> None:
     }
     append_scan_log(log_dir, scan_entry)
 
+    # Canonical board artifact: full engine payload for the cockpit (single source of truth).
+    scan_latest = {
+        "timestamp": ts.isoformat(),
+        "session_type": session_type,
+        "market_context": market_context,
+        "regime": regime,
+        "source_health": source_health,
+        "qualified_trades": qualified_trades,
+        "rejected_trades": avoided,
+    }
+    write_scan_latest(log_dir, scan_latest)
+
     # ── Gate 1: record each qualified trade as a "modeled" outcome row (non-blocking).
     # You later add the real fill + close via log_outcome.py; the report measures calibration.
     try:
@@ -1010,27 +1049,3 @@ def run_scan(session_type: str) -> None:
             {k: v for k, v in t.items() if k != "component_breakdown"}
             for t in qualified_trades
         ]
-
-        post_to_jarvis(
-            scan_entry=full_scan_entry,
-            session_type=session_type,
-            market_context=market_context,
-            tipsheet_html=tipsheet_html,
-        )
-    elif VEGA_INGEST_ENABLED:
-        logger.warning("[scan] Skipping JARVIS ingest because source health is degraded")
-
-    if config.EMAIL_ENABLED:
-        pass  # Email sending not configured
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Options Intelligence tip sheet generator")
-    parser.add_argument("--session", choices=["morning", "close"], required=True)
-    return parser.parse_args()
-
-
-if __name__ == "__main__":
-    setup_logging()
-    args = parse_args()
-    run_scan(args.session)

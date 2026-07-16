@@ -62,6 +62,8 @@ SPY_BUFFER_TICKERS = {"SPY", "QQQ", "IWM", "DIA", "GLD", "TLT"}
 #   Roadmap (NOT yet implemented): bear_call_spread, iron_condor, pmcc, csp
 ENABLED_STRATEGIES = [
     "bull_put_spread",
+    "bear_call_spread",   # live via multi_strategy.py — spot-check vs broker on first run
+    "iron_condor",        # live via multi_strategy.py — spot-check vs broker on first run
 ]
 
 # ─────────────────────────────────────────────
@@ -92,14 +94,32 @@ MIN_OPTION_OPEN_INTEREST = 500
 MIN_CREDIT_TO_WIDTH_PCT = 0.15
 
 # ─────────────────────────────────────────────
-# EXECUTION COST MODEL (Gate 1 realism)
+# EXECUTION COST MODEL (Gate 1 realism) — Robinhood-accurate
 # ─────────────────────────────────────────────
-# Conservative defaults for a 1-contract vertical:
-# - Commission assumed per contract per leg (open and close)
-# - Slippage assumed per share at entry and exit (mark vs. fill friction)
-COMMISSION_PER_CONTRACT_PER_LEG = 0.65  # USD
-ASSUMED_ENTRY_SLIPPAGE_PER_SHARE = 0.02 # USD/share
-ASSUMED_EXIT_SLIPPAGE_PER_SHARE = 0.02  # USD/share
+# Robinhood options pricing (verified 2026-07): $0.50/contract (non-Gold) or $0.35 (Gold),
+# PLUS ~$0.04/contract combined regulatory + exchange fees, charged on BOTH open and close.
+# So per-leg-per-direction ≈ $0.54 (non-Gold) / $0.39 (Gold). A vertical = 2 legs, round trip
+# = 4 leg-fills. These are the MEASUREMENT baseline for honest paper P/L — not something to
+# optimize yet. Set ROBINHOOD_GOLD=True if you carry Gold.
+ROBINHOOD_GOLD = False
+_RH_CONTRACT_FEE = 0.35 if ROBINHOOD_GOLD else 0.50
+_RH_REG_EXCH_FEE = 0.04
+COMMISSION_PER_CONTRACT_PER_LEG = round(_RH_CONTRACT_FEE + _RH_REG_EXCH_FEE, 2)  # ≈0.54 / 0.39
+# Slippage is only used by the scanner's *modeled* estimate. Paper P/L captures real friction
+# through the actual entry/exit prices you log, so paper trades are commission-only by default.
+ASSUMED_ENTRY_SLIPPAGE_PER_SHARE = 0.02 # USD/share (modeled estimate only)
+ASSUMED_EXIT_SLIPPAGE_PER_SHARE = 0.02  # USD/share (modeled estimate only)
+# Legs per vertical spread (bull put = short leg + long leg).
+LEGS_PER_SPREAD = 2
+
+# ─────────────────────────────────────────────
+# PAPER / CREDIT-FREE MODE
+# ─────────────────────────────────────────────
+# DISABLE_AI hard-stops every paid LLM call (news GPT sentiment + tipsheet synthesis) so paper
+# validation never burns Anthropic/OpenAI credits. The system falls back to rule-based/keyword
+# logic, which is fully sufficient for screening and paper tracking. Flip to False only when you
+# deliberately want AI narrative and have credits to spend.
+DISABLE_AI = True
 
 # ─────────────────────────────────────────────
 # RISK TIERS — account-size-agnostic position sizing
