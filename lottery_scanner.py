@@ -28,6 +28,8 @@ BASE = Path(__file__).resolve().parent
 OUT = BASE / "logs" / "lottery_latest.json"
 sys.path.insert(0, str(BASE))
 
+import strategies
+
 
 def _build_call(ticker, price, tech, news, chain_calls, budget, dte_lo=25, dte_hi=45):
     """Pick a ~0.30-delta call in the DTE window under budget; classify the setup."""
@@ -41,9 +43,14 @@ def _build_call(ticker, price, tech, news, chain_calls, budget, dte_lo=25, dte_h
         setup, conv = "Oversold bounce at support", "MED"
     else:
         return None
-    # choose call: nearest to ~0.32 delta within DTE + budget
+    # Choose the call nearest ~0.32 delta within DTE + budget, but only inside the spec's
+    # delta band. Searching the whole chain and picking "nearest 0.32" silently degrades to
+    # junk when budget binds: on a high-priced underlying the only calls under $400 are deep
+    # OTM, so this surfaced 0.08-delta tickets labelled HIGH conviction.
+    d_lo, d_hi = strategies.STRATEGY_SPECS["long_call_lottery"]["target_delta"]
     cands = [o for o in chain_calls if dte_lo <= (o.get("dte") or 0) <= dte_hi
-             and (o.get("mid") or 0) * 100 <= budget and (o.get("delta") or 0) > 0]
+             and (o.get("mid") or 0) * 100 <= budget
+             and d_lo <= (o.get("delta") or 0) <= d_hi]
     if not cands:
         return None
     pick = min(cands, key=lambda o: abs((o.get("delta") or 0) - 0.32))
@@ -53,15 +60,26 @@ def _build_call(ticker, price, tech, news, chain_calls, budget, dte_lo=25, dte_h
     tgt_mult = 3.0
     # underlying price where the option ~triples at expiration (intrinsic ≈ 3*premium above breakeven)
     tgt_price = strike + prem_ps * (1 + tgt_mult)
+    # Final gate through the single source of truth (delta band, IV-rank cap, budget, and news
+    # validation), so a lottery row is held to the same published criteria as every other
+    # strategy and the cockpit can show it the same criteria panel.
+    ev = strategies.evaluate("long_call_lottery", {
+        "dte": pick.get("dte"), "delta": pick.get("delta"), "iv_rank": tech.get("iv_rank"),
+        "trend": trend, "premium_usd": prem, "sentiment": sent,
+    })
+    if not ev["qualified"]:
+        return None
     return {
         "ticker": ticker, "current_price": round(price, 2), "strike": strike,
         "expiration": pick.get("expiration"), "dte": pick.get("dte"),
         "premium_per_share": round(prem_ps, 2), "premium_usd": prem, "max_loss_usd": prem,
         "delta": round(float(pick.get("delta") or 0), 2), "iv": pick.get("iv"),
+        "iv_rank": tech.get("iv_rank"),
         "breakeven": round(be, 2), "breakeven_move_pct": round(be_move, 1),
         "target_multiple": tgt_mult, "target_price": round(tgt_price, 2),
         "conviction": conv, "setup": setup, "catalyst": news.get("market_impact_summary"),
         "news_sentiment": sent, "rsi": rsi, "trend": trend, "nearest_support": support,
+        "criteria": ev["criteria"], "news_check": ev["news_check"],
     }
 
 
@@ -76,9 +94,13 @@ def scan_live(budget):
             if px is None or px.empty:
                 continue
             price = float(px["Close"].iloc[-1])
-            tech = technicals.compute(tk, px) if hasattr(technicals, "compute") else {}
-            nws = newsmod.get_sentiment(tk) if hasattr(newsmod, "get_sentiment") else {}
-            chain = fetcher.get_call_options_chain(tk, 25, 45) if hasattr(fetcher, "get_call_options_chain") else []
+            # These were hasattr-guarded against function names that do not exist
+            # (technicals.compute, news.get_sentiment), so tech/news silently fell back to {}
+            # forever. _build_call needs rsi/sma/support and returns None without them, so the
+            # live scanner could never emit a single call. Call the real functions instead.
+            chain = fetcher.get_call_options_chain(tk, 25, 45)
+            tech = technicals.calculate_all(px, tk, current_iv=technicals.estimate_atm_iv(chain, price))
+            nws = newsmod.get_ticker_sentiment(tk)
             row = _build_call(tk, price, tech, nws, chain, budget)
             if row:
                 calls.append(row)

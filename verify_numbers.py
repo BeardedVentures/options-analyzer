@@ -19,9 +19,13 @@ ART = Path(__file__).resolve().parent / "logs" / "scan_latest.json"
 
 
 def strategy_key(t):
-    """Map the display label back to a geometry family. Unknown → caller fails the row
-    loudly rather than skipping its checks (a silent pass reads as 'verified')."""
-    s = (t.get("strategy") or "").lower()
+    """Map a strategy name back to a geometry family. Unknown → caller fails the row loudly
+    rather than skipping its checks (a silent pass reads as 'verified').
+
+    Accepts both spellings in circulation: main.py emits the raw key ("bull_put_spread")
+    while multi_strategy emits the display label ("Iron Condor"), so normalize separators.
+    """
+    s = (t.get("strategy") or "").lower().replace("_", " ")
     if "iron condor" in s:
         return "iron_condor"
     if "bear call" in s:
@@ -114,12 +118,22 @@ def main():
     # freshness
     stale = False
     try:
-        dt = datetime.fromisoformat(str(ts).split(".")[0])
-        age = (datetime.now() - dt).total_seconds() / 60
-        print(f"age: {age:.0f} min", "(fresh)" if age <= 20 else "(STALE — rescan)")
-        stale = age > 20
-    except Exception:
-        print("age: could not parse timestamp")
+        # main.py stamps tz-aware ET; the seeder stamps naive local. Splitting on "." used to
+        # discard the offset and compare ET against naive local time, so on a non-ET box the
+        # age came out ~-60 min: never > 20, so the staleness guard could never fire.
+        dt = datetime.fromisoformat(str(ts))
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+        age = (now - dt).total_seconds() / 60
+        if age < -5:
+            # Future-stamped: clock skew or a bad tz. Treat as untrustworthy, not "fresh".
+            print(f"age: {age:.0f} min — TIMESTAMP IS IN THE FUTURE (clock skew?); cannot vouch for freshness")
+            stale = True
+        else:
+            print(f"age: {age:.0f} min", "(fresh)" if age <= 20 else "(STALE — rescan)")
+            stale = age > 20
+    except Exception as e:
+        print(f"age: could not parse timestamp ({e}) — treating as stale")
+        stale = True
     bad = 0
     for t in trades:
         iss = check_trade(t)

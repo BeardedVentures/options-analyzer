@@ -824,7 +824,16 @@ body {
         </div>
         <div>
           <div class="card-strikes">
-            ${{ "%.0f"|format(trade.short_strike) }} / ${{ "%.0f"|format(trade.long_strike) }}
+            {# Iron condors carry four strikes and no short_strike/long_strike — formatting
+               those directly raises UndefinedError and takes the whole scan down. #}
+            {% if trade.get('call_short_strike') %}
+              ${{ "%.0f"|format(trade.get('put_long_strike')) }}/${{ "%.0f"|format(trade.get('put_short_strike')) }}
+              &mdash; ${{ "%.0f"|format(trade.get('call_short_strike')) }}/${{ "%.0f"|format(trade.get('call_long_strike')) }}
+            {% elif trade.get('short_strike') is not none %}
+              ${{ "%.0f"|format(trade.get('short_strike')) }} / ${{ "%.0f"|format(trade.get('long_strike')) }}
+            {% else %}
+              &mdash;
+            {% endif %}
           </div>
           <div class="card-dte">{{ trade.expiration }} · {{ trade.dte }}DTE</div>
         </div>

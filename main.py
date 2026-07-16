@@ -963,19 +963,29 @@ def run_scan(session_type: str) -> None:
     weekly_summary = compute_weekly_summary(log_dir, ts) if (session_type == "close" and ts.weekday() == 4) else None
 
     logger.debug("[scan] Calling renderer.render()")
-    output_path = renderer.render(
-        session_type=session_type,
-        qualified_trades=qualified_trades,
-        avoided_tickers=avoided,
-        market_context=market_context,
-        synthesis=synthesis,
-        account_balance=config.ACCOUNT_BALANCE,
-        scan_timestamp=ts,
-        eod_setups=eod_setups,
-        weekly_summary=weekly_summary,
-        morning_signals=morning_signals,
-        decay_alerts=decay_alerts,
-    )
+    # The tip sheet is a presentation artifact; scan_latest.json is the cockpit's source of
+    # truth. A template error must not cost us the scan — an iron condor (no short_strike)
+    # raised UndefinedError here and killed run_scan before the artifact was ever written,
+    # leaving the board silently serving the previous run.
+    output_path = None
+    try:
+        output_path = renderer.render(
+            session_type=session_type,
+            qualified_trades=qualified_trades,
+            avoided_tickers=avoided,
+            market_context=market_context,
+            synthesis=synthesis,
+            account_balance=config.ACCOUNT_BALANCE,
+            scan_timestamp=ts,
+            eod_setups=eod_setups,
+            weekly_summary=weekly_summary,
+            morning_signals=morning_signals,
+            decay_alerts=decay_alerts,
+        )
+    except Exception as e:
+        logger.error(f"[scan] Tip sheet render FAILED ({e}) — continuing so the engine "
+                     f"artifact is still written. The board is unaffected; the tip sheet is not.",
+                     exc_info=True)
     logger.debug(f"[scan] renderer.render() returned: {output_path}")
 
     scan_entry = {
@@ -1038,3 +1048,39 @@ def run_scan(session_type: str) -> None:
             {k: v for k, v in t.items() if k != "component_breakdown"}
             for t in qualified_trades
         ]
+
+        post_to_jarvis(
+            scan_entry=full_scan_entry,
+            session_type=session_type,
+            market_context=market_context,
+            tipsheet_html=tipsheet_html,
+        )
+    elif VEGA_INGEST_ENABLED:
+        logger.warning("[scan] Skipping JARVIS ingest because source health is degraded")
+
+    if config.EMAIL_ENABLED:
+        pass  # Email sending not configured
+
+
+def resolve_session(ts: Optional[datetime] = None) -> str:
+    """Pick the session from the clock. Before noon ET is the morning scan, after is the close."""
+    ts = ts or now_et()
+    return "morning" if ts.time() < time(12, 0) else "close"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Options Intelligence tip sheet generator")
+    # Defaults to the clock so the launcher's bare `python main.py` runs a real scan. It used to
+    # be required, which made that call exit 2 before any scan ran.
+    parser.add_argument("--session", choices=["morning", "close"], default=None,
+                        help="scan session; defaults to morning before noon ET, close after")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    setup_logging()
+    args = parse_args()
+    session = args.session or resolve_session()
+    logger.info(f"[main] Running {session} scan"
+                + ("" if args.session else " (session auto-detected from clock)"))
+    run_scan(session)
