@@ -47,6 +47,27 @@ STRATEGY_SPECS: Dict[str, Dict] = {
 }
 
 
+# data/technicals.py classifies regime as STRONG_UP | UP | NEUTRAL | DOWN | STRONG_DOWN.
+# The specs above speak in thesis buckets (up / flat / down), so the two vocabularies must be
+# reconciled in exactly one place. Without this, "NEUTRAL" never equals "flat" and the iron
+# condor (trend_ok={"flat"}) can never qualify under ANY market condition, while a STRONG_DOWN
+# tape — the textbook bear-call setup — is rejected for not fitting a bearish thesis.
+_TREND_BUCKETS = {
+    "STRONG_UP": "up", "UP": "up",
+    "NEUTRAL": "flat", "FLAT": "flat", "SIDEWAYS": "flat", "RANGE": "flat",
+    "DOWN": "down", "STRONG_DOWN": "down",
+}
+
+
+def normalize_trend(trend: str) -> str:
+    """Map a technicals regime label onto its thesis bucket. Unknown/absent → "" (the
+    caller then skips the regime check rather than silently failing a valid trade)."""
+    if not trend:
+        return ""
+    t = str(trend).strip().upper()
+    return _TREND_BUCKETS.get(t, t.lower())
+
+
 def validate_news(strategy: str, sentiment: str) -> Dict:
     """Validate the strategy's thesis against news sentiment. Returns
     {ok, verdict, detail}. ok=False means the recommendation should be blocked."""
@@ -84,9 +105,12 @@ def evaluate(strategy: str, ctx: Dict) -> Dict:
         lo, hi = spec["dte"]
         crit.append(_chk(f"DTE {lo}-{hi}", lo <= dte <= hi, f"{dte}d"))
 
-    trend = (ctx.get("trend") or "").lower()
+    raw_trend = ctx.get("trend")
+    trend = normalize_trend(raw_trend)
     if trend:
-        crit.append(_chk("Regime fits thesis", trend in spec["trend_ok"], f"trend {trend}"))
+        # Show the raw label so the cockpit reads the same word the technicals panel does.
+        crit.append(_chk("Regime fits thesis", trend in spec["trend_ok"],
+                         f"trend {str(raw_trend).lower()}"))
 
     iv = ctx.get("iv_rank")
     if iv is not None:
@@ -134,7 +158,18 @@ if __name__ == "__main__":
         ("iron_condor", {"dte": 30, "short_delta": 0.14, "credit_to_width": 0.32, "iv_rank": 48, "trend": "flat", "pop": 0.70, "sentiment": "POSITIVE"}, False),  # directional news
         ("long_call_lottery", {"dte": 36, "delta": 0.30, "iv_rank": 52, "trend": "up", "premium_usd": 210, "sentiment": "POSITIVE"}, True),
         ("long_call_lottery", {"dte": 36, "delta": 0.30, "iv_rank": 52, "trend": "up", "premium_usd": 210, "sentiment": "BLOCKING"}, False),
+        # --- REAL technicals vocabulary (STRONG_UP|UP|NEUTRAL|DOWN|STRONG_DOWN) ---
+        # These are the labels the live engine actually passes. Before normalize_trend(),
+        # "NEUTRAL" != "flat" so the condor could never qualify and STRONG_* always failed.
+        ("iron_condor", {"dte": 30, "short_delta": 0.14, "credit_to_width": 0.32, "iv_rank": 48, "trend": "NEUTRAL", "pop": 0.70, "sentiment": "NEUTRAL"}, True),
+        ("bear_call", {"dte": 33, "short_delta": 0.20, "credit_to_width": 0.22, "iv_rank": 62, "trend": "STRONG_DOWN", "pop": 0.78, "sentiment": "NEGATIVE"}, True),
+        ("bull_put", {"dte": 30, "short_delta": -0.23, "credit_to_width": 0.57, "iv_rank": 68, "trend": "STRONG_UP", "pop": 0.84, "sentiment": "NEUTRAL"}, True),
+        # ...and the thesis must still be enforced, not merely satisfied by normalization.
+        ("bear_call", {"dte": 33, "short_delta": 0.20, "credit_to_width": 0.22, "iv_rank": 62, "trend": "STRONG_UP", "pop": 0.78, "sentiment": "NEGATIVE"}, False),
+        ("iron_condor", {"dte": 30, "short_delta": 0.14, "credit_to_width": 0.32, "iv_rank": 48, "trend": "STRONG_UP", "pop": 0.70, "sentiment": "NEUTRAL"}, False),
     ]
+    assert normalize_trend("NEUTRAL") == "flat" and normalize_trend("STRONG_DOWN") == "down"
+    assert normalize_trend("flat") == "flat" and normalize_trend(None) == ""
     ok = 0
     for strat, ctx, exp in tests:
         r = evaluate(strat, ctx)

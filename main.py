@@ -142,19 +142,8 @@ def build_market_context() -> Dict:
 
 
 def estimate_current_iv(options: List[Dict], current_price: float) -> float:
-    ivs = []
-    for opt in options:
-        iv = opt.get("iv")
-        strike = opt.get("strike", 0)
-        if iv and current_price > 0:
-            if abs(strike - current_price) / current_price <= 0.03:
-                ivs.append(float(iv))
-    if not ivs:
-        ivs = [float(opt.get("iv")) for opt in options if opt.get("iv")]
-    if not ivs:
-        return 0.0
-    ivs.sort()
-    return ivs[len(ivs) // 2]
+    # Single source of truth in technicals so every strategy path ranks IV off the same number.
+    return technicals.estimate_atm_iv(options, current_price)
 
 
 def select_long_put_strike(options: List[Dict], short_strike: float) -> Optional[float]:

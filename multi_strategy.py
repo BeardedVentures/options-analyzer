@@ -201,8 +201,16 @@ def scan_extra(ticker: str, sentiment_map: Dict, price_data=None, calls=None, pu
             puts = fetcher.get_options_chain(ticker, config.MIN_DTE, config.MAX_DTE)
         if tech is None:
             try:
-                tech = technicals.calculate_all(price_data, ticker)
-            except Exception:
+                # current_iv is REQUIRED: it defaults to 0.0, which yields iv_rank 0 and makes
+                # every iv_rank_min gate (bear call 35, condor 45) unpassable — the generators
+                # would silently never emit a trade. Rank off the same chain we price from.
+                iv_chain = list(calls or []) + list(puts or [])
+                current_iv = technicals.estimate_atm_iv(iv_chain, price)
+                if not current_iv:
+                    logger.warning(f"[multi_strategy] {ticker}: no ATM IV in chain — iv_rank gates will reject")
+                tech = technicals.calculate_all(price_data, ticker, current_iv=current_iv)
+            except Exception as e:
+                logger.warning(f"[multi_strategy] {ticker}: technicals failed: {e}")
                 tech = {}
         sentiment = (sentiment_map.get(ticker, {}) or {}).get("sentiment", "NEUTRAL")
         earnings_days = None

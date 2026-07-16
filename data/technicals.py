@@ -145,6 +145,28 @@ def _iv_rank_hv_approx(close: pd.Series, current_iv: float) -> float:
     return round(float(np.mean(arr <= current_iv) * 100), 1)
 
 
+def estimate_atm_iv(options: List[Dict], current_price: float) -> float:
+    """Median IV of the near-ATM (within 3%) contracts, falling back to the whole chain.
+
+    Shared by every strategy path so they all rank IV off the same number: calculate_all()
+    defaults current_iv to 0.0, which silently yields iv_rank 0 and fails any iv_rank_min
+    gate, so a caller that skips this cannot surface a trade at all.
+    """
+    ivs = []
+    for opt in options or []:
+        iv = opt.get("iv")
+        strike = opt.get("strike", 0)
+        if iv and current_price > 0:
+            if abs(strike - current_price) / current_price <= 0.03:
+                ivs.append(float(iv))
+    if not ivs:
+        ivs = [float(opt.get("iv")) for opt in (options or []) if opt.get("iv")]
+    if not ivs:
+        return 0.0
+    ivs.sort()
+    return ivs[len(ivs) // 2]
+
+
 def calculate_iv_rank(ticker: str, current_iv: float, close: pd.Series) -> dict:
     """
     Calculate IV Rank from stored historical IV samples for this ticker.
