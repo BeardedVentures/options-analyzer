@@ -11,6 +11,7 @@ All functions cache results for the session to avoid redundant API calls.
 All functions degrade gracefully -- log and continue, never crash.
 """
 
+import re
 import time
 import logging
 import json
@@ -52,6 +53,21 @@ def _last_trade_date(exp_date):
     return exp_date
 
 
+_SECRET_QS_RE = re.compile(r"(?i)\b(apikey|api_key|token|access_token|key|secret|password)=([^&\s\"']+)")
+
+
+def redact_secrets(text: str) -> str:
+    """Strip credentials out of a string before it is logged or persisted.
+
+    requests puts the full request URL in its exception message, so a NewsAPI 429 carries
+    the live API key. Those strings land in scan_log.json's api_calls[].error, which is a
+    TRACKED file -- the key reached git history that way.
+    """
+    if not text:
+        return text
+    return _SECRET_QS_RE.sub(lambda m: f"{m.group(1)}=***REDACTED***", str(text))
+
+
 def _log_api_call(source: str, ticker: str, success: bool, error: str = ""):
     """Append to the module-level API call log (used by scan_log)."""
     if not hasattr(_log_api_call, "calls"):
@@ -60,7 +76,7 @@ def _log_api_call(source: str, ticker: str, success: bool, error: str = ""):
         "source": source,
         "ticker": ticker,
         "success": success,
-        "error": error,
+        "error": redact_secrets(error),
         "timestamp": datetime.now().isoformat(),
     })
 
@@ -791,7 +807,7 @@ def get_news(ticker: str, hours: int = 24) -> List[Dict]:
                 })
             _log_api_call("newsapi", ticker, True)
         except Exception as e:
-            logger.warning(f"[fetcher] NewsAPI error for {ticker}: {e}")
+            logger.warning(f"[fetcher] NewsAPI error for {ticker}: {redact_secrets(str(e))}")
             _log_api_call("newsapi", ticker, False, str(e))
 
     # Tier 2: yfinance fallback
@@ -853,7 +869,7 @@ def get_macro_news(hours: int = 24) -> List[Dict]:
                 })
             _log_api_call("newsapi.macro", "MACRO", True)
         except Exception as e:
-            logger.warning(f"[fetcher] Macro news error: {e}")
+            logger.warning(f"[fetcher] Macro news error: {redact_secrets(str(e))}")
             _log_api_call("newsapi.macro", "MACRO", False, str(e))
 
     _cache[cache_key] = articles
