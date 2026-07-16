@@ -441,6 +441,7 @@ def load_board():
                 trades = [_adapt_engine(t) for t in qt]
                 trades.sort(key=lambda x: (x["priority"] or 0), reverse=True)
                 return {"source": "engine", "trades": trades, "asof": d.get("timestamp"),
+                        "session": d.get("session_type"),
                         "context": d.get("market_context") or {}, "regime": d.get("regime") or {},
                         "note": ""}
         except Exception:
@@ -780,15 +781,28 @@ def _reconcile(c):
 
 def _freshness(board):
     """(label, css_class, stale_bool) for the data as-of stamp vs the ~15-min pull window."""
+    # seed_demo.py writes fabricated trades to the SAME artifact the live engine uses, stamped
+    # with a current timestamp — so an offline demo board otherwise reads as a fresh live one.
+    # Say so before anything else: these are invented numbers, not quotes.
+    if str(board.get("session") or "").upper() == "DEMO":
+        return ("DEMO DATA — fabricated sample trades, NOT live quotes. Do not trade off this board.",
+                "warn", True)
     asof=board.get("asof")
     if not asof:
         return ("no scan yet", "warn", True)
     try:
-        ts=datetime.fromisoformat(str(asof).replace("Z","").split(".")[0].replace("T"," ").strip())
+        # main.py stamps tz-aware ET. Stripping the offset and diffing against naive local time
+        # made age negative on a non-ET box, which the age<0 clamp then showed as "0 min old" —
+        # so a genuinely stale board always read as fresh.
+        ts=datetime.fromisoformat(str(asof).replace("Z","+00:00").strip())
     except Exception:
         try: ts=datetime.strptime(str(asof)[:16], "%Y-%m-%d %H:%M")
         except Exception: return (f"as-of {esc(asof)}", "flash", False)
-    age=(datetime.now()-ts).total_seconds()/60.0
+    now=datetime.now(ts.tzinfo) if ts.tzinfo else datetime.now()
+    age=(now-ts).total_seconds()/60.0
+    if age < -5:
+        return (f"as-of {ts.strftime('%H:%M')} · timestamp is in the FUTURE (clock skew?) — freshness unknown",
+                "warn", True)
     if age<0: age=0
     if age<=20: return (f"as-of {ts.strftime('%H:%M')} · {age:.0f} min old (within 15-min feed)", "flash", False)
     if age<=90: return (f"as-of {ts.strftime('%H:%M')} · {age:.0f} min old — rescan for fresh quotes", "warn", True)
