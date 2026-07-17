@@ -400,6 +400,24 @@ FUNDAMENTALS_WEIGHT = 10          # Component weight in composite score (0-10)
 # These will be tagged and flagged with special warnings in the output.
 ENABLE_VOL_CRUSH_MODE = True
 
+# ─────────────────────────────────────────────
+# BETA BUILD — signal-quality components (spec §3.2–§3.5)
+# ─────────────────────────────────────────────
+# P0 dedup / book awareness
+ALLOW_SAME_TICKER = False          # If True, don't flag trades whose underlying is already held
+
+# IV skew scoring (spec §3.3) — additive 0–15 component
+SKEW_SCORING_ENABLED = True        # Compute per-ticker put/call skew and add a skew_score
+SKEW_SCORE_MAX_POINTS = 15         # Max points the skew component can contribute
+SKEW_SCORE_CAP_VOL_PTS = 10.0      # Favorable skew (vol points) that maps to the max score
+SKEW_TARGET_DTE = 30               # Expiration (DTE) at which skew is measured
+
+# Post-earnings IV-crush mode (spec §3.5) — additive +5 bonus
+POST_EARNINGS_MODE_ENABLED = True  # Flag names that reported 1–3 days ago with IVR still high
+POST_EARNINGS_IVR_MIN = 55         # IV Rank must exceed this to qualify as a crush candidate
+POST_EARNINGS_DAYS_WINDOW = (1, 3) # Trading days since the earnings report (inclusive)
+POST_EARNINGS_BONUS = 5            # Edge-score bonus applied to a qualifying crush candidate
+
 # EOD Mean Reversion thresholds (close session)
 EOD_MIN_DROP_PCT = 1.5            # Minimum % down on day to flag for mean reversion
 EOD_MAX_DROP_PCT = 4.0            # Maximum % down (beyond this = potential fundamental break)

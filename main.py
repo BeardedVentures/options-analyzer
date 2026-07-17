@@ -377,6 +377,39 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     earnings_dt = fetcher.get_earnings_date(ticker)
     days_to_earnings = fundamentals.days_until_earnings(earnings_dt)
 
+    # ── Post-earnings IV-crush detection (spec §3.5) ──────────────────────
+    # A name that reported 1–3 trading days ago while IV is still elevated
+    # (IVR > threshold) and is stable/recovering (not breaking down) is a
+    # premium-selling candidate. Best-effort; dormant when data is unavailable.
+    post_earnings_crush = False
+    days_since_earnings = None
+    post_earnings_bonus = 0
+    if getattr(config, "POST_EARNINGS_MODE_ENABLED", True):
+        try:
+            last_earn = fetcher.get_last_earnings_date(ticker)
+            if last_earn is not None:
+                last_d = last_earn.date() if hasattr(last_earn, "date") else last_earn
+                days_since_earnings = (now_et().date() - last_d).days
+                ivr_min = float(getattr(config, "POST_EARNINGS_IVR_MIN", 55))
+                lo, hi = getattr(config, "POST_EARNINGS_DAYS_WINDOW", (1, 3))
+                trend_up = (tech.get("trend") or "").upper() not in ("DOWN", "STRONG_DOWN")
+                if (days_since_earnings is not None and lo <= days_since_earnings <= hi
+                        and (iv_rank or 0) > ivr_min and trend_up):
+                    post_earnings_crush = True
+                    post_earnings_bonus = int(getattr(config, "POST_EARNINGS_BONUS", 5))
+        except Exception as _pe:
+            logger.debug(f"[screen] {ticker}: post-earnings check skipped: {_pe}")
+
+    # ── IV skew (spec §3.3) — raw vol-point skew feeding the skew_score component ──
+    skew_info: Dict = {}
+    skew_raw = None
+    if getattr(config, "SKEW_SCORING_ENABLED", True):
+        try:
+            skew_info = fetcher.get_options_skew(ticker, config.MIN_DTE, config.MAX_DTE) or {}
+            skew_raw = skew_info.get("skew_vol_pts")
+        except Exception as _sk:
+            logger.debug(f"[screen] {ticker}: skew check skipped: {_sk}")
+
     sentiment = sentiment_map.get(ticker, {})
     sentiment_label = (sentiment.get("sentiment") or "NEUTRAL").upper()
     if config.NEWS_SENTIMENT_BLOCK and sentiment_label == "BLOCKING":
@@ -452,6 +485,8 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         news_sentiment=sentiment_label,
         earnings_days_away=days_to_earnings,
         fundamentals_score=fundamentals_eval.get("score"),
+        skew_raw=skew_raw,
+        post_earnings_bonus=post_earnings_bonus,
     )
 
     if not edge_score.get("qualified"):
@@ -548,6 +583,11 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "edge_points": edge_points,
         "edge_score": edge_score.get("total_score"),
         "component_breakdown": edge_score.get("component_breakdown"),
+        "skew_vol_pts": skew_raw,
+        "skew_score": (edge_score.get("component_breakdown") or {}).get("skew", 0),
+        "skew_detail": skew_info or None,
+        "post_earnings_crush": post_earnings_crush,
+        "days_since_earnings": days_since_earnings,
         "vrp": tech.get("vrp"),
         "trend": tech.get("trend"),
         "rsi": tech.get("rsi"),
@@ -751,6 +791,114 @@ def _compute_regime_context(market_context: Dict) -> Dict:
         return {"regime_flag": "NORMAL", "regime_note": None, "trade_suppressed": False}
 
 
+def _deduplicate_by_underlying(qualified_trades: List[Dict]) -> List[Dict]:
+    """
+    P0 dedup (spec §3.2): surface exactly one row per underlying — the single
+    highest edge_score strategy. A trader cannot safely hold a bull put spread AND
+    an iron condor on the same name simultaneously, so the board must not show both.
+
+    Suppressed alternatives are NOT discarded — they are attached to the kept trade
+    as `suppressed_strategies` so the trade detail card can still surface "compare
+    modes". Result is returned highest-edge-first.
+    """
+    if not qualified_trades:
+        return qualified_trades
+
+    by_ticker: Dict[str, List[Dict]] = {}
+    for t in qualified_trades:
+        by_ticker.setdefault(str(t.get("ticker", "")).upper(), []).append(t)
+
+    deduped: List[Dict] = []
+    dropped: List[str] = []
+    for tk, group in by_ticker.items():
+        group.sort(key=lambda t: (t.get("edge_score") or 0), reverse=True)
+        winner = group[0]
+        if len(group) > 1:
+            winner["suppressed_strategies"] = [
+                {
+                    "strategy": g.get("strategy"),
+                    "edge_score": g.get("edge_score"),
+                    "short_strike": g.get("short_strike"),
+                    "long_strike": g.get("long_strike"),
+                    "expiration": g.get("expiration"),
+                    "credit_usd": g.get("credit_usd"),
+                    "max_loss_usd": g.get("max_loss_usd"),
+                    "true_pop": g.get("true_pop"),
+                }
+                for g in group[1:]
+            ]
+            dropped.extend(f"{tk}:{g.get('strategy')}({g.get('edge_score')})" for g in group[1:])
+        deduped.append(winner)
+
+    if dropped:
+        logger.info(
+            f"[dedup] Suppressed {len(dropped)} same-underlying duplicate(s) "
+            f"(kept highest edge per ticker): {', '.join(dropped)}"
+        )
+    deduped.sort(key=lambda t: (t.get("edge_score") or 0), reverse=True)
+    return deduped
+
+
+def _get_open_position_tickers(log_dir: Path) -> Tuple[set, List[Dict]]:
+    """
+    Best-effort set of tickers with OPEN positions plus the open rows, for book
+    awareness (spec §3.4). Tries the JARVIS tower's /vega/outcomes?status=open first
+    (authoritative once trades are logged there), then falls back to the local
+    open_positions.json ledger. Never raises — book awareness is advisory.
+    """
+    open_rows: List[Dict] = []
+    try:
+        import os as _os
+        import json as _json
+        import urllib.request as _rq
+
+        host = _os.environ.get("JARVIS_HOST", "http://192.168.0.222:8000")
+        if host:
+            url = f"{host}/vega/outcomes?status=open&limit=200"
+            with _rq.urlopen(url, timeout=4) as resp:
+                data = _json.loads(resp.read().decode("utf-8"))
+            if isinstance(data, dict):
+                open_rows = data.get("outcomes", []) or []
+    except Exception as e:
+        logger.debug(f"[book] JARVIS open-outcomes unavailable ({e}); using local ledger")
+
+    if not open_rows:
+        try:
+            open_rows = load_open_positions(log_dir)
+        except Exception:
+            open_rows = []
+
+    tickers = {str(r.get("ticker", "")).upper() for r in open_rows if r.get("ticker")}
+    return tickers, open_rows
+
+
+def _annotate_book_awareness(
+    qualified_trades: List[Dict], open_tickers: set, open_rows: List[Dict]
+) -> Tuple[List[Dict], float]:
+    """
+    Flag any qualified trade whose underlying already has an open position, and
+    compute aggregate book risk (spec §3.4). Suppression vs flag is controlled by
+    config.ALLOW_SAME_TICKER (default False = flag prominently, do not drop).
+    """
+    for t in qualified_trades:
+        tk = str(t.get("ticker", "")).upper()
+        in_pos = tk in open_tickers
+        t["already_in_position"] = in_pos
+        if in_pos:
+            t.setdefault("warnings", []).append(
+                "ALREADY IN POSITION — open exposure already exists in this underlying"
+            )
+
+    book_risk = 0.0
+    for r in open_rows:
+        ml = r.get("max_loss_usd", r.get("max_loss"))
+        try:
+            book_risk += float(ml or 0)
+        except (TypeError, ValueError):
+            continue
+    return qualified_trades, round(book_risk, 2)
+
+
 def _apply_sector_limit(qualified_trades: List[Dict]) -> List[Dict]:
     """
     Enforce MAX_TRADES_PER_SECTOR to prevent correlated position concentration.
@@ -886,6 +1034,21 @@ def run_scan(session_type: str) -> None:
     logger.debug(f"[scan] Avoided: {[a.get('ticker') for a in avoided]}")
     logger.debug(f"[scan] Errors: {errors}")
 
+    # ── P0: de-duplicate by underlying (one strategy per ticker) ─────────
+    qualified_trades = _deduplicate_by_underlying(qualified_trades)
+
+    # ── Book awareness: flag underlyings already held; aggregate book risk ──
+    _book_log_dir = BASE_DIR / config.LOG_DIR
+    open_tickers, open_rows = _get_open_position_tickers(_book_log_dir)
+    qualified_trades, book_risk_usd = _annotate_book_awareness(
+        qualified_trades, open_tickers, open_rows
+    )
+    if open_tickers:
+        logger.info(
+            f"[book] {len(open_tickers)} open position(s): {', '.join(sorted(open_tickers))} "
+            f"· current book risk ${book_risk_usd:.0f}"
+        )
+
     # Build shadow telemetry payload (non-blocking observability data)
     qualified_by_ticker = {str(t.get("ticker", "")).upper(): t for t in qualified_trades}
     avoided_by_ticker = {str(a.get("ticker", "")).upper(): a for a in avoided}
@@ -1019,6 +1182,11 @@ def run_scan(session_type: str) -> None:
         "source_health": source_health,
         "qualified_trades": qualified_trades,
         "rejected_trades": avoided,
+        "book": {
+            "open_tickers": sorted(open_tickers),
+            "open_positions": len(open_rows),
+            "current_book_risk_usd": book_risk_usd,
+        },
     }
     write_scan_latest(log_dir, scan_latest)
 

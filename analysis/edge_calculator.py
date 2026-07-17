@@ -354,6 +354,39 @@ def calculate_fundamentals_score(fundamentals: Dict, is_etf: bool = False) -> Di
 # COMPOSITE EDGE SCORE
 # ─────────────────────────────────────────────
 
+def compute_skew_score(raw_skew_vol_pts: Optional[float], strategy: str) -> int:
+    """
+    Normalize raw IV skew (in vol points) to a 0–15 scoring component.
+
+    raw_skew_vol_pts = IV(30-delta put) − IV(30-delta call), i.e. positive when
+    downside puts are richer than upside calls (the normal equity skew).
+
+    Directional interpretation by strategy (spec §3.3):
+      bull_put_spread : positive put skew is EDGE (selling rich downside insurance) → higher score
+      bear_call_spread: invert — negative skew (calls rich) scores higher
+      iron_condor     : use absolute skew — richness on either wing helps the sold leg
+
+    Normalization: 0 at flat/adverse skew, capped at 15 at ≥10 vol points of
+    favorable skew (linear in between). Returns 0 when data is unavailable.
+    """
+    if raw_skew_vol_pts is None:
+        return 0
+
+    strat = (strategy or "bull_put_spread").lower()
+    if "bear_call" in strat:
+        favorable = -float(raw_skew_vol_pts)      # calls-rich (negative raw) is favorable
+    elif "iron_condor" in strat or "condor" in strat:
+        favorable = abs(float(raw_skew_vol_pts))  # either wing rich helps
+    else:  # bull_put_spread and default
+        favorable = float(raw_skew_vol_pts)       # puts-rich (positive raw) is favorable
+
+    if favorable <= 0:
+        return 0
+    cap = float(getattr(config, "SKEW_SCORE_CAP_VOL_PTS", 10.0))
+    max_pts = int(getattr(config, "SKEW_SCORE_MAX_POINTS", 15))
+    return int(round(min(favorable, cap) / cap * max_pts))
+
+
 def calculate_edge_score(
     ticker: str,
     strategy: str,
@@ -363,17 +396,27 @@ def calculate_edge_score(
     news_sentiment: str,
     earnings_days_away: int,
     fundamentals_score: Optional[float] = None,
+    skew_raw: Optional[float] = None,
+    post_earnings_bonus: int = 0,
 ) -> Dict:
     """
-    Composite 0-100 edge score combining all factors.
+    Composite edge score combining all factors.
 
-    Components:
+    Core components (sum to a 0-100 base):
       VRP component         (30 points max)
       True POP Edge         (25 points max)
-    Technical Score       (20 points max)
+      Technical Score       (20 points max)
       News Sentiment        (10 points max)
-    Earnings Safety       (5 points max)
-    Fundamentals          (10 points max)
+      Earnings Safety       (5 points max)
+      Fundamentals          (10 points max)
+
+    Beta additive components (spec §3.3 / §3.5), disabled by default via None/0 args
+    so existing behavior is unchanged unless the caller opts in:
+      IV Skew               (0-15 points, additive)  — set via skew_raw
+      Post-earnings crush   (+5 bonus)               — set via post_earnings_bonus
+
+    The final total is clamped to 0-100. Additive components can only raise a score,
+    so enabling them may qualify more trades — recalibrate MIN_EDGE_SCORE if desired.
 
     Returns:
         total_score: int 0-100
@@ -459,6 +502,16 @@ def calculate_edge_score(
     else:
         normalized = max(0.0, min(10.0, float(fundamentals_score))) / 10.0
         breakdown["fundamentals"] = round(normalized * fundamentals_weight)
+
+    # ── IV Skew Component (0-15 points, additive — spec §3.3) ──
+    # Only contributes when the caller supplies skew data and scoring is enabled.
+    if getattr(config, "SKEW_SCORING_ENABLED", True):
+        breakdown["skew"] = compute_skew_score(skew_raw, strategy)
+    else:
+        breakdown["skew"] = 0
+
+    # ── Post-earnings IV-crush bonus (+5, additive — spec §3.5) ──
+    breakdown["post_earnings"] = int(post_earnings_bonus or 0)
 
     total = sum(breakdown.values())
     total = min(100, max(0, total))

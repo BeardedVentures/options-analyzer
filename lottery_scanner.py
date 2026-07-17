@@ -69,6 +69,30 @@ def _build_call(ticker, price, tech, news, chain_calls, budget, dte_lo=25, dte_h
     })
     if not ev["qualified"]:
         return None
+
+    # Per-ticker differentiation (spec §5.5): surface 2–3 CONCRETE technical signals
+    # instead of the same template setup line on every card. Built from this ticker's
+    # actual indicators so no two cards read identically.
+    ivr = tech.get("iv_rank")
+    signals = []
+    if rsi is not None and "Momentum" in (setup or ""):
+        signals.append(f"RSI {rsi:.0f} — momentum with room below overbought")
+        if sma20 and sma50:
+            signals.append(f"Above SMA20 ${sma20:.2f} & SMA50 ${sma50:.2f}")
+    elif rsi is not None:
+        signals.append(f"RSI {rsi:.0f} — oversold, turning at support")
+        if support:
+            signals.append(f"Holding support ${support:.2f} ({(price - support) / price * 100:+.1f}% away)")
+    signals.append(f"Breakeven +{be_move:.1f}% to ${be:.2f}; ~{tgt_mult:.0f}x if it reaches ${tgt_price:.2f}")
+    if ivr is not None:
+        signals.append(f"IV-Rank {ivr:.0f}")
+    signals = signals[:3]
+
+    # Drop the generic "no significant news" filler — it reads as template noise.
+    catalyst = news.get("market_impact_summary")
+    if catalyst and "no significant" in catalyst.lower():
+        catalyst = None
+
     return {
         "ticker": ticker, "current_price": round(price, 2), "strike": strike,
         "expiration": pick.get("expiration"), "dte": pick.get("dte"),
@@ -77,7 +101,7 @@ def _build_call(ticker, price, tech, news, chain_calls, budget, dte_lo=25, dte_h
         "iv_rank": tech.get("iv_rank"),
         "breakeven": round(be, 2), "breakeven_move_pct": round(be_move, 1),
         "target_multiple": tgt_mult, "target_price": round(tgt_price, 2),
-        "conviction": conv, "setup": setup, "catalyst": news.get("market_impact_summary"),
+        "conviction": conv, "setup": setup, "catalyst": catalyst, "signals": signals,
         "news_sentiment": sent, "rsi": rsi, "trend": trend, "nearest_support": support,
         "criteria": ev["criteria"], "news_check": ev["news_check"],
     }
@@ -116,11 +140,15 @@ def demo():
          "breakeven": 142.1, "breakeven_move_pct": 11.0, "target_multiple": 3.0, "target_price": 148.4,
          "conviction": "HIGH", "setup": "Momentum breakout — above SMA20/50 with room to run",
          "catalyst": "Positive news themes — sector strength", "news_sentiment": "POSITIVE",
+         "signals": ["RSI 63 — momentum with room below overbought", "Above SMA20 $124.40 & SMA50 $119.80",
+                     "Breakeven +11.0% to $142.10; ~3x if it reaches $148.40"],
          "rsi": 63, "trend": "up", "nearest_support": 120.0},
         {"ticker": "AMD", "current_price": 132.0, "strike": 130.0, "expiration": "2026-08-14", "dte": 29,
          "premium_per_share": 3.4, "premium_usd": 340, "max_loss_usd": 340, "delta": 0.36, "iv": 0.48,
          "breakeven": 133.4, "breakeven_move_pct": 1.1, "target_multiple": 3.0, "target_price": 143.6,
-         "conviction": "MED", "setup": "Oversold bounce at support", "catalyst": "No significant news impact",
+         "conviction": "MED", "setup": "Oversold bounce at support", "catalyst": None,
+         "signals": ["RSI 35 — oversold, turning at support", "Holding support $131.00 (+0.8% away)",
+                     "Breakeven +1.1% to $133.40; ~3x if it reaches $143.60"],
          "news_sentiment": "NEUTRAL", "rsi": 35, "trend": "down", "nearest_support": 131.0},
     ]
 

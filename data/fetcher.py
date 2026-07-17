@@ -713,6 +713,47 @@ def get_earnings_date(ticker: str) -> Optional[datetime]:
         return None
 
 
+def get_last_earnings_date(ticker: str) -> Optional[datetime]:
+    """
+    Return the most recent PAST earnings date for a ticker (None if unavailable/ETF).
+
+    Used by the post-earnings IV-crush detector (spec §3.5): a name that reported
+    1–3 trading days ago while IV is still elevated is a premium-selling candidate.
+    Best-effort — degrades to None if yfinance has no earnings history.
+    """
+    cache_key = f"last_earnings_{ticker}"
+    if cache_key in _cache:
+        return _cache[cache_key]
+
+    etf_tickers = {item["ticker"] for item in config.WATCHLIST if item.get("type") == "ETF"}
+    if ticker in etf_tickers:
+        _cache[cache_key] = None
+        return None
+
+    _rate_limit()
+    last_dt = None
+    try:
+        ed = yf.Ticker(ticker).earnings_dates
+        if ed is not None and not ed.empty:
+            now = pd.Timestamp.now(tz="UTC")
+            idx = ed.index
+            # Normalize to tz-aware UTC for a safe comparison
+            try:
+                idx_cmp = idx.tz_convert("UTC") if idx.tz is not None else idx.tz_localize("UTC")
+            except Exception:
+                idx_cmp = idx
+            past = ed[idx_cmp <= now]
+            if not past.empty:
+                last_dt = past.index.max().to_pydatetime()
+        _log_api_call("yfinance.last_earnings", ticker, last_dt is not None)
+    except Exception as e:
+        logger.debug(f"[fetcher] Last earnings lookup failed for {ticker}: {e}")
+        _log_api_call("yfinance.last_earnings", ticker, False, str(e))
+
+    _cache[cache_key] = last_dt
+    return last_dt
+
+
 # ─────────────────────────────────────────────
 # VIX
 # ─────────────────────────────────────────────
@@ -953,3 +994,64 @@ def get_call_options_chain(ticker: str, min_dte: int = None, max_dte: int = None
     _log_api_call("yfinance.calls", ticker, len(records) > 0)
     _cache[cache_key] = records
     return records
+
+
+def get_options_skew(ticker: str, min_dte: int = None, max_dte: int = None,
+                     target_delta: float = 0.30) -> Dict:
+    """
+    Measure IV skew for a ticker: IV(30-delta put) − IV(30-delta call), in vol POINTS.
+
+    Positive → downside puts are richer than upside calls (normal equity skew); for a
+    bull put spread this is edge (selling expensive insurance). See spec §3.3 and
+    edge_calculator.compute_skew_score for how the raw value becomes a 0–15 component.
+
+    Both wings are matched at the same expiration (nearest to SKEW_TARGET_DTE, default 30)
+    to avoid a term-structure artifact. Returns a dict; skew_vol_pts is None when the
+    chain is too thin to measure.
+    """
+    empty = {"ticker": ticker, "skew_vol_pts": None, "put_iv": None, "call_iv": None,
+             "expiration": None, "put_delta": None, "call_delta": None}
+    try:
+        puts = get_options_chain(ticker, min_dte, max_dte)
+        calls = get_call_options_chain(ticker, min_dte, max_dte)
+        if not puts or not calls:
+            return empty
+
+        dte_by_exp: Dict[str, int] = {}
+        for o in list(puts) + list(calls):
+            exp = o.get("expiration")
+            if exp and exp not in dte_by_exp and o.get("dte") is not None:
+                dte_by_exp[exp] = int(o["dte"])
+
+        common = ({p.get("expiration") for p in puts} & {c.get("expiration") for c in calls})
+        common = {e for e in common if e}
+        if not common:
+            return empty
+
+        target_dte = int(getattr(config, "SKEW_TARGET_DTE", 30))
+        best_exp = min(common, key=lambda e: abs(dte_by_exp.get(e, 9999) - target_dte))
+
+        put_pool = [p for p in puts if p.get("expiration") == best_exp and (p.get("iv") or 0) > 0]
+        call_pool = [c for c in calls if c.get("expiration") == best_exp and (c.get("iv") or 0) > 0]
+        if not put_pool or not call_pool:
+            return empty
+
+        put = min(put_pool, key=lambda o: abs(abs(float(o.get("delta") or 0)) - target_delta))
+        call = min(call_pool, key=lambda o: abs(abs(float(o.get("delta") or 0)) - target_delta))
+        piv = float(put.get("iv") or 0)
+        civ = float(call.get("iv") or 0)
+        if piv <= 0 or civ <= 0:
+            return empty
+
+        return {
+            "ticker": ticker,
+            "skew_vol_pts": round((piv - civ) * 100, 2),
+            "put_iv": round(piv, 4),
+            "call_iv": round(civ, 4),
+            "expiration": best_exp,
+            "put_delta": round(float(put.get("delta") or 0), 3),
+            "call_delta": round(float(call.get("delta") or 0), 3),
+        }
+    except Exception as e:
+        logger.warning(f"[fetcher] Skew computation failed for {ticker}: {e}")
+        return empty

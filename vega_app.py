@@ -395,6 +395,11 @@ def _adapt_engine(t: dict) -> dict:
         "call_short": g.get("call_short"), "call_long": g.get("call_long"),
         "gates": None, "gates_passed": 8, "gates_total": 8,  # qualified → passed the gate set
         "priority": _f(t.get("edge_score"), 0.0),
+        # Beta signal-quality fields (spec §3.2–§3.5 / §5.1)
+        "already_in_position": bool(t.get("already_in_position")),
+        "post_earnings_crush": bool(t.get("post_earnings_crush")),
+        "skew_vol_pts": _f(t.get("skew_vol_pts")), "skew_score": _f(t.get("skew_score")),
+        "suppressed_strategies": t.get("suppressed_strategies") or [],
     }
 
 
@@ -443,7 +448,7 @@ def load_board():
                 return {"source": "engine", "trades": trades, "asof": d.get("timestamp"),
                         "session": d.get("session_type"),
                         "context": d.get("market_context") or {}, "regime": d.get("regime") or {},
-                        "note": ""}
+                        "book": d.get("book") or {}, "note": ""}
         except Exception:
             pass
     data, path = _latest_candidates()
@@ -650,6 +655,12 @@ th.srt .arw{color:var(--green);font-size:9px}
 .lgrid .v{font-size:16px;font-weight:800;margin-top:2px}.lgrid .v.pos{color:var(--green)}.lgrid .v.neg{color:var(--red)}
 .lgrid .dim{font-size:9.5px}
 .lwhy{margin-top:11px;padding-top:9px;border-top:1px solid var(--line2);font-size:11.5px;color:var(--ink2);line-height:1.5}
+.bflag{display:inline-block;font-size:9px;font-weight:800;letter-spacing:.03em;padding:1px 5px;border-radius:4px;margin:0 3px;vertical-align:middle;text-transform:uppercase}
+.bflag.inpos{background:rgba(230,120,40,.16);color:var(--amber,#e6a23c);border:1px solid rgba(230,120,40,.4)}
+.bflag.crush{background:rgba(90,160,255,.14);color:#5aa0ff;border:1px solid rgba(90,160,255,.4)}
+.bflag.skew{background:rgba(60,180,120,.14);color:var(--green,#3cba7c);border:1px solid rgba(60,180,120,.4)}
+.bookfoot{margin-top:14px;padding:10px 14px;background:var(--panel,#1a1d24);border:1px solid var(--line,#2a2e37);border-radius:8px;font-size:12px;color:var(--ink2,#aab)}
+.bookfoot b.num{color:var(--ink,#e6e8ee)}
 """
 
 
@@ -921,6 +932,32 @@ def detail_drawer(c, i, tier):
     return f'<div class="vdraw"><div class="vdrin">{colA}{colB}{colC}</div></div>'
 
 
+def _beta_flags(c):
+    """Board chips for beta signal-quality flags (spec §5.1)."""
+    out = ""
+    if c.get("already_in_position"):
+        out += '<span class="bflag inpos" title="An open position already exists in this underlying">IN POSITION</span>'
+    if c.get("post_earnings_crush"):
+        out += '<span class="bflag crush" title="Reported 1-3 days ago with IV still elevated (post-earnings crush)">POST-ER</span>'
+    sk = c.get("skew_score")
+    if sk:
+        out += f'<span class="bflag skew" title="IV-skew component — richer downside insurance being sold">SKEW +{sk:.0f}</span>'
+    return out
+
+
+def book_footer(board):
+    """Book-health footer for the Today board (spec §5.4)."""
+    bk = board.get("book") or {}
+    if not bk:
+        return ""
+    n = bk.get("open_positions") or 0
+    risk = bk.get("current_book_risk_usd") or 0
+    tks = bk.get("open_tickers") or []
+    hold = (' &middot; holding: ' + ", ".join(esc(t) for t in tks)) if tks else ''
+    return (f'<div class="bookfoot"><b>Book health</b> &middot; {n} open position(s) '
+            f'&middot; current book risk <b class="num">${risk:,.0f}</b>{hold}</div>')
+
+
 def board_table(trades, tier):
     if not trades:
         return '<div class="empty">No qualified opportunities in the latest scan. Not a strong day to sell premium.</div>'
@@ -948,7 +985,7 @@ def board_table(trades, tier):
         body+=(f'<tr class="vmain" id="vm-{i}"{datts} onclick="vtoggle({i})">'
                f'<td class="l"><span class="vcaret">&#9656;</span> {rec_badge}</td>'
                f'<td class="l tk"><span class="dim">{i+1}</span> <b>{esc(c["ticker"])}</b><div class="dim num">score {sc:.0f}</div></td>'
-               f'<td class="l"><span class="sbadge {scls} num">{sc:.0f}</span> {_type_chip(c)}{_valtag(c)}<span class="strat">{esc(c["strategy"])}</span>'
+               f'<td class="l"><span class="sbadge {scls} num">{sc:.0f}</span> {_type_chip(c)}{_valtag(c)}{_beta_flags(c)}<span class="strat">{esc(c["strategy"])}</span>'
                f'<div class="dim num">{esc(c.get("structure") or "")} - {esc(c.get("dte"))}d</div></td>'
                f'<td>{edge_c}</td>'
                f'<td>{pop_cell(c)}</td>'
@@ -1001,7 +1038,8 @@ def view_today(board, s, tier):
             + '<div class="h2row" style="display:flex;align-items:baseline;gap:10px;margin:18px 0 8px">'
               '<h2 style="margin:0">Qualified opportunities</h2>'
               '<span class="dim" style="margin-left:auto">Click any row to open the full trade -&gt;</span></div>'
-            + board_table(trades, tier))
+            + board_table(trades, tier)
+            + book_footer(board))
 
 
 def hero_card(trades, tier):
@@ -1320,10 +1358,17 @@ def _lottery_card(x):
     rsi=_f(x.get("rsi")); sup=_f(x.get("nearest_support")); trend=esc(x.get("trend") or "")
     prob=f"{delta*100:.0f}%" if delta is not None else "-"
     mult_txt=(f"{mult:.0f}x" if mult else "-")
+    # Prefer the generator's per-ticker signals (spec §5.5). Fall back to a small
+    # tech summary only when signals are absent (older lottery_latest.json).
+    signals=[s for s in (x.get("signals") or []) if s]
     tech=[]
-    if trend: tech.append(f"trend {trend}")
-    if rsi is not None: tech.append(f"RSI {rsi:.0f}")
-    if sup is not None: tech.append(f"support ${sup:.2f}")
+    if not signals:
+        if trend: tech.append(f"trend {trend}")
+        if rsi is not None: tech.append(f"RSI {rsi:.0f}")
+        if sup is not None: tech.append(f"support ${sup:.2f}")
+    # Suppress the generic "no significant news" filler line.
+    if cat and "no significant" in cat.lower():
+        cat=""
     return (
         '<div class="lotto">'
         f'<div class="lh"><div><span class="tchip" title="Long call">CALL</span> <b class="tk">{tk}</b>'
@@ -1336,7 +1381,9 @@ def _lottery_card(x):
         f'<div><div class="cap">Breakeven move</div><div class="v">{(bemv or 0):+.1f}%</div><div class="dim">to ${(be or 0):.2f}</div></div>'
         f'<div><div class="cap">Prob ITM (Δ)</div><div class="v">{prob}</div><div class="dim">IV {(iv*100 if iv and iv<3 else iv) or 0:.0f}%</div></div>'
         f'</div>'
-        f'<div class="lwhy"><b>Setup:</b> {setup or "-"}{(" · <b>Catalyst:</b> "+cat) if cat else ""}'
+        f'<div class="lwhy"><b>Why {tk}:</b> '
+        f'{(" · ".join(esc(sg) for sg in signals)) if signals else (setup or "-")}'
+        f'{(" · <b>Catalyst:</b> "+cat) if cat else ""}'
         f'{(" · News "+sent) if sent else ""}{(" · "+", ".join(tech)) if tech else ""}</div>'
         '</div>'
     )
