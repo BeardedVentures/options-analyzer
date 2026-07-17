@@ -100,7 +100,7 @@ def _gpt4o_batch_sentiment(ticker_headlines: Dict[str, List[str]]) -> Dict[str, 
     Batch all ticker headlines into a single GPT-4o call.
     Returns {ticker: sentiment_dict} for each ticker.
     """
-    if not config.OPENAI_API_KEY:
+    if getattr(config, "DISABLE_AI", False) or not config.OPENAI_API_KEY:
         return {}
 
     try:
@@ -194,7 +194,7 @@ def _gpt4o_batch_sentiment(ticker_headlines: Dict[str, List[str]]) -> Dict[str, 
                 raw = response.choices[0].message.content.strip()
                 match = re.search(r"\{.*\}", raw, re.DOTALL)
                 if match:
-                    data = _json.loads(match.group())
+                    data = json.loads(match.group())
                     result = {}
                     for ticker, vals in data.items():
                         result[ticker] = {

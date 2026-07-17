@@ -17,9 +17,17 @@ This module is dependency-free (stdlib only) and never raises into the scan path
 
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+try:
+    import config as _config
+except Exception:  # pragma: no cover
+    _config = None
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +58,120 @@ def _read_all() -> List[Dict]:
 
 def _write_all(rows: List[Dict]) -> None:
     OUTCOMES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with OUTCOMES_FILE.open("w", encoding="utf-8") as f:
+    # Atomic write — serialize to a temp file then os.replace so an interrupted write can
+    # never truncate the ledger (the failure mode that corrupted scan_log.json).
+    tmp = OUTCOMES_FILE.with_suffix(".jsonl.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
+    os.replace(tmp, OUTCOMES_FILE)
+
+
+def _round_trip_cost_per_contract() -> float:
+    """Robinhood round-trip commission for a vertical: 2 legs open + 2 legs close."""
+    per_leg = float(getattr(_config, "COMMISSION_PER_CONTRACT_PER_LEG", 0.54)) if _config else 0.54
+    legs = int(getattr(_config, "LEGS_PER_SPREAD", 2)) if _config else 2
+    return round(per_leg * legs * 2, 2)
+
+
+def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
+                     entry_credit_per_share: float, dte=None, delta=None,
+                     iv_rank=None, implied_pop=None, contracts: int = 1,
+                     source: str = "manual", note: Optional[str] = None,
+                     theta=None) -> str:
+    """
+    Open a PAPER position from a real candidate (or manual entry). Records the entry credit you
+    would realistically collect; net P/L on close subtracts Robinhood round-trip commissions.
+    Returns the trade id. Reuses the same ledger + set_close/report as real Gate-1 trades.
+    """
+    rows = _read_all()
+    existing_ids = {r.get("id") for r in rows}
+    ts = datetime.now().isoformat()
+    tid = _trade_id(ts, ticker, short_strike, long_strike, expiration)
+    if tid in existing_ids:  # ensure uniqueness for repeat same-day paper entries
+        tid = f"{tid}-{datetime.now().strftime('%H%M%S')}"
+
+    width = None
+    try:
+        width = round(float(short_strike) - float(long_strike), 2)
+    except Exception:
+        pass
+    credit = round(float(entry_credit_per_share), 2)
+    if implied_pop is None and delta is not None:
+        try:
+            implied_pop = round(1 - abs(float(delta)), 3)
+        except Exception:
+            implied_pop = None
+
+    rows.append({
+        "id": tid,
+        "status": "open",                 # open (paper) -> closed
+        "mode": "paper",
+        "source": source,
+        "note": note,
+        "logged_at": ts,
+        "opened_at": ts,
+        "scan_ts": ts,
+        "session_type": "paper",
+        "ticker": ticker,
+        "strategy": "bull_put_spread",
+        "short_strike": short_strike,
+        "long_strike": long_strike,
+        "expiration": expiration,
+        "dte": dte,
+        "spread_width": width,
+        "contracts": int(contracts),
+        # Paper entry: modeled == actual (you chose the fill), so the credit-gap is zero and
+        # the calibration/P&L math flows through set_close unchanged.
+        "modeled_credit_per_share": credit,
+        "modeled_credit_usd": round(credit * 100, 2),
+        "actual_fill_credit": credit,
+        "estimated_round_trip_cost_per_contract": _round_trip_cost_per_contract(),
+        "delta": delta,
+        "short_theta": theta,
+        "iv_rank": iv_rank,
+        "modeled_pop": implied_pop,
+        "implied_pop": implied_pop,
+        "max_loss_per_contract": (round((width - credit) * 100, 2) if (width and credit < width) else None),
+        # Live mark (updated on each rescan while open) → unrealized P/L
+        "current_mark": None,
+        "unrealized_gross": None,
+        "unrealized_net": None,
+        "marked_at": None,
+        # Ground truth (filled on close)
+        "exit_price": None,
+        "realized_gross_pl_per_contract": None,
+        "realized_net_pl_per_contract": None,
+        "realized_pl_per_contract": None,
+        "outcome": None,
+        "exit_reason": None,
+        "filled_at": ts,
+        "closed_at": None,
+    })
+    _write_all(rows)
+    logger.info(f"[outcomes] Opened paper trade {tid}")
+    return tid
+
+
+def set_mark(trade_id: str, current_mark_per_share: float) -> bool:
+    """Update the live spread mark for an OPEN paper trade → unrealized P/L (per contract).
+    unrealized gross = (entry_credit - current_mark) * 100; net subtracts round-trip fees."""
+    rows = _read_all()
+    for r in rows:
+        if r.get("id") == trade_id and r.get("status") == "open":
+            entry = r.get("actual_fill_credit")
+            if entry is None:
+                return False
+            mark = round(float(current_mark_per_share), 2)
+            gross = round((float(entry) - mark) * 100, 2)
+            net = round(gross - float(r.get("estimated_round_trip_cost_per_contract") or 0.0), 2)
+            r["current_mark"] = mark
+            r["unrealized_gross"] = gross
+            r["unrealized_net"] = net
+            r["marked_at"] = datetime.now().isoformat()
+            _write_all(rows)
+            return True
+    return False
 
 
 def record_modeled_trades(scan_ts: str, session_type: str, qualified_trades: List[Dict]) -> int:

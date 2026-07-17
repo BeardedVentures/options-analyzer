@@ -199,8 +199,9 @@ def synthesize_tipsheet(
 
     Returns structured dict matching the tip sheet template schema.
     """
-    if not config.ANTHROPIC_API_KEY:
-        logger.info("[synthesizer] No Anthropic API key — using fallback synthesis")
+    if getattr(config, "DISABLE_AI", False) or not config.ANTHROPIC_API_KEY:
+        reason = "DISABLE_AI set (paper/credit-free mode)" if getattr(config, "DISABLE_AI", False) else "No Anthropic API key"
+        logger.info(f"[synthesizer] {reason} — using rule-based fallback synthesis")
         return _fallback_synthesis(session_type, qualified_trades, market_context, account_balance)
 
     try:
