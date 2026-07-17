@@ -62,7 +62,11 @@ def _edge_score(ticker, strategy, tech, vrp_pct, true_pop, implied_pop, sentimen
             ticker=ticker, strategy=strategy, technical_score=tech.get("technical_score", 50) or 50,
             vrp_pct=vrp_pct or 0, edge_points=ep, news_sentiment=(sentiment or "NEUTRAL"),
             earnings_days_away=earnings_days if earnings_days is not None else 99,
-            fundamentals_score=tech.get("fundamentals_score"))
+            fundamentals_score=tech.get("fundamentals_score"),
+            # compute_skew_score has had per-strategy handling for bear_call (calls-rich is
+            # favorable) and iron_condor (either wing) since the beta build, but this path never
+            # passed the raw value — so those trades silently scored 0 on a 15-point component.
+            skew_raw=tech.get("skew_vol_pts"))
         return es.get("total_score", 0), es.get("component_breakdown", {})
     except Exception as e:
         logger.debug(f"edge_score fallback: {e}")
@@ -77,6 +81,10 @@ def _base(ticker, strategy_key, price, tech, sentiment, dte, exp):
         "rsi": tech.get("rsi"), "nearest_support": tech.get("nearest_support"),
         "news_sentiment": sentiment, "news_summary": tech.get("news_summary"),
         "fundamentals_score": tech.get("fundamentals_score"),
+        # Emit the key unconditionally (None when unavailable) so every strategy's rows have the
+        # same shape — the cockpit and any "is the field present?" check treat an absent key and
+        # a null value very differently.
+        "skew_vol_pts": tech.get("skew_vol_pts"),
         "true_pop_drift_mode": "risk_free", "estimated_round_trip_cost_per_contract":
             float(getattr(config, "COMMISSION_PER_CONTRACT_PER_LEG", 0.65)) * 4 + 4.0,
         "needs_validation": True, "warnings": [],
@@ -124,7 +132,8 @@ def build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings
         "true_pop_confidence": pr_res.get("confidence", "LOW"),
         "true_pop_windows": pr_res.get("independent_windows"),
         "implied_pop": round(implied, 3), "edge_score": es,
-        "component_breakdown": comp, "auto_reasoning": f"Bear call: {ev['news_check']['detail']}.",
+        "component_breakdown": comp, "skew_score": (comp or {}).get("skew", 0),
+        "auto_reasoning": f"Bear call: {ev['news_check']['detail']}.",
         "criteria": ev["criteria"], "news_check": ev["news_check"],
     })
     return t
@@ -173,7 +182,8 @@ def build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, 
         "true_pop_confidence": pr_res.get("confidence", "LOW"),
         "true_pop_windows": pr_res.get("independent_windows"),
         "implied_pop": round(implied, 3), "edge_score": es,
-        "component_breakdown": comp, "auto_reasoning": f"Iron condor: {ev['news_check']['detail']}.",
+        "component_breakdown": comp, "skew_score": (comp or {}).get("skew", 0),
+        "auto_reasoning": f"Iron condor: {ev['news_check']['detail']}.",
         "criteria": ev["criteria"], "news_check": ev["news_check"],
     })
     return t
@@ -212,6 +222,13 @@ def scan_extra(ticker: str, sentiment_map: Dict, price_data=None, calls=None, pu
             except Exception as e:
                 logger.warning(f"[multi_strategy] {ticker}: technicals failed: {e}")
                 tech = {}
+        if tech.get("skew_vol_pts") is None and getattr(config, "SKEW_SCORING_ENABLED", True):
+            # Same source and config gate as the bull-put path in main.screen_ticker.
+            try:
+                tech["skew_vol_pts"] = (fetcher.get_options_skew(
+                    ticker, config.MIN_DTE, config.MAX_DTE) or {}).get("skew_vol_pts")
+            except Exception as e:
+                logger.debug(f"[multi_strategy] {ticker}: skew check skipped: {e}")
         sentiment = (sentiment_map.get(ticker, {}) or {}).get("sentiment", "NEUTRAL")
         earnings_days = None
         if want_bc and calls:
