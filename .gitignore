@@ -15,10 +15,15 @@ venv/
 env/
 
 # ── Generated outputs (never commit tip sheets) ──
+# Note: output/ itself is a tracked package (emailer, renderer, templates)
+# — only the regenerated artifact subdirectories are ignored.
 output/tipsheets/
+output/candidates/
+output/paper_desk/
 
-# ── Logs (keep scan_log.json tracked; ignore run log) ──
-logs/run.log
+# ── Logs (all runtime logs; scan_log.json untracked 2026-07-21 —
+#    it appended ~47k lines per commit and is regenerated on each run) ──
+logs/
 
 # ── Runtime model state (cached in CI; do not commit) ──
 data/iv_history/*.json
