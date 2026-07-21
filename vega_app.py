@@ -31,7 +31,7 @@ import os
 import sys
 import threading
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from statistics import NormalDist
@@ -41,6 +41,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
 from analysis import outcome_logger as ol
 from paper_desk import compute_stats, _latest_candidates
+try:
+    import clv_tracker
+except Exception:  # never let the learning module break the cockpit
+    clv_tracker = None
+try:
+    import environment as _environment
+except Exception:
+    _environment = None
 
 BASE = Path(__file__).resolve().parent
 CAND_DIR = BASE / "output" / "candidates"
@@ -51,10 +59,13 @@ SCAN = {"min_dte": 25, "max_dte": 45, "delta_min": 0.12, "delta_max": 0.35, "top
         "max_width": float(getattr(config, "MAX_SPREAD_WIDTH", 5))}
 _scan_status = {"running": False, "msg": "", "at": None}
 
-VIEWS = ("today", "open", "history", "lottery")
+VIEWS = ("today", "brief", "track", "open", "history", "lottery")
 IVR_MIN = getattr(config, "MIN_IV_RANK", 45)
 
 # Component max points for the score composition panel (mirrors edge_calculator).
+# The first six sum to a 100-point base; skew (0-15) and post-earnings (0-5) are
+# additive bonuses on top, so the displayed edge_score can exceed 100. All eight
+# are listed here so the "no black box" panel reconciles exactly to the headline.
 EDGE_COMPONENTS = [
     ("vrp", "VRP / premium", 30),
     ("true_pop_edge", "True-POP edge", 25),
@@ -62,6 +73,11 @@ EDGE_COMPONENTS = [
     ("fundamentals", "Fundamentals", 10),
     ("news", "News", 10),
     ("earnings_safety", "Earnings safety", 5),
+]
+# Additive bonus components (beyond the 100-point base).
+EDGE_BONUSES = [
+    ("skew", "IV skew (bonus)", 15),
+    ("post_earnings", "Post-earnings (bonus)", 5),
 ]
 
 # ── Gate 1 tiering (A3). Backtest sign-off is config-driven; live fills can revert it. ──
@@ -400,6 +416,7 @@ def _adapt_engine(t: dict) -> dict:
         "post_earnings_crush": bool(t.get("post_earnings_crush")),
         "skew_vol_pts": _f(t.get("skew_vol_pts")), "skew_score": _f(t.get("skew_score")),
         "suppressed_strategies": t.get("suppressed_strategies") or [],
+        "env": (_environment.heat_assessment(t) if _environment else None),
     }
 
 
@@ -421,6 +438,12 @@ def _adapt_legacy(row: dict, c: dict) -> dict:
     priority = max(0.0, min(100.0, 0.65 * pop_score * 100 + 0.35 * (roi or 0) * 100 - fails * 6))
     return {
         "source": "legacy", "ticker": row.get("ticker"), "strategy": "Bull Put Spread (fast scan)",
+        "strat_type": "bull_put",
+        "structure": (f'{_f(c.get("short_strike")):g}/{_f(c.get("long_strike")):g}P'
+                      if (c.get("short_strike") is not None and c.get("long_strike") is not None) else None),
+        "breakevens": ([_f(c.get("breakeven"))] if c.get("breakeven") is not None else []),
+        "max_loss_usd": _f(c.get("max_loss_usd")),
+        "env": None,
         "price": _f(row.get("price")), "short": _f(c.get("short_strike")), "long": _f(c.get("long_strike")),
         "width": _f(c.get("width")), "credit_ps": _f(c.get("credit_per_share"), 0.0),
         "credit_usd": _f(c.get("credit_usd")), "dte": c.get("dte"), "exp": c.get("expiration"),
@@ -477,7 +500,9 @@ document.addEventListener('submit', function(e){
 }, true);
 function vtoggle(i){var m=document.getElementById('vm-'+i),d=document.getElementById('vd-'+i);if(m)m.classList.toggle('open');if(d)d.classList.toggle('open');}
 function vopen(i){var d=document.getElementById('vd-'+i);if(d&&!d.classList.contains('open'))vtoggle(i);var m=document.getElementById('vm-'+i);if(m)m.scrollIntoView({behavior:'smooth',block:'center'});}
-function sortBoard(th,key){var tbl=th.closest('table'),tb=tbl.tBodies[0];var dir=th.getAttribute('data-dir')==='asc'?'desc':'asc';tbl.querySelectorAll('th.srt').forEach(function(h){h.removeAttribute('data-dir');var a=h.querySelector('.arw');if(a)a.textContent='';});th.setAttribute('data-dir',dir);var ar=th.querySelector('.arw');if(ar)ar.textContent=dir==='asc'?' \u25B2':' \u25BC';var mains=[].slice.call(tb.querySelectorAll('tr.vmain'));mains.sort(function(a,b){var x=parseFloat(a.getAttribute('data-'+key)),y=parseFloat(b.getAttribute('data-'+key));if(isNaN(x))x=-1e12;if(isNaN(y))y=-1e12;return dir==='asc'?x-y:y-x;});mains.forEach(function(m){var i=m.getAttribute('data-i');tb.appendChild(m);var d=document.getElementById('vd-'+i);if(d)tb.appendChild(d);});}
+function sortBoard(th,key){var tbl=th.closest('table'),tb=tbl.tBodies[0];var dir=th.getAttribute('data-dir')==='asc'?'desc':'asc';tbl.querySelectorAll('th.srt').forEach(function(h){h.removeAttribute('data-dir');var a=h.querySelector('.arw');if(a)a.textContent='';});th.setAttribute('data-dir',dir);var ar=th.querySelector('.arw');if(ar)ar.textContent=dir==='asc'?' \u25B2':' \u25BC';var mains=[].slice.call(tb.querySelectorAll('tr.vmain'));mains.sort(function(a,b){var sa=a.getAttribute('data-'+key)||'',sb=b.getAttribute('data-'+key)||'';var x=parseFloat(sa),y=parseFloat(sb);if(!isNaN(x)&&!isNaN(y)){return dir==='asc'?x-y:y-x;}var r=sa.localeCompare(sb);return dir==='asc'?r:-r;});mains.forEach(function(m){var i=m.getAttribute('data-i');tb.appendChild(m);var d=document.getElementById('vd-'+i);if(d)tb.appendChild(d);});clearGroups();}
+function clearGroups(){document.querySelectorAll('tr.grouphead').forEach(function(g){g.remove();});var b=document.getElementById('grpbtn');if(b)b.classList.remove('active');}
+function groupByTicker(){var btn=document.getElementById('grpbtn');var tbl=document.querySelector('.board table');if(!tbl)return;var tb=tbl.tBodies[0];clearGroups();if(btn&&btn.getAttribute('data-on')==='1'){btn.setAttribute('data-on','0');btn.classList.remove('active');return;}var mains=[].slice.call(tb.querySelectorAll('tr.vmain'));mains.sort(function(a,b){var r=(a.getAttribute('data-ticker')||'').localeCompare(b.getAttribute('data-ticker')||'');if(r!==0)return r;return parseFloat(b.getAttribute('data-score'))-parseFloat(a.getAttribute('data-score'));});var ncols=tbl.querySelectorAll('thead .col th').length||12;var last=null;mains.forEach(function(m){var tk=m.getAttribute('data-ticker');if(tk!==last){var hr=document.createElement('tr');hr.className='grouphead';hr.innerHTML='<td class="l" colspan="'+ncols+'">'+tk+'</td>';tb.appendChild(hr);last=tk;}tb.appendChild(m);var d=document.getElementById('vd-'+m.getAttribute('data-i'));if(d)tb.appendChild(d);});if(btn){btn.setAttribute('data-on','1');btn.classList.add('active');}}
 function filterBoard(){var el=document.getElementById('fmaxloss');var v=el?parseFloat(el.value):NaN;var n=0,shown=0;document.querySelectorAll('tr.vmain').forEach(function(m){n++;var ml=parseFloat(m.getAttribute('data-maxloss'));var hide=!isNaN(v)&&ml>v;m.style.display=hide?'none':'';var d=document.getElementById('vd-'+m.getAttribute('data-i'));if(d){d.style.display=hide?'none':'';if(hide){m.classList.remove('open');d.classList.remove('open');}}if(!hide)shown++;});var fc=document.getElementById('fcount');if(fc)fc.textContent=isNaN(v)?'':(shown+' of '+n+' within budget');}
 function clearFilter(){var e=document.getElementById('fmaxloss');if(e){e.value='';filterBoard();}}
 </script>"""
@@ -565,7 +590,116 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 .comp .row .bar{flex:1;height:6px;background:var(--panel3);border-radius:99px;overflow:hidden}
 .comp .row .bar i{display:block;height:100%;background:var(--blue)}
 .comp .row .v{width:52px;text-align:right;color:var(--ink3)}
+.comp .subtot{display:flex;justify-content:space-between;border-top:1px dashed var(--line);padding-top:6px;margin-top:2px;color:var(--ink2);font-weight:600}
 .comp .tot{display:flex;justify-content:space-between;border-top:1px solid var(--line);padding-top:8px;margin-top:2px;font-weight:700}
+.comp .dim{color:var(--ink3);font-weight:400}
+/* ── Brief tab ── */
+.bstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:8px 0 20px}
+.bstrip .ms{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:11px 14px}
+.bstrip .msl{font-size:10px;letter-spacing:.12em;color:var(--ink3);text-transform:uppercase;margin-bottom:5px}
+.bstrip .msv{font-size:16px;font-weight:700;color:var(--ink)}
+.bstrip .mss{font-size:11px;color:var(--ink3);margin-top:3px}
+.briefcard{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:9px;padding:14px 16px;margin-bottom:14px}
+.briefcard.bl-green{border-left-color:var(--green)}.briefcard.bl-amber{border-left-color:var(--amber,#F0B429)}.briefcard.bl-red{border-left-color:var(--red);opacity:.9}
+.bch{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.bcl{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.bch .bt{font-size:20px;font-weight:800;color:var(--ink)}
+.bch .bstrat{font-size:11px;letter-spacing:.05em;color:var(--ink3)}
+.bch .bstruct{font-size:13px;color:var(--ink2)}
+.bcr{margin-left:auto;text-align:right}
+.bch .bcred{display:block;color:var(--green);font-weight:700;font-size:14px}
+.bch .bcml{display:block;color:var(--ink3);font-size:11px}
+.brec{font-size:11px;font-weight:800;letter-spacing:.1em;padding:5px 12px;border-radius:5px;border:1px solid}
+.rec-green{color:var(--green);border-color:var(--green);background:rgba(0,200,122,.12)}
+.rec-amber{color:var(--amber,#F0B429);border-color:var(--amber,#F0B429);background:rgba(240,180,41,.12)}
+.rec-red{color:var(--red);border-color:var(--red);background:rgba(240,69,90,.12)}
+.bmeter{display:flex;align-items:center;gap:10px;margin:12px 0 10px}
+.bmeter .ml2{font-size:11px;color:var(--ink3);letter-spacing:.06em;white-space:nowrap}
+.bmeter .mtrk{flex:1;height:5px;background:var(--panel3);border-radius:99px;overflow:hidden}
+.bmeter .mtrk i{display:block;height:100%}
+.mtrk i.score-high{background:var(--green)}.mtrk i.score-med{background:var(--amber,#F0B429)}.mtrk i.score-low{background:var(--red)}
+.bpop{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.bpop .pb{background:var(--panel2,var(--bg));border:1px solid var(--line);border-radius:6px;padding:6px 12px;min-width:92px}
+.bpop .pb.edge{background:rgba(240,180,41,.08);border-color:rgba(240,180,41,.4)}
+.bpop .pl{display:block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin-bottom:2px}
+.bpop .pb b{font-size:15px}
+.evln{font-size:12.5px;color:var(--ink2);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 12px;margin-bottom:10px}
+.brwhy{font-size:12px;color:var(--ink2);margin-bottom:10px}
+.tkt{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.tk{font-size:12.5px;color:var(--ink2);line-height:1.5;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:5px;padding:8px 12px}
+.tk.entry{border-left-color:var(--green)}.tk.exit{border-left-color:var(--amber,#F0B429)}.tk.inval{border-left-color:var(--red)}
+.tk .tl{display:block;font-size:9.5px;font-weight:700;letter-spacing:.1em;color:var(--ink3);margin-bottom:3px}
+.tk b{color:var(--ink)}
+.szg{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.szc{flex:1;min-width:96px;text-align:center;border:1px solid var(--line);border-radius:6px;padding:7px 10px;background:var(--bg)}
+.szc.on{border-color:rgba(0,200,122,.5)}.szc.off{opacity:.55}
+.szc .szl{font-size:10px;color:var(--ink3);margin-bottom:3px}
+.szc .szn{font-size:16px;font-weight:700;color:var(--green)}.szc.off .szn{color:var(--ink3)}
+.szc .szs{font-size:10.5px;color:var(--ink3);margin-top:2px}
+.wflist{display:flex;flex-direction:column;gap:5px;margin-top:6px}
+.wf{font-size:11.5px;color:var(--amber,#F0B429);background:rgba(240,180,41,.07);border:1px solid rgba(240,180,41,.28);border-radius:4px;padding:5px 10px}
+/* ── Gate detail table + notes ("under the hood") ── */
+.gatecell{cursor:pointer}
+.gatecell .dim{color:var(--ink3)}
+.gtbl{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+.gtbl th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink4);font-weight:700;text-align:right;padding:4px 8px;border-bottom:1px solid var(--line)}
+.gtbl th.l{text-align:left}
+.gtbl td{padding:5px 8px;text-align:right;border-bottom:1px solid var(--line2);color:var(--ink2)}
+.gtbl td.l{text-align:left}
+.gtbl td.num{padding-right:18px}
+.gtbl th.l:nth-child(3),.gtbl td.l:nth-child(3){padding-left:6px}
+.gtbl tr.gsub td{background:var(--panel2);color:var(--ink3);font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;padding:5px 8px}
+.gtbl .gpass{color:var(--green);white-space:nowrap;text-align:right}
+.gtbl .gwarn{color:var(--amber,#F0B429);white-space:nowrap;text-align:right}
+.notes{display:flex;flex-direction:column;gap:5px;margin-top:4px}
+.noterow{font-size:12px;color:var(--ink2);line-height:1.5;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:6px 10px}
+.ntag{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:1px 6px;border-radius:3px;margin-right:7px;vertical-align:middle}
+.nt-engine{background:var(--blue-dim,rgba(77,159,255,.14));color:var(--blue,#4E8EF5)}
+.nt-news{background:rgba(0,200,122,.14);color:var(--green)}
+.nt-flag{background:rgba(240,180,41,.14);color:var(--amber,#F0B429)}
+.nt-you{background:rgba(180,120,255,.16);color:#b478ff}
+/* ── Track Record tiles ── */
+.tkgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:8px 0 16px}
+.tktile{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:12px 14px}
+.tktile .tkl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);margin-bottom:5px}
+.tktile .tkv{font-size:22px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+.tktile .tkv.green{color:var(--green)}.tktile .tkv.red{color:var(--red)}
+.tktile .tks{font-size:10.5px;color:var(--ink3);margin-top:3px}
+/* ── Environment heat chips + brief line ── */
+.bflag.envwarm{background:rgba(240,180,41,.14);color:var(--amber,#F0B429);border:1px solid rgba(240,180,41,.45)}
+.bflag.envhot{background:rgba(240,69,90,.16);color:var(--red);border:1px solid rgba(240,69,90,.5)}
+.envln.env-warm{font-size:12px;color:var(--ink2);background:rgba(240,180,41,.07);border:1px solid rgba(240,180,41,.3);border-radius:6px;padding:7px 11px;margin-bottom:10px;line-height:1.5}
+.envln.env-hot{font-size:12px;color:var(--ink2);background:rgba(240,69,90,.08);border:1px solid rgba(240,69,90,.35);border-radius:6px;padding:7px 11px;margin-bottom:10px;line-height:1.5}
+/* ── Row contract line (strikes + clear expiration) + provisional banner ── */
+.subln{margin-top:3px;font-size:12px;color:var(--ink3)}
+.subln .strk{color:var(--ink);font-weight:600;font-size:12.5px}
+.subln .expd{color:var(--amber);font-weight:600}
+.provbar{background:rgba(240,180,41,.08);border:1px solid rgba(240,180,41,.3);border-radius:8px;padding:9px 14px;margin-bottom:10px;font-size:12.5px;color:var(--ink2);line-height:1.5}
+.provbar code{background:var(--panel3);padding:1px 6px;border-radius:4px;font-size:11.5px;color:var(--ink)}
+/* ── Desired-range status tint on board numbers (green optimal / white neutral / red outside) ── */
+.rg-opt{color:var(--green)}
+.rg-neu{color:var(--ink)}
+.rg-bad{color:var(--red)}
+.rgkey{color:var(--ink3);font-size:10.5px;display:inline-flex;align-items:center;gap:3px}
+.rgkey i{font-style:normal;font-size:9px;margin-left:8px;margin-right:1px}
+/* ── Drawer contract header ── */
+.chdr{padding:12px 16px;margin-bottom:6px;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:9px}
+.chtop{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.chdr .chstrat{font-size:17px;font-weight:800;color:var(--ink);letter-spacing:.01em}
+.chdr .chlegs{font-size:13px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.chdr .chlegs b{color:var(--ink)}
+.chdr .chmeta{margin-top:7px;font-size:12.5px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.chdr .chm{color:var(--ink3);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;margin-right:2px}
+tr.grouphead td{background:var(--panel3);color:var(--amber);font-weight:800;font-size:12px;letter-spacing:.06em;padding:6px 12px;border-bottom:1px solid var(--line)}
+.ghostbtn.active{background:var(--amber-dim,rgba(240,180,41,.14));border-color:var(--amber);color:var(--amber)}
+.alts{display:flex;flex-direction:column;gap:5px}
+.altrow{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink2);background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:6px 10px}
+.altrow .alttxt{flex:1}
+.altmeta{font-size:11px}
+.alttag{font-size:8.5px;font-weight:800;letter-spacing:.07em;padding:1px 6px;border-radius:3px}
+.alt-primary{background:rgba(0,200,122,.14);color:var(--green)}
+.alt-alt{background:var(--panel3);color:var(--ink3)}
+.alt-env{background:rgba(240,180,41,.14);color:var(--amber)}
 .strip{display:flex;flex-wrap:wrap;gap:20px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 16px;margin:4px 0}
 .strip span{color:var(--ink3);font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-right:6px}.strip b{font-size:15px}
 button{font:inherit;border:0;border-radius:7px;padding:6px 12px;cursor:pointer;font-weight:600}
@@ -589,8 +723,11 @@ button:disabled{opacity:.75;cursor:default}
 .mbar i,.sc .row .bar i,.comp .row .bar i{transition:width .45s cubic-bezier(.22,.61,.36,1)}
 .card,.panel{transition:border-color .15s ease}
 .panel:hover{border-color:#2c3342}
-.board thead .grp th{position:sticky;top:47px;background:var(--panel);z-index:6}
-.board thead .col th{position:sticky;top:71px;background:var(--panel);z-index:6}
+/* Header stays in normal flow. It was position:sticky, but .board is a scroll
+   container (overflow-x:auto below), so the header stuck to the board's own top
+   and its opaque background clipped the first data row. Static = no overlap. */
+.board thead .grp th{position:static;background:var(--panel);z-index:6}
+.board thead .col th{position:static;background:var(--panel);z-index:6}
 .spin{display:inline-block;width:11px;height:11px;border:2px solid rgba(4,21,14,.35);border-top-color:#04150e;border-radius:50%;vertical-align:-1px;margin-right:4px;animation:spin .6s linear infinite}
 .close .spin,.primary .spin{border-color:rgba(255,255,255,.35);border-top-color:#fff}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -693,6 +830,42 @@ def gate_dots(card):
     return f'<span class="gdots">{dots}</span>'
 
 
+# ── Desired-range coloring (STATUS encoding: green=optimal, white=neutral, red=outside).
+#    Thresholds encode premium-selling doctrine; tune them here. Each returns a css class.
+#    Numbers stay fully legible; color is an at-a-glance "where does this sit vs. what I want".
+RANGE_MAXLOSS_OPT = 250.0   # $ per trade at/under this reads optimal (near your risk tier)
+RANGE_MAXLOSS_BAD = 500.0   # $ over this reads out-of-range for the account
+
+def _rg(metric, v):
+    """Return 'rg-opt' | 'rg-neu' | 'rg-bad' | '' for a metric value."""
+    if v is None:
+        return ""
+    try:
+        v = float(v)
+    except Exception:
+        return ""
+    if metric == "edge":            # POP edge (pp) — higher better
+        return "rg-opt" if v >= 6 else "rg-bad" if v < 0 else "rg-neu"
+    if metric == "tpop":            # True POP (%) — sweet spot high, not thin
+        return "rg-opt" if v >= 80 else "rg-bad" if v < 68 else "rg-neu"
+    if metric == "ev":              # EV $/contract — positive expectancy wanted
+        return "rg-opt" if v >= 10 else "rg-bad" if v < 0 else "rg-neu"
+    if metric == "roc":             # ROC (%) — banded; absurdly high = illiquid/mispriced artifact
+        if v < 12 or v > 150:
+            return "rg-bad"
+        return "rg-opt" if 20 <= v <= 80 else "rg-neu"
+    if metric == "maxloss":         # $ risk — lower better vs account
+        return "rg-opt" if v <= RANGE_MAXLOSS_OPT else "rg-bad" if v > RANGE_MAXLOSS_BAD else "rg-neu"
+    if metric == "cushion":         # % distance to the short strike — higher safer
+        return "rg-opt" if v >= 8 else "rg-bad" if v < 4 else "rg-neu"
+    if metric == "delta":           # |short delta| — banded; too close (>0.30) is the danger
+        a = abs(v)
+        if a > 0.30:
+            return "rg-bad"
+        return "rg-opt" if 0.12 <= a <= 0.22 else "rg-neu"
+    return ""
+
+
 def pop_cell(card):
     """A2: headline true POP, secondary implied, edge as decision metric."""
     tp = card.get("true_pop")
@@ -704,7 +877,7 @@ def pop_cell(card):
         imp = f'impl {implied*100:.0f}%' if implied is not None else ""
         conf = card.get("true_pop_conf")
         cf = ' <span class="dim">est</span>' if conf == "LOW" else ""
-        return f'<b class="num">{tp*100:.0f}%</b>{cf}<div class="dim num">{imp} · {edge_html}</div>'
+        return f'<b class="num {_rg("tpop",tp*100)}">{tp*100:.0f}%</b>{cf}<div class="dim num">{imp} · {edge_html}</div>'
     mp = card.get("model_pop")
     if mp is not None:
         imp = f'impl {implied*100:.0f}%' if implied is not None else ""
@@ -841,6 +1014,84 @@ def _criteria_panel(c):
     return f'<h4 style="margin-top:14px">Selection criteria &middot; fitted to strategy</h4>{lead}{rows}{news}'
 
 
+def gate_detail_table(c):
+    """The 'under the hood' data table: each hard gate + fitted criterion with its actual
+       value and pass/warn status. Simple 8/8 lives on the row; this is what it expands into."""
+    # Hard qualifying gates with the live value that satisfied each (qualified → all pass).
+    ivr=c.get("iv_rank"); dl=c.get("delta"); ctw=c.get("credit_to_width")
+    cush=c.get("cushion_pct"); cu=c.get("credit_usd"); dte=c.get("dte")
+    tp=c.get("true_pop"); ip=c.get("implied_pop")
+    hard=[
+        ("IV rank",        f"{ivr:.0f}" if ivr is not None else "—",           f"≥ {IVR_MIN}"),
+        ("Short delta",    f"{abs(dl):.2f}" if dl is not None else "—",          "within band"),
+        ("OTM cushion",    f"{cush:.1f}%" if cush is not None else "—",          "short strike OTM"),
+        ("Credit / width", f"{ctw*100:.0f}%" if ctw is not None else "—",        "≥ min"),
+        ("Min credit",     f"${cu:.0f}" if cu is not None else "—",              "> 0"),
+        ("Liquidity",      "ok",                                                 "vol / OI screen"),
+        ("POP",            f"{(tp if tp is not None else ip or 0)*100:.0f}%",    "≥ threshold"),
+        ("DTE window",     f"{dte}d" if dte is not None else "—",                "25–45d"),
+    ]
+    hrows="".join(
+        f'<tr><td class="l">{esc(lab)}</td><td class="num">{esc(val)}</td>'
+        f'<td class="l dim">{esc(rule)}</td><td class="gpass">&#10003; pass</td></tr>'
+        for lab,val,rule in hard)
+    # Fitted, strategy-specific criteria (these CAN warn while the trade still qualifies).
+    crit=c.get("criteria") or []
+    crows=""
+    for x in crit:
+        ok=x.get("ok"); st=('<td class="gpass">&#10003; pass</td>' if ok else '<td class="gwarn">&#9888; soft</td>')
+        crows+=(f'<tr><td class="l">{esc(x.get("label",""))}</td><td class="num" colspan="2">'
+                f'{esc(x.get("detail",""))}</td>{st}</tr>')
+    crit_hdr=('<tr class="gsub"><td colspan="4" class="l">Strategy-fitted criteria</td></tr>'+crows) if crows else ""
+    passed=c.get("gates_passed"); total=c.get("gates_total")
+    return (f'<h4 style="margin-top:14px">Gate detail — {passed}/{total} hard gates '
+            f'<span class="dim">(click any row header on the board to collapse)</span></h4>'
+            f'<table class="gtbl"><thead><tr><th class="l">Check</th><th>Value</th>'
+            f'<th class="l">Rule</th><th>Status</th></tr></thead><tbody>{hrows}{crit_hdr}</tbody></table>')
+
+
+def notes_section(c):
+    """Notes / analyst annotations. Shows the engine's own reasoning + any warnings as notes,
+       and the persisted per-trade note when one exists (outcome_logger 'note' field)."""
+    bits=[]
+    auto=c.get("auto_reasoning")
+    if auto: bits.append(('engine', esc(auto)))
+    nc=c.get("news_check") or {}
+    if nc.get("detail"): bits.append(('news', esc(nc.get("detail"))))
+    for w in (c.get("warnings") or []):
+        bits.append(('flag', esc(w)))
+    note=c.get("note")
+    if note: bits.append(('you', esc(note)))
+    if not bits:
+        body='<div class="dim" style="font-size:12px">No notes yet.</div>'
+    else:
+        body="".join(f'<div class="noterow"><span class="ntag nt-{t}">{t}</span>{txt}</div>' for t,txt in bits)
+    return f'<h4 style="margin-top:14px">Notes</h4><div class="notes">{body}</div>'
+
+
+def _cost_bases():
+    """The two round-trip cost figures, computed from config so labels stay truthful.
+       modeled (pre-trade EV, conservative: commission + assumed slippage) vs
+       paper (realized ledger P/L, commission-only — real fills capture slippage)."""
+    try:
+        leg = float(getattr(config, "COMMISSION_PER_CONTRACT_PER_LEG", 0.54))
+        legs = int(getattr(config, "LEGS_PER_SPREAD", 2))
+        paper = round(leg * legs * 2, 2)  # both legs, both directions
+        slip = (float(getattr(config, "ASSUMED_ENTRY_SLIPPAGE_PER_SHARE", 0.02))
+                + float(getattr(config, "ASSUMED_EXIT_SLIPPAGE_PER_SHARE", 0.02))) * 100
+        modeled = round(paper + slip, 2)
+        return paper, modeled
+    except Exception:
+        return 2.16, 6.16
+
+
+def _cost_note():
+    paper, modeled = _cost_bases()
+    return (f'<div class="ln" style="color:var(--ink4);margin-top:4px">EV is net of modeled friction '
+            f'~${modeled:.2f}/ct (commission + assumed slippage). Realized paper P/L in Track Record nets '
+            f'commission-only ~${paper:.2f}/ct — real fills capture slippage.</div>')
+
+
 def _edge_block(c):
     e=_ev(c)
     if not e:
@@ -855,7 +1106,8 @@ def _edge_block(c):
     verdict="POSITIVE expectancy - the bet pays" if e["positive"] else "negative expectancy - skip on the math"
     return (f'<div class="edgebox"><div class="cap">Gambler edge - expected value / contract</div>'
             f'<div class="v {cls}">${e["ev"]:+.0f}</div>'
-            f'<div class="ln">Need to win <b>{bw:.0f}%</b> to break even &middot; model says <b>{tp:.0f}%</b> &rarr; {verdict}</div></div>')
+            f'<div class="ln">Need to win <b>{bw:.0f}%</b> to break even &middot; model says <b>{tp:.0f}%</b> &rarr; {verdict}</div>'
+            f'{_cost_note()}</div>')
 
 
 def _verification(c):
@@ -885,6 +1137,71 @@ def _verification(c):
     return f'<h4 style="margin-top:14px">Verification - theory vs the tape</h4>{lead}{body}'
 
 
+def alternatives_panel(c):
+    """Suggested strategies for THIS ticker: the engine's ranked alternatives (suppressed_strategies)
+       plus the environment-recommended structure when the tape is heating against the primary side."""
+    rows = []
+    prim = (c.get("strategy") or (c.get("strat_type") or "").replace("_", " ").title())
+    rows.append(('primary', f'<b>{esc(prim)}</b> {esc(c.get("structure") or "")}',
+                 f'score {c.get("edge_score") or 0:.0f}', 'gpass'))
+    for s in (c.get("suppressed_strategies") or []):
+        nm = (s.get("strategy") or "").replace("_", " ").title()
+        strk = ""
+        if s.get("short_strike") is not None and s.get("long_strike") is not None:
+            strk = f'{s["short_strike"]:g}/{s["long_strike"]:g}'
+        rows.append(('alt', f'{esc(nm)} {esc(strk)}', f'score {s.get("edge_score") or 0:.0f}', 'dim'))
+    e = c.get("env") or {}
+    rec = e.get("recommendation") or {}
+    if e.get("band") in ("warm", "hot"):
+        tgt = rec.get("alt_structure") or (rec.get("strike_note") if rec.get("action", "").startswith(("flip", "condor")) else None)
+        if tgt:
+            rows.append(('env', f'{esc(tgt)}', f'environment {e.get("band")}', 'gwarn'))
+    if len(rows) == 1:
+        body = ('<div class="dim" style="font-size:12px">Top-ranked structure for this name — '
+                'the engine found no competitive alternative and the environment is calm.</div>')
+    else:
+        body = ""
+        for kind, txt, meta, cls in rows:
+            tag = {"primary": "PRIMARY", "alt": "ALSO RANKED", "env": "ENV FLIP"}.get(kind, "")
+            body += (f'<div class="altrow"><span class="alttag alt-{kind}">{tag}</span>'
+                     f'<span class="alttxt">{txt}</span><span class="{cls} altmeta">{esc(meta)}</span></div>')
+    return f'<h4 style="margin-top:14px">Suggested structures — {esc(c["ticker"])}</h4><div class="alts">{body}</div>'
+
+
+def _legs_text(c):
+    """Human-readable legs for the contract header, spelled out per structure."""
+    st = c.get("strat_type", "bull_put")
+    def g(x): return f"{x:g}" if x is not None else "?"
+    if st == "iron_condor":
+        return (f'Put spread <b>{g(c.get("put_short"))}/{g(c.get("put_long"))}</b> '
+                f'<span class="dim">+</span> Call spread <b>{g(c.get("call_short"))}/{g(c.get("call_long"))}</b>')
+    if st == "bear_call":
+        return f'Call spread <b>{g(c.get("short"))}/{g(c.get("long"))}</b> (sell {g(c.get("short"))}C / buy {g(c.get("long"))}C)'
+    return f'Put spread <b>{g(c.get("short"))}/{g(c.get("long"))}</b> (sell {g(c.get("short"))}P / buy {g(c.get("long"))}P)'
+
+
+def contract_header(c):
+    """Prominent banner atop the drawer so the strategy + full contract is unmistakable."""
+    strat = (c.get("strategy") or (c.get("strat_type") or "bull_put").replace("_", " ").title())
+    strat = strat.replace(" (fast scan)", "")
+    chip = _type_chip(c)
+    lab, dte, approx, dt = _exp_parts(c)
+    exp_txt = ""
+    if dt is not None:
+        exp_txt = f'{dt.strftime("%a %b %d, %Y")}' + ("~" if approx else "") + (f' · {dte} DTE' if dte is not None else "")
+    elif dte is not None:
+        exp_txt = f'{dte} DTE'
+    credit = c.get("credit_usd")
+    ml = c.get("max_loss_usd")
+    meta = []
+    if exp_txt: meta.append(f'<span class="chm">Expires</span> <b class="expd">{esc(exp_txt)}</b>')
+    if credit is not None: meta.append(f'<span class="chm">Credit</span> <b class="rg-opt">+${credit:.0f}</b>')
+    if ml is not None: meta.append(f'<span class="chm">Max loss</span> <b style="color:var(--red)">-${ml:.0f}</b>')
+    return (f'<div class="chdr"><div class="chtop">{chip}<span class="chstrat">{esc(strat)}</span>'
+            f'<span class="chlegs">{_legs_text(c)}</span></div>'
+            f'<div class="chmeta">{" &nbsp;·&nbsp; ".join(meta)}</div></div>')
+
+
 def detail_drawer(c, i, tier):
     cushion, max_loss, sc, scls = _card_extras(c)
     rok, riss = _reconcile(c)
@@ -893,7 +1210,14 @@ def detail_drawer(c, i, tier):
     delta=c.get("delta")
 
     def kv(k,v): return f'<div class="kv"><span class="k">{k}</span><b class="num">{v}</b></div>'
+    _elab, _edte, _eapprox, _edt = _exp_parts(c)
+    if _edt is not None:
+        _efull = _edt.strftime("%a %b %d, %Y") + (" ~" if _eapprox else "")
+        _eval = f'{_efull} &middot; {_edte} DTE' if _edte is not None else _efull
+    else:
+        _eval = f'{_edte} DTE' if _edte is not None else "-"
     kvs=[kv("Structure", f'{esc(c.get("structure") or "")} &middot; w{(c.get("width") or 0):g}'),
+         f'<div class="kv"><span class="k">Expiration</span><b class="num" style="color:var(--amber)">{_eval}</b></div>',
          kv("Strategy", esc((c.get("strat_type") or "bull_put").replace("_"," ").title())),
          kv("Credit", f'${(c["credit_usd"] or 0):.0f} (${c["credit_ps"]:.2f}/sh)')]
     if max_loss is not None: kvs.append(f'<div class="kv"><span class="k">Max loss</span><b class="num" style="color:var(--red)">-${max_loss:.0f}</b></div>')
@@ -919,17 +1243,105 @@ def detail_drawer(c, i, tier):
               f'<input class="n" type="number" name="contracts" value="1" min="1">'
               f'<button class="go" type="submit" data-busy="Logging...">Log paper trade</button></form>')
 
+    chdr=contract_header(c)
     colA=f'<div>{_edge_block(c)}<h4 style="margin-top:12px">Key metrics - {esc(c["ticker"])}</h4>{"".join(kvs)}{log_form}</div>'
     colB=(f'<div><div class="payhd"><span>Payoff at expiration</span><span>{esc(c.get("dte"))} DTE</span></div>{diag}'
-          f'<h4 style="margin-top:14px">Why VEGA chose this</h4>{_why_chosen(c)}{_verification(c)}{_criteria_panel(c)}</div>')
+          f'<h4 style="margin-top:14px">Why VEGA chose this</h4>{_why_chosen(c)}{_verification(c)}'
+          f'{env_panel(c)}{alternatives_panel(c)}{gate_detail_table(c)}{notes_section(c)}</div>')
     conf=c.get("true_pop_conf") or "-"
     colC=(f'<div>{score_composition(c)}'
-          f'<h4 style="margin-top:14px">Gates &amp; confidence</h4>'
-          f'<div class="kv"><span class="k">Gates passed</span><b>{gate_dots(c)} {c["gates_passed"]}/{c["gates_total"]}</b></div>'
+          f'<h4 style="margin-top:14px">Confidence</h4>'
+          f'<div class="kv"><span class="k">Hard gates</span><b>{gate_dots(c)} {c["gates_passed"]}/{c["gates_total"]}</b></div>'
           f'<div class="kv"><span class="k">True-POP confidence</span><b>{esc(conf)}</b></div>'
           f'<div class="kv"><span class="k">Gate 1 status</span><b>{tier_badge(tier)}</b></div>'
           f'<div class="kv"><span class="k">Figures reconciled</span><b>{rec_html}</b></div></div>')
-    return f'<div class="vdraw"><div class="vdrin">{colA}{colB}{colC}</div></div>'
+    return f'<div class="vdraw">{chdr}<div class="vdrin">{colA}{colB}{colC}</div></div>'
+
+
+def env_badge(c):
+    """Small board/brief chip for a heating environment (warm/hot only; cool stays quiet)."""
+    e = c.get("env")
+    if not e or e.get("band") == "cool":
+        return ""
+    band = e["band"]; heat = e.get("heat", 0)
+    cls = "envhot" if band == "hot" else "envwarm"
+    lbl = "HEATING" if band == "hot" else "WARM"
+    return (f'<span class="bflag {cls}" title="Environment heat {heat}/100 ({e.get("threat_dir")}) — '
+            f'click the row for the recommended adjustment">{lbl} {heat}</span>')
+
+
+def env_panel(c):
+    """Drawer panel: the 'game environment' read + best-practice recommendation."""
+    e = c.get("env")
+    if not e:
+        return ""
+    band = e["band"]; heat = e.get("heat", 0); rec = e.get("recommendation") or {}
+    tone = {"hot": "gwarn", "warm": "gwarn", "cool": "gpass"}.get(band, "")
+    dot = {"hot": "🔴", "warm": "🟠", "cool": "🟢"}.get(band, "")
+    drivers = "".join(f'<div class="chk amber"><span class="k">&#9888;</span>{esc(d)}</div>'
+                      for d in (e.get("drivers") or [])) or \
+              '<div class="chk"><span class="k">&#10003;</span>Calm — no directional or vol stress against the short side.</div>'
+    sm = rec.get("size_mult")
+    size_line = ("stand aside / flip" if sm == 0 else f"{sm:g}× size" if sm is not None else "—")
+    alt = rec.get("alt_structure")
+    struct_line = ""
+    if rec.get("action") in ("flip_or_stand_aside", "condor_or_stand_aside"):
+        struct_line = f'<div class="kv"><span class="k">Recommended structure</span><b>{esc(rec.get("strike_note") or rec.get("structure"))}</b></div>'
+    elif alt:
+        struct_line = f'<div class="kv"><span class="k">Or play the protected side</span><b>{esc(alt)}</b></div>'
+    strike = rec.get("strike_note")
+    strike_line = (f'<div class="kv"><span class="k">Strike guidance</span><b>{esc(strike)}</b></div>'
+                   if strike and rec.get("action") == "trim" else "")
+    return (f'<h4 style="margin-top:14px">Game environment — {dot} {band.upper()} ({heat}/100, {esc(e.get("threat_dir"))})</h4>'
+            f'{drivers}'
+            f'<div class="kv"><span class="k">Best-practice action</span><b class="{tone}">{esc((rec.get("action") or "").replace("_"," "))} · {size_line}</b></div>'
+            f'{struct_line}{strike_line}'
+            f'<div class="dim" style="font-size:11.5px;margin-top:4px">{esc(rec.get("rationale") or "")}</div>')
+
+
+def _exp_parts(c):
+    """Clear expiration for the row/drawer: (short_label, dte, approx, dt).
+       Uses the real expiration date when present; else derives it from today+DTE (flagged ~)."""
+    dte = c.get("dte")
+    dt = None
+    exp = c.get("exp")
+    if exp:
+        try:
+            dt = datetime.strptime(str(exp)[:10], "%Y-%m-%d")
+        except Exception:
+            dt = None
+    approx = False
+    if dt is None and isinstance(dte, (int, float)):
+        try:
+            dt = datetime.now() + timedelta(days=int(dte))
+            approx = True
+        except Exception:
+            dt = None
+    if dt is None:
+        return (None, dte, False, None)
+    lab = f"{dt.strftime('%b')} {dt.day}"
+    if dt.year != datetime.now().year:
+        lab += f" '{dt.strftime('%y')}"
+    return (lab, dte, approx, dt)
+
+
+def _row_contract(c):
+    """The scannable contract line for a board row: strikes + a clear expiration date + DTE."""
+    strikes = c.get("structure")
+    if not strikes:
+        sh, lg = c.get("short"), c.get("long")
+        strikes = f"{sh:g}/{lg:g}" if (sh is not None and lg is not None) else ""
+    lab, dte, approx, _ = _exp_parts(c)
+    exp_txt = ""
+    if lab:
+        tilde = '<span class="dim" title="approx from DTE — run full engine for the listed date">~</span>' if approx else ''
+        dtxt = f' <span class="dim">· {dte}d</span>' if dte is not None else ''
+        exp_txt = f'<span class="expd">{esc(lab)}{tilde}</span>{dtxt}'
+    elif dte is not None:
+        exp_txt = f'<span class="dim">{dte}d</span>'
+    sk = f'<b class="strk num">{esc(strikes)}</b>' if strikes else ''
+    sep = ' <span class="dim">·</span> ' if (sk and exp_txt) else ''
+    return f'<div class="subln">{sk}{sep}{exp_txt}</div>'
 
 
 def _beta_flags(c):
@@ -965,14 +1377,14 @@ def board_table(trades, tier):
     for i,c in enumerate(trades):
         cushion, max_loss, sc, scls = _card_extras(c)
         delta=c.get("delta"); roi=c.get("roi"); edge=c.get("edge_pp"); tpop=c.get("true_pop")
-        edge_c=(f'<span class="{"pos" if edge>=0 else "neg"} num">{edge:+.1f}pp</span>') if edge is not None else '<span class="dim num">-</span>'
-        roi_c=f'{roi*100:.0f}%' if roi is not None else "-"
-        cush_c=f'{cushion:.1f}%' if cushion is not None else "-"
-        delta_c=f'{delta:.2f}' if delta is not None else "-"
-        maxloss_c=f'${max_loss:.0f}' if max_loss is not None else "-"
+        edge_c=(f'<span class="{_rg("edge",edge)} num">{edge:+.1f}pp</span>') if edge is not None else '<span class="dim num">-</span>'
+        roi_c=f'<span class="{_rg("roc",roi*100)}">{roi*100:.0f}%</span>' if roi is not None else "-"
+        cush_c=f'<span class="{_rg("cushion",cushion)}">{cushion:.1f}%</span>' if cushion is not None else "-"
+        delta_c=f'<span class="{_rg("delta",delta)}">{delta:.2f}</span>' if delta is not None else "-"
+        maxloss_c=f'<span class="{_rg("maxloss",max_loss)}">${max_loss:.0f}</span>' if max_loss is not None else "-"
         why=c.get("why") or ""
         ev=_ev(c); ev_val=ev["ev"] if ev else None
-        ev_c=(f'<span class="{"pos" if ev_val>=0 else "neg"} num">${ev_val:+.0f}</span>') if ev_val is not None else '<span class="dim num">-</span>'
+        ev_c=(f'<span class="{_rg("ev",ev_val)} num">${ev_val:+.0f}</span>') if ev_val is not None else '<span class="dim num">-</span>'
         rec_ok, rec_issues=_reconcile(c)
         rec_badge=('<span class="rec ok" title="figures reconciled">&#10003;</span>' if rec_ok else '<span class="rec bad" title="'+esc("; ".join(rec_issues))+'">&#9888;</span>')
         datts=(f' data-i="{i}" data-edge="{edge if edge is not None else -999}"'
@@ -981,12 +1393,13 @@ def board_table(trades, tier):
                f' data-maxloss="{max_loss if max_loss is not None else 999999}"'
                f' data-cushion="{cushion if cushion is not None else -999}"'
                f' data-delta="{abs(delta) if delta is not None else 999}"'
-               f' data-gates="{c["gates_passed"]}" data-score="{sc}" data-ev="{ev_val if ev_val is not None else -1e9}"')
+               f' data-gates="{c["gates_passed"]}" data-score="{sc}" data-ev="{ev_val if ev_val is not None else -1e9}"'
+               f' data-ticker="{esc(c["ticker"])}" data-strat="{esc((c.get("strat_type") or "bull_put"))}"')
         body+=(f'<tr class="vmain" id="vm-{i}"{datts} onclick="vtoggle({i})">'
                f'<td class="l"><span class="vcaret">&#9656;</span> {rec_badge}</td>'
                f'<td class="l tk"><span class="dim">{i+1}</span> <b>{esc(c["ticker"])}</b><div class="dim num">score {sc:.0f}</div></td>'
-               f'<td class="l"><span class="sbadge {scls} num">{sc:.0f}</span> {_type_chip(c)}{_valtag(c)}{_beta_flags(c)}<span class="strat">{esc(c["strategy"])}</span>'
-               f'<div class="dim num">{esc(c.get("structure") or "")} - {esc(c.get("dte"))}d</div></td>'
+               f'<td class="l"><span class="sbadge {scls} num">{sc:.0f}</span> {_type_chip(c)}{_valtag(c)}{_beta_flags(c)}{env_badge(c)}'
+               f'{_row_contract(c)}</td>'
                f'<td>{edge_c}</td>'
                f'<td>{pop_cell(c)}</td>'
                f'<td>{ev_c}</td>'
@@ -994,7 +1407,7 @@ def board_table(trades, tier):
                f'<td class="num">{maxloss_c}</td>'
                f'<td class="num">{cush_c}</td>'
                f'<td class="gsep num">{delta_c}</td>'
-               f'<td>{gate_dots(c)}<div class="dim num">{c["gates_passed"]}/{c["gates_total"]}</div></td>'
+               f'<td class="gatecell" title="Click the row to see the full gate detail table">{gate_dots(c)}<div class="dim num">{c["gates_passed"]}/{c["gates_total"]} &#9662;</div></td>'
                f'<td class="l dim">{esc(why)}</td></tr>'
                f'<tr class="vdetail" id="vd-{i}"><td colspan="12">{detail_drawer(c,i,tier)}</td></tr>')
     order=[("score","Ticker","l"),("edge","Edge",""),("tpop","True POP",""),("ev","EV $",""),("roc","ROC",""),
@@ -1003,12 +1416,15 @@ def board_table(trades, tier):
         c2=("%s srt"%cls) if cls else "srt"
         return "<th class=\"%s\" onclick=\"sortBoard(this,'%s')\">%s<span class=\"arw\"></span></th>"%(c2,key,label)
     head=("<thead><tr class=\"col\"><th class=\"l\" style=\"width:18px\"></th>"
-          + sth(*order[0]) + "<th class=\"l\">Strategy</th>"
+          + sth("ticker","Ticker","l") + sth("strat","Strategy","l")
           + "".join(sth(*o) for o in order[1:]) + "<th class=\"l\">Why</th></tr></thead>")
     toolbar=("<div class=\"btoolbar\"><span class=\"flab\">Max loss &le; $</span>"
              "<input id=\"fmaxloss\" type=\"number\" class=\"n\" placeholder=\"any\" oninput=\"filterBoard()\">"
              "<button type=\"button\" class=\"ghostbtn\" onclick=\"clearFilter()\">Clear</button>"
+             "<button type=\"button\" id=\"grpbtn\" class=\"ghostbtn\" data-on=\"0\" onclick=\"groupByTicker()\">Group by ticker</button>"
              "<span class=\"dim\" id=\"fcount\" style=\"margin-left:auto\"></span>"
+             "<span class=\"rgkey\" title=\"Numbers are tinted by where they sit vs the desired trading range\">"
+             "<i class=\"rg-opt\">●</i>optimal <i class=\"rg-neu\">●</i>neutral <i class=\"rg-bad\">●</i>outside range</span>"
              "<span class=\"dim\">Click a header to sort</span></div>")
     return f'<div class="board">{toolbar}<table>{head}<tbody>{body}</tbody></table></div>'
 
@@ -1033,11 +1449,17 @@ def today_strip(board, s, tier):
 def view_today(board, s, tier):
     trades=board["trades"]
     hero=hero_card(trades, tier).replace('class="hero"','class="hero" onclick="vopen(0)"',1)
+    prov=""
+    if board.get("source")=="legacy":
+        prov=('<div class="provbar">⚡ <b>Fast scan (provisional)</b> — ranked by model POP + ROC. '
+              'Edge, EV $ and True POP are blank here because they need the full engine. '
+              'Run the engine (<code>python main.py</code>) for the graded board.</div>')
     return ('<h1>Today\'s board</h1><p class="q">Is today worth trading - and what are the best setups right now?</p>'
             + today_strip(board, s, tier) + hero
             + '<div class="h2row" style="display:flex;align-items:baseline;gap:10px;margin:18px 0 8px">'
               '<h2 style="margin:0">Qualified opportunities</h2>'
               '<span class="dim" style="margin-left:auto">Click any row to open the full trade -&gt;</span></div>'
+            + prov
             + board_table(trades, tier)
             + book_footer(board))
 
@@ -1111,16 +1533,23 @@ def score_composition(card):
         return ('<div class="panel"><h3>Score composition</h3>'
                 '<div class="empty">No edge breakdown — this is a fast-scan (provisional) candidate. '
                 'Run the full engine for the component scores.</div></div>')
-    inner = ""
-    total = 0
-    for key, lab, mx in EDGE_COMPONENTS:
+    def _row(key, lab, mx):
         v = _f(bd.get(key), 0) or 0
-        total += v
-        w = max(2, v / mx * 100)
-        inner += (f'<div class="row"><div class="lab">{lab}</div>'
-                  f'<div class="bar"><i style="width:{w:.0f}%"></i></div>'
-                  f'<div class="v num">{v:.0f} / {mx}</div></div>')
-    inner += f'<div class="tot"><span>Total edge score</span><span class="num">{total:.0f} / 100</span></div>'
+        w = max(2, v / mx * 100) if mx else 2
+        return v, (f'<div class="row"><div class="lab">{lab}</div>'
+                   f'<div class="bar"><i style="width:{w:.0f}%"></i></div>'
+                   f'<div class="v num">{v:.0f} / {mx}</div></div>')
+    inner = ""
+    base = 0
+    for key, lab, mx in EDGE_COMPONENTS:
+        v, h = _row(key, lab, mx); base += v; inner += h
+    inner += f'<div class="subtot"><span>Base subtotal</span><span class="num">{base:.0f} / 100</span></div>'
+    bonus = 0
+    for key, lab, mx in EDGE_BONUSES:
+        v, h = _row(key, lab, mx); bonus += v; inner += h
+    total = base + bonus
+    tail = f' <span class="dim">({base:.0f} base + {bonus:.0f} bonus)</span>' if bonus else ''
+    inner += f'<div class="tot"><span>Total edge score</span><span class="num">{total:.0f}{tail}</span></div>'
     return f'<div class="panel"><h3>Score composition — no black box</h3><div class="comp">{inner}</div></div>'
 
 
@@ -1415,9 +1844,261 @@ def view_history(s, closed):
             + stat_cards(s) + closed_section(closed) + manual_form())
 
 
+def _brief_reco(c, ev):
+    """Derive a TAKE/WATCH/PASS-style recommendation from engine truth.
+       PASS on negative expectancy (surfaces the EV-sign issue directly);
+       CONSIDER on a high score with positive EV; otherwise WATCH."""
+    score = c.get("edge_score") or 0
+    if ev and ev.get("positive") is False:
+        return ("PASS", "red", "Negative expectancy — the math says skip.")
+    if score >= 80 and ev and ev.get("positive"):
+        return ("CONSIDER", "green", "High composite edge with positive expectancy.")
+    return ("WATCH", "amber", "Qualifies, but edge is thinner — size small or wait for a better fill.")
+
+
+def _brief_ticket(c):
+    """Actionable order ticket from real strikes (fixes the $0/$0 condor bug at the source)."""
+    st = c.get("strat_type", "bull_put")
+    cr = c.get("credit_ps") or 0.0
+    exp = esc(c.get("exp") or "")
+    tp = getattr(config, "TARGET_PROFIT_PCT", 0.5)
+    sl = getattr(config, "STOP_LOSS_MULTIPLIER", 2.0)
+    target = cr * (1 - tp); stop = cr * sl
+    def g(x): return f"{x:g}" if x is not None else "?"
+    if st == "iron_condor":
+        ps, pl = c.get("put_short"), c.get("put_long")
+        cs, cl = c.get("call_short"), c.get("call_long")
+        entry = (f'Sell <b>{esc(c["ticker"])}</b> iron condor for <b>${cr:.2f}</b> credit, exp {exp} — one spread order: '
+                 f'put spread <b>{g(ps)}/{g(pl)}P</b> (sell {g(ps)}P, buy {g(pl)}P) + '
+                 f'call spread <b>{g(cs)}/{g(cl)}C</b> (sell {g(cs)}C, buy {g(cl)}C).')
+    elif st == "bear_call":
+        s, l = c.get("short"), c.get("long")
+        entry = (f'Sell <b>{esc(c["ticker"])}</b> <b>{g(s)}/{g(l)}</b> call spread for <b>${cr:.2f}</b> credit, exp {exp} '
+                 f'— sell {g(s)}C, buy {g(l)}C simultaneously (spread order).')
+    else:
+        s, l = c.get("short"), c.get("long")
+        entry = (f'Sell <b>{esc(c["ticker"])}</b> <b>{g(s)}/{g(l)}</b> put spread for <b>${cr:.2f}</b> credit, exp {exp} '
+                 f'— sell {g(s)}P, buy {g(l)}P simultaneously (spread order).')
+    exit_ = (f'Buy back at <b>${target:.2f}</b> ({tp*100:.0f}% profit target). '
+             f'Stop if the spread reaches <b>${stop:.2f}</b> ({sl:g}× credit). Set the GTC close order right after fill.')
+    bes = c.get("breakevens") or []
+    sup = c.get("nearest_support")
+    if st == "iron_condor" and len(bes) >= 2:
+        inval = f'Exit if {esc(c["ticker"])} closes outside the breakevens <b>${bes[0]:.2f} / ${bes[1]:.2f}</b> on volume.'
+    elif sup is not None:
+        inval = f'Exit if {esc(c["ticker"])} breaks support at <b>${sup:.2f}</b> on high volume, regardless of spread price.'
+    else:
+        inval = 'Exit on a decisive break of the short strike on high volume.'
+    return (f'<div class="tkt"><div class="tk entry"><span class="tl">ENTRY</span>{entry}</div>'
+            f'<div class="tk exit"><span class="tl">EXIT / TARGET</span>{exit_}</div>'
+            f'<div class="tk inval"><span class="tl">INVALIDATION</span>{inval}</div></div>')
+
+
+def _brief_sizing(c):
+    ml = c.get("max_loss_usd")
+    if not ml or ml <= 0:
+        return ""
+    cr = c.get("credit_usd") or 0.0
+    cells = ""
+    for tier in getattr(config, "RISK_TIERS", [{"label": "< $500", "max_risk": 500}]):
+        n = int(tier["max_risk"] // ml)
+        if n < 1:
+            cells += (f'<div class="szc off"><div class="szl">{esc(tier["label"])}</div>'
+                      f'<div class="szn">—</div><div class="szs">n/a</div></div>')
+        else:
+            cells += (f'<div class="szc on"><div class="szl">{esc(tier["label"])}</div>'
+                      f'<div class="szn">{n}×</div><div class="szs">+${cr*n:.0f} / -${ml*n:.0f}</div></div>')
+    return f'<div class="szg">{cells}</div>'
+
+
+def brief_card(c, tier):
+    ev = _ev(c)
+    rec, rc, rwhy = _brief_reco(c, ev)
+    score = c.get("edge_score") or 0
+    scls = "score-high" if score >= 80 else "score-med" if score >= 65 else "score-low"
+    tpp = (c.get("true_pop") or 0) * 100
+    ipp = (c.get("implied_pop") or 0) * 100
+    edge = c.get("edge_pp")
+    edge_s = f'{edge:+.1f}pp' if edge is not None else '—'
+    ec = "green" if (edge or 0) >= 0 else "red"
+    roi = c.get("roi")
+    # EV line
+    if ev and ev.get("ev") is not None:
+        evv = ev["ev"]; ecls = "green" if evv > 0 else "red"
+        bewr = ev.get("be_wr")
+        ev_line = (f'<div class="evln"><b class="num {_rg("ev",evv)}">${evv:+.0f}</b> expected value / contract '
+                   f'· need <b>{bewr*100:.0f}%</b> to break even · model POP <b>{tpp:.0f}%</b> → '
+                   f'<b class="{ecls}">{"positive" if evv>0 else "negative"} expectancy</b></div>')
+    else:
+        ev_line = ''
+    flags = "".join(f'<div class="wf">{esc(w)}</div>' for w in (c.get("warnings") or []))
+    struct = esc(c.get("structure") or "")
+    ml = c.get("max_loss_usd") or 0
+    head = (f'<div class="bch"><div class="bcl"><span class="bt">{esc(c["ticker"])}</span>'
+            f'<span class="bstrat">{esc((c.get("strat_type") or "").replace("_"," ").upper())}</span>'
+            f'<span class="bstruct num">{struct}</span></div>'
+            f'<div class="bcr"><span class="bcred num">+${(c.get("credit_usd") or 0):.0f} credit</span>'
+            f'<span class="bcml num">max loss ${ml:.0f} · {(c.get("dte") or 0)}DTE</span></div>'
+            f'{env_badge(c)}<div class="brec rec-{rc}">{rec}</div></div>')
+    meter = (f'<div class="bmeter"><span class="ml2">EDGE {score:.0f}/100</span>'
+             f'<div class="mtrk"><i class="{scls}" style="width:{min(100,score):.0f}%"></i></div></div>')
+    edge_cls = _rg("edge", edge) if edge is not None else ""
+    pop = (f'<div class="bpop"><div class="pb"><span class="pl">True POP</span><b class="num {_rg("tpop",tpp)}">{tpp:.0f}%</b></div>'
+           f'<div class="pb"><span class="pl">Implied POP</span><b class="num">{ipp:.0f}%</b></div>'
+           f'<div class="pb edge"><span class="pl">POP edge</span><b class="num {edge_cls}">{edge_s}</b></div>'
+           + (f'<div class="pb"><span class="pl">ROC</span><b class="num {_rg("roc",roi*100)}">{roi*100:.0f}%</b></div>' if roi is not None else '')
+           + f'<div class="pb"><span class="pl">IV rank</span><b class="num">{(c.get("iv_rank") or 0):.0f}</b></div></div>')
+    why = f'<div class="brwhy">{tier_badge(tier)} {esc(rwhy)}</div>'
+    envln = ""
+    e = c.get("env")
+    if e and e.get("band") != "cool":
+        r = e.get("recommendation") or {}
+        # rationale already names the alt for warm/trim; only append a tail for flip/condor actions
+        tail = ''
+        if r.get("action") in ("flip_or_stand_aside", "condor_or_stand_aside"):
+            tail = f' → <b>{esc(r.get("strike_note") or r.get("structure"))}</b>'
+        envln = (f'<div class="envln env-{e["band"]}">⚠ Environment {e["band"].upper()} ({e.get("heat")}/100, '
+                 f'{esc(e.get("threat_dir"))}): {esc(r.get("rationale") or "")}{tail}</div>')
+    sizing = _brief_sizing(c)
+    return (f'<div class="briefcard bl-{rc}">{head}{meter}{pop}{ev_line}{why}{envln}'
+            f'{_brief_ticket(c)}{sizing}'
+            + (f'<div class="wflist">{flags}</div>' if flags else '') + '</div>')
+
+
+def view_brief(board, s, tier):
+    trades = board.get("trades") or []
+    ctx = board.get("context") or {}
+    vix = ctx.get("vix") or {}; spy = ctx.get("spy") or {}
+    bias = ctx.get("bias") or "—"
+    great = sum(1 for t in trades if (t.get("edge_score") or 0) >= 80)
+    elite = sum(1 for t in trades if (t.get("edge_score") or 0) >= 90)
+    verdict = "Good day to sell premium" if trades else "Nothing qualifies right now"
+    strip = (f'<div class="bstrip">'
+             f'<div class="ms"><div class="msl">VERDICT</div><div class="msv">{esc(verdict)}</div>'
+             f'<div class="mss">{len(trades)} qualified · {great} great · {elite} elite</div></div>'
+             f'<div class="ms"><div class="msl">VIX</div><div class="msv num">{(vix.get("current") or 0):.2f}</div>'
+             f'<div class="mss">{esc((vix.get("label") or "").title())} · {esc(vix.get("trend") or "")}</div></div>'
+             f'<div class="ms"><div class="msl">SPY</div><div class="msv num">${(spy.get("price") or 0):.2f}</div>'
+             f'<div class="mss">{(spy.get("day_change_pct") or 0):+.2f}% today</div></div>'
+             f'<div class="ms"><div class="msl">Bias</div><div class="msv">{esc(bias)}</div>'
+             f'<div class="mss">engine artifact</div></div></div>')
+    if not trades:
+        return f'<h2>Daily brief</h2>{strip}<div class="empty">No qualified setups on the latest scan.</div>'
+    cards = "".join(brief_card(c, tier) for c in trades)
+    intro = ('<p class="q" style="margin:2px 0 14px">The same engine scan as the board, written as actionable '
+             'tickets — real strikes, real expectancy, and position sizing per risk tier. '
+             'Numbers reconcile with the Today tab.</p>')
+    return f'<h2>Daily brief — options to consider selling</h2>{intro}{strip}{cards}{book_footer(board)}'
+
+
+def _tile(label, value, sub, cls=""):
+    return (f'<div class="tktile"><div class="tkl">{esc(label)}</div>'
+            f'<div class="tkv {cls}">{value}</div><div class="tks">{esc(sub)}</div></div>')
+
+
+def view_track():
+    """Track Record — the ever-learning CLV scorecard. Reads the outcome ledger via
+       clv_tracker and grades every prediction against a theta baseline (closing-line value)."""
+    intro = ('<p class="q" style="margin:2px 0 14px">Every prediction, graded like a closing-line-value bet. '
+             '<b>CLV</b> = how much the spread beat pure time-decay (theta) — a leading, low-variance signal of '
+             'real edge that shows up before a trade resolves. News-catalyst trades (exogenous shocks) are '
+             'flagged so they don\'t distort the model\'s calibration.</p>')
+    if clv_tracker is None:
+        return f'<h2>Track Record</h2>{intro}<div class="empty">clv_tracker module not found next to vega_app.py.</div>'
+    try:
+        s = clv_tracker.summary()
+    except Exception as e:
+        return f'<h2>Track Record</h2>{intro}<div class="warn">Could not read the outcome ledger: {esc(e)}</div>'
+
+    fr = s.get("freshness") or {}
+    stale_banner = ""
+    if fr.get("stale"):
+        ds = fr.get("days_stale")
+        stale_banner = (f'<div class="provbar" style="border-color:rgba(240,69,90,.5);background:rgba(240,69,90,.08)">'
+                        f'⚠ <b>Marks are {ds} days stale</b> (last re-mark {esc(fr.get("last_mark") or "?")}). '
+                        f'CLV and unrealized figures below are frozen at that snapshot — the re-mark loop '
+                        f'(<code>auto_paper_cycle.py</code>) has not run. Clear any stale '
+                        f'<code>logs/auto_paper_cycle.lock</code> and re-run it to refresh.</div>')
+    c = s["counts"]; clv = s["clv"]; ex = s["clv_ex_catalyst"]; er = s["edge_retention"]
+    def pct(x): return f'{x*100:.0f}%' if x is not None else '—'
+    def money(x): return f'${x:+.3f}' if x is not None else '—'
+    beat_cls = "green" if (clv["beat_rate"] or 0) >= 0.5 else "red"
+    cg = s["calibration_gap_pp"]
+    cg_cls = "green" if (cg or 0) >= 0 else "red"
+    tiles = (
+        _tile("CLV beat-rate", pct(clv["beat_rate"]), f'{clv["n"]} positions scored vs theta', beat_cls)
+        + _tile("Avg CLV / share", money(clv["avg_clv"]), '+ = beating time decay', beat_cls)
+        + _tile("Calibration gap", (f'{cg:+.0f}pp' if cg is not None else '—'),
+                'realized − predicted POP', cg_cls)
+        + _tile("Realized net P/L", (f'${er["total_realized_net_pl"]:+.0f}' if er["n_closed"] else '—'),
+                f'{er["n_closed"]} closed · avg ${er["avg_realized_net_pl"]:+.2f}/ct' if er["avg_realized_net_pl"] is not None else 'no closes yet')
+        + _tile("Ledger", f'{c["total"]}', f'{c["modeled"]} modeled · {c["open"]} open · {c["closed"]} closed')
+    )
+    tilerow = f'<div class="tkgrid">{tiles}</div>'
+    if ex["n"] != clv["n"] and ex["n"]:
+        tilerow += (f'<div class="dim" style="margin:-6px 0 14px">Ex-catalyst (news shocks quarantined): '
+                    f'{pct(ex["beat_rate"])} beat, avg {money(ex["avg_clv"])} over {ex["n"]}.</div>')
+
+    # Calibration reliability table
+    crows = ""
+    for b in s["calibration_curve"]:
+        band = f'{b["lo"]*100:.0f}–{b["hi"]*100:.0f}%'
+        if b["n"]:
+            gap = b["gap"] * 100
+            gcls = "gpass" if gap >= 0 else "gwarn"
+            crows += (f'<tr><td class="l">{band}</td><td class="num">{b["n"]}</td>'
+                      f'<td class="num">{b["predicted"]*100:.0f}%</td><td class="num">{b["realized"]*100:.0f}%</td>'
+                      f'<td class="{gcls}">{gap:+.0f}pp</td></tr>')
+        else:
+            crows += (f'<tr><td class="l">{band}</td><td class="num">0</td>'
+                      f'<td class="num dim">—</td><td class="num dim">—</td><td class="dim">—</td></tr>')
+    cal = (f'<h3 style="margin-top:20px">Calibration — predicted POP vs realized hit-rate</h3>'
+           f'<table class="gtbl"><thead><tr><th class="l">Predicted POP band</th><th>n</th>'
+           f'<th>Predicted</th><th>Realized</th><th>Gap</th></tr></thead><tbody>{crows}</tbody></table>'
+           f'<div class="dim" style="font-size:11px;margin-top:4px">Grows meaningful past ~30 closed trades — '
+           f'currently {c["closed"]} closed. This is the signal that flips Gate&nbsp;1 from provisional to validated.</div>')
+
+    # Per-position CLV table (worst → best; worst are the catalyst suspects)
+    prows = ""
+    for r in s["records"]:
+        clvv = r["clv"]; cls = "gpass" if clvv > 0 else "gwarn"
+        cat = ' <span class="ntag nt-flag">catalyst</span>' if r.get("news_catalyst") else ''
+        adv = ' <span class="dim" title="mark moved ≥25% above entry">adverse</span>' if r.get("adverse") and not r.get("news_catalyst") else ''
+        prows += (f'<tr><td class="l"><b>{esc(r["ticker"])}</b> <span class="dim">{esc((r.get("strategy") or "")[:8])}</span>{cat}{adv}</td>'
+                  f'<td class="num">${r["entry"]:.2f}</td><td class="num">${r["theta_expected"]:.2f}</td>'
+                  f'<td class="num">${r["mark"]:.2f}</td><td class="{cls}">{clvv:+.2f}</td></tr>')
+    postbl = (f'<h3 style="margin-top:20px">Open predictions — CLV vs theta baseline</h3>'
+              f'<table class="gtbl"><thead><tr><th class="l">Position</th><th>Entry</th>'
+              f'<th>Theta-exp</th><th>Mark</th><th>CLV</th></tr></thead><tbody>{prows}</tbody></table>') if prows else ''
+
+    # News split
+    nw = s["news"]; cf = nw["confirms"]; ot = nw["other"]
+    def nf(a): return f'{pct(a["beat_rate"])} beat · {money(a["avg_clv"])} avg (n={a["n"]})' if a["n"] else 'no data yet'
+    newsblk = (f'<h3 style="margin-top:20px">News verdict &amp; catalysts</h3>'
+               f'<div class="kv"><span class="k">Trades where news CONFIRMED the thesis</span><b>{nf(cf)}</b></div>'
+               f'<div class="kv"><span class="k">Other (neutral / not logged)</span><b>{nf(ot)}</b></div>')
+    if nw["catalyst_flagged"]:
+        cl = "".join(f'<div class="noterow"><span class="ntag nt-flag">catalyst</span>'
+                     f'<b>{esc(x["ticker"])}</b> CLV {x["clv"]:+.2f} — {esc(x.get("headline") or "flagged")}</div>'
+                     for x in nw["catalyst_flagged"])
+        newsblk += f'<div class="notes" style="margin-top:8px">{cl}</div>'
+    else:
+        newsblk += ('<div class="dim" style="font-size:11px;margin-top:4px">No catalyst-flagged trades. '
+                    'The grader flags a position when it moves ≥25% against entry AND a material story hit the '
+                    'ticker in that window — quarantined from calibration like an injury-driven bet loss.</div>')
+
+    _pc, _mc = _cost_bases()
+    costfoot = (f'<div class="dim" style="font-size:11px;margin-top:16px;border-top:1px solid var(--line);padding-top:8px">'
+                f'Cost basis: realized paper P/L here nets <b>commission-only ~${_pc:.2f}/ct</b> (your real fills '
+                f'capture slippage). The board/Brief pre-trade EV is more conservative — net of '
+                f'<b>~${_mc:.2f}/ct</b> (commission + assumed slippage) — so a trade can read a touch better here '
+                f'than its pre-trade EV. Same trade, two honest cost lenses.</div>')
+    return f'<h2>Track Record — the learning loop</h2>{intro}{stale_banner}{tilerow}{cal}{postbl}{newsblk}{costfoot}'
+
+
 def nav(view):
     links = ""
-    labels = {"today": "Today", "open": "Open", "history": "History", "lottery": "Lottery"}
+    labels = {"today": "Today", "brief": "Brief", "track": "Track Record", "open": "Open", "history": "History", "lottery": "Lottery"}
     for v in VIEWS:
         links += f'<a class="{"on" if v == view else ""}" href="/?view={v}">{labels[v]}</a>'
     is_open, _ = market_status()
@@ -1441,7 +2122,11 @@ def render(view="today", flash=""):
     if _scan_status["msg"] and _scan_status["msg"] not in flash:
         banner += f'<div class="flash">{esc(_scan_status["msg"])}</div>'
 
-    if view == "open":
+    if view == "brief":
+        content = view_brief(board, s, tier)
+    elif view == "track":
+        content = view_track()
+    elif view == "open":
         content = view_open(open_)
     elif view == "history":
         content = view_history(s, closed)

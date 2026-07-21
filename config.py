@@ -469,7 +469,7 @@ EMAIL_ENABLED = bool(
 # ─────────────────────────────────────────────
 OUTPUT_DIR = "output/tipsheets"
 LOG_DIR = "logs"
-AUTO_OPEN_BROWSER = True          # Auto-open tip sheet in browser after generation
+AUTO_OPEN_BROWSER = False         # Consolidated into the VEGA dashboard "Brief" tab — no separate page. Email is off (EMAIL_ENABLED gated on unset SMTP env).
 
 # ─────────────────────────────────────────────
 # RISK-FREE RATE (for Black-Scholes)
