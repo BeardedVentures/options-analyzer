@@ -290,6 +290,37 @@ def generate_setup_highlight_post(scan: Dict) -> Optional[Dict]:
                 f"= {edge_pts_str} edge pts"
             )
 
+        # Score display — show base + bonus split when an uncapped raw score is available
+        raw = top.get("raw_score")
+        base = top.get("base_score", edge_score)
+        bonus = top.get("bonus_score", 0)
+        if raw and raw != edge_score:
+            score_display = f"{edge_score}/100 (raw {raw} = {base} base + {bonus} bonus)"
+        else:
+            score_display = f"{edge_score}/100"
+
+        # ROC display — flag inflated ROC; each metric is optional so guard every format
+        gross_roc = top.get("gross_roc_pct")
+        net_roc = top.get("net_realized_roc_pct")
+        ev_roc = top.get("ev_roc_pct")
+        roc_flag = " ⚠ ROC INFLATED" if top.get("roc_sanity_flag") else ""
+        roc_parts = []
+        if gross_roc is not None:
+            roc_parts.append(f"Gross {gross_roc:.1f}%")
+        if net_roc is not None:
+            roc_parts.append(f"Net realized {net_roc:.1f}%")
+        if ev_roc is not None:
+            roc_parts.append(f"EV {ev_roc:+.1f}%")
+        roc_line = ("  |  ".join(roc_parts) + roc_flag) if roc_parts else ""
+
+        # Environment heat — only surface when not calm
+        band = top.get("env_band")
+        if band and band != "cool":
+            env_action = (top.get("env_action") or "").replace("_", " ")
+            env_line = f"ENV {band.upper()}: {env_action} — {top.get('env_rationale', '')}".rstrip(" —")
+        else:
+            env_line = ""
+
         short = (
             f"📋 VEGA Setup | {ticker} — {date_display}\n\n"
             f"{rec_emoji} {recommendation} | Edge {_format_edge_score(edge_score)}\n"
@@ -310,11 +341,15 @@ def generate_setup_highlight_post(scan: Dict) -> Optional[Dict]:
             f"• VRP +{vrp:.1f}% — implied vol exceeds realized vol (seller's edge)\n"
             f"• {pop_line}\n"
             f"• Trend: {trend} | RSI: {rsi:.0f}\n"
-            f"• Edge Score: {_format_edge_score(edge_score)}\n\n"
-            f"This is the kind of setup VEGA is built to find — "
-            f"IV elevated above realized vol, probability edge confirmed historically, "
-            f"trend aligned. Not every day has one. Today it does.\n\n"
-            f"{DISCLAIMER}"
+            f"• Edge Score: {score_display}\n"
+            + (f"• ROC: {roc_line}\n" if roc_line else "")
+            + (f"• {env_line}\n" if env_line else "")
+            + (
+                "\nThis is the kind of setup VEGA is built to find — "
+                "IV elevated above realized vol, probability edge confirmed historically, "
+                "trend aligned. Not every day has one. Today it does.\n\n"
+                f"{DISCLAIMER}"
+            )
         )
 
     else:

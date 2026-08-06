@@ -22,15 +22,106 @@ logger = logging.getLogger(__name__)
 MAXW = float(getattr(config, "MAX_SPREAD_WIDTH", 5))
 
 
+def _structure(price_data, tech: Dict) -> Dict:
+    """Chart-shape read for the timing advisory. {} on any failure — a bad structure read
+    degrades the chip to momentum-only, it must never break a scan."""
+    if not getattr(config, "STRUCTURE_ENABLED", True) or price_data is None:
+        return {}
+    try:
+        from analysis.structure import detect_structure
+        if price_data.empty:
+            return {}
+        d = price_data.tail(int(getattr(config, "STRUCTURE_LOOKBACK_DAYS", 180)))
+        return detect_structure(
+            highs=d["High"].tolist(), lows=d["Low"].tolist(), closes=d["Close"].tolist(),
+            volumes=d["Volume"].tolist() if "Volume" in d else None,
+            # Rich levels (clustered, strength-ranked) so "at support" agrees with
+            # nearest_support rather than answering from the raw price list.
+            supports=(tech or {}).get("support_levels") or (tech or {}).get("supports"),
+            resistances=(tech or {}).get("resistance_levels") or (tech or {}).get("resistances"))
+    except Exception as e:
+        logger.warning("[structure] read failed: %s", e)
+        return {}
+
+
+def _vol_surface(ticker: str, price: float, calls, puts, strategy_key: str) -> Dict:
+    """Term structure + skew for the call-side strategies.
+
+    main.screen_ticker read the surface for bull puts only, so bear calls and condors were
+    scored with NO term-structure component while bull puts took the full +5/-8 adjustment.
+    On the 2026-08-05 20:52 board that put ADBE at a -5 penalty and WMT at none purely
+    because WMT was never measured — two strategies ranked against each other on different
+    bases. {} on any failure; the read is advisory.
+    """
+    out: Dict = {}
+    if not getattr(config, "TERM_STRUCTURE_ENABLED", True):
+        return out
+    try:
+        from data import fetcher
+        from analysis.vol_surface import get_term_structure, get_skew_depth
+        by_exp = fetcher.get_chain_by_expiry(ticker)
+        if by_exp:
+            out["term"] = get_term_structure(by_exp, price)
+        if getattr(config, "SKEW_SCORING_ENABLED", True) and calls and puts:
+            out["skew"] = get_skew_depth(puts, calls, price, strategy=strategy_key)
+    except Exception as e:
+        logger.warning("[vol_surface] read failed for %s: %s", ticker, e)
+    return out
+
+
+def _timing(strategy_key: str, tech: Dict, price: float, structure: Optional[Dict] = None) -> Dict:
+    """Advisory pattern-phase assessment. Returns {} when disabled or on any failure, which
+    strategies.evaluate() treats as "no timing row" — it must never break a scan."""
+    if not getattr(config, "ENTRY_TIMING_ENABLED", True):
+        return {}
+    try:
+        from analysis.entry_timing import assess_entry_timing
+        return assess_entry_timing(strategy=strategy_key, tech=tech, current_price=price,
+                                   structure=structure)
+    except Exception as e:
+        logger.warning("[timing] entry_timing assessment failed for %s: %s", strategy_key, e)
+        return {}
+
+
 def _tradeable(o: Dict) -> bool:
     return (o.get("mid", 0) or 0) > 0 and ((o.get("volume", 0) or 0) >= 1 or (o.get("open_interest", 0) or 0) >= 10)
 
 
-def _pick_short(chain: List[Dict], target_delta: float, lo: float, hi: float) -> Optional[Dict]:
+def _pick_short(chain: List[Dict], target_delta: float, lo: float, hi: float,
+                levels: Optional[List[Dict]] = None, side: str = "") -> Optional[Dict]:
+    """Closest strike to the delta target, preferring one shielded by a real level.
+
+    Delta stays in charge — it sets the risk. Among strikes inside the delta band, though,
+    a short call under a resistance the market has rejected twice is a materially different
+    trade from one hanging in open air, and until 2026-08-05 that distinction was invisible
+    to selection on every strategy.
+    """
     cands = [o for o in chain if _tradeable(o) and lo <= abs(o.get("delta") or 0) <= hi]
     if not cands:
         return None
-    return min(cands, key=lambda o: abs(abs(o.get("delta") or 0) - target_delta))
+    plain = min(cands, key=lambda o: abs(abs(o.get("delta") or 0) - target_delta))
+    if not (getattr(config, "LEVEL_AWARE_STRIKES", True) and levels and side):
+        return plain
+    try:
+        from analysis.levels import strike_cushion
+        band = float(getattr(config, "LEVEL_STRIKE_DELTA_TOLERANCE", 0.04))
+        target_buf = float(getattr(config, "LEVEL_TARGET_BUFFER_PCT", 0.02))
+        min_buf = float(getattr(config, "LEVEL_MIN_BUFFER_PCT", 0.005))
+        near = [o for o in cands
+                if abs(abs(o.get("delta") or 0) - target_delta) <= band]
+        best, best_score = plain, -1.0
+        for o in near or cands:
+            cush = strike_cushion(o.get("strike"), levels, side, min_buffer_pct=min_buf)
+            if not cush:
+                continue
+            depth = min(1.0, (cush["buffer_pct"] or 0.0) / target_buf) if target_buf else 1.0
+            score = (cush["strength"] / 100.0) * depth
+            if score > best_score:
+                best, best_score = o, score
+        return best if best_score > 0 else plain
+    except Exception as e:
+        logger.warning("[levels] short-strike shelter preference skipped: %s", e)
+        return plain
 
 
 def _pick_long(chain: List[Dict], short: Dict, direction: str) -> Optional[Dict]:
@@ -52,21 +143,31 @@ def _pop_between(down_pct: float, up_pct: float, dte: int, prices) -> Dict:
     return edge_calculator.calculate_pop_between(dte, prices, lower_move_pct=-down_pct, upper_move_pct=up_pct)
 
 
-def _edge_score(ticker, strategy, tech, vrp_pct, true_pop, implied_pop, sentiment, earnings_days):
+def _edge_score(ticker, strategy, tech, vrp_pct, true_pop, implied_pop, sentiment, earnings_days,
+                vol_surface=None):
     try:
         ep = edge_calculator.calculate_edge_points(true_pop, implied_pop).get("edge_points", 0)
     except Exception:
         ep = (true_pop - implied_pop) * 100 if (true_pop and implied_pop) else 0
     try:
         es = edge_calculator.calculate_edge_score(
-            ticker=ticker, strategy=strategy, technical_score=tech.get("technical_score", 50) or 50,
+            # data/technicals.py emits `composite_score`; this read `technical_score`, which
+            # does not exist, so it silently fell back to the hardcoded 50 for every bear
+            # call and iron condor since the beta build. Chart quality — trend, RSI, MAs and
+            # the support-shelter check — never reached call-side edge scores at all.
+            ticker=ticker, strategy=strategy,
+            technical_score=tech.get("composite_score", tech.get("technical_score", 50)) or 50,
             vrp_pct=vrp_pct or 0, edge_points=ep, news_sentiment=(sentiment or "NEUTRAL"),
             earnings_days_away=earnings_days if earnings_days is not None else 99,
             fundamentals_score=tech.get("fundamentals_score"),
             # compute_skew_score has had per-strategy handling for bear_call (calls-rich is
             # favorable) and iron_condor (either wing) since the beta build, but this path never
             # passed the raw value — so those trades silently scored 0 on a 15-point component.
-            skew_raw=tech.get("skew_vol_pts"))
+            skew_raw=tech.get("skew_vol_pts"),
+            # Same term-structure basis the bull-put path uses, so strategies are
+            # ranked against each other on equal footing.
+            term_slope=((vol_surface or {}).get("term") or {}).get("slope"),
+            event_expiry_flag=bool(((vol_surface or {}).get("term") or {}).get("event_expiry")))
         return es.get("total_score", 0), es.get("component_breakdown", {})
     except Exception as e:
         logger.debug(f"edge_score fallback: {e}")
@@ -79,6 +180,11 @@ def _base(ticker, strategy_key, price, tech, sentiment, dte, exp):
         "current_price": round(price, 2), "dte": dte, "expiration_display": exp,
         "iv_rank": tech.get("iv_rank"), "vrp": tech.get("vrp"), "trend": tech.get("trend"),
         "rsi": tech.get("rsi"), "nearest_support": tech.get("nearest_support"),
+        "nearest_resistance": tech.get("nearest_resistance"),
+        # Same level payload the bull-put path emits, so the cockpit's Key levels panel is
+        # not silently blank on every call-side trade.
+        "support_levels": tech.get("support_levels", []),
+        "resistance_levels": tech.get("resistance_levels", []),
         "news_sentiment": sentiment, "news_summary": tech.get("news_summary"),
         "fundamentals_score": tech.get("fundamentals_score"),
         # Emit the key unconditionally (None when unavailable) so every strategy's rows have the
@@ -91,8 +197,27 @@ def _base(ticker, strategy_key, price, tech, sentiment, dte, exp):
     }
 
 
-def build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings_days=None) -> Optional[Dict]:
-    short = _pick_short(calls, 0.22, 0.16, 0.30)
+def _surface_fields(vs: Optional[Dict]) -> Dict:
+    """Same surface keys the bull-put path emits, so the cockpit and any consumer
+    see one shape across every strategy."""
+    term = (vs or {}).get("term") or {}
+    skew = (vs or {}).get("skew") or {}
+    return {
+        "term_structure": term, "term_slope": term.get("slope", "unknown"),
+        "term_spread_pts": term.get("term_spread_pts"),
+        "term_confidence": term.get("confidence"),
+        "event_expiry_date": term.get("event_expiry"),
+        "event_expiry_flag": bool(term.get("event_expiry")),
+        "skew_depth": skew, "skew_steepness": skew.get("skew_steepness", "unknown"),
+        "skew_20d": skew.get("skew_20d"), "skew_40d": skew.get("skew_40d"),
+    }
+
+
+def build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings_days=None,
+                    structure=None, vol_surface=None) -> Optional[Dict]:
+    # tech carries support_levels / resistance_levels from analysis/levels.py.
+    short = _pick_short(calls, 0.22, 0.16, 0.30,
+                        (tech or {}).get("resistance_levels"), "call")
     if not short:
         return None
     long_ = _pick_long(calls, short, "call")
@@ -116,10 +241,13 @@ def build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings
     p_max_profit = mp_res.get("true_pop")
     true_pop = pr_res.get("true_pop")
     implied = 1 - abs(short.get("delta") or 0)
-    es, comp = _edge_score(ticker, "bear_call_spread", tech, tech.get("vrp"), p_max_profit, implied, sentiment, earnings_days)
+    es, comp = _edge_score(ticker, "bear_call_spread", tech, tech.get("vrp"), p_max_profit,
+                           implied, sentiment, earnings_days, vol_surface)
+    entry_timing = _timing("bear_call", tech, price, structure)
     ctx = {"dte": dte, "short_delta": short.get("delta"),
            "credit_to_width": credit_ps / width, "iv_rank": tech.get("iv_rank"),
-           "trend": tech.get("trend"), "pop": true_pop, "sentiment": sentiment}
+           "trend": tech.get("trend"), "pop": true_pop, "sentiment": sentiment,
+           "entry_timing": entry_timing}
     ev = strategies.evaluate("bear_call", ctx)
     if not ev["qualified"]:
         return None
@@ -133,14 +261,20 @@ def build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings
         "true_pop_windows": pr_res.get("independent_windows"),
         "implied_pop": round(implied, 3), "edge_score": es,
         "component_breakdown": comp, "skew_score": (comp or {}).get("skew", 0),
+        **_surface_fields(vol_surface),
         "auto_reasoning": f"Bear call: {ev['news_check']['detail']}.",
         "criteria": ev["criteria"], "news_check": ev["news_check"],
+        "entry_timing": entry_timing,
     })
     return t
 
 
-def build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, earnings_days=None) -> Optional[Dict]:
-    cs = _pick_short(calls, 0.16, 0.12, 0.22); ps = _pick_short(puts, 0.16, 0.12, 0.22)
+def build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, earnings_days=None,
+                      structure=None, vol_surface=None) -> Optional[Dict]:
+    _res = (tech or {}).get("resistance_levels")
+    _sup = (tech or {}).get("support_levels")
+    cs = _pick_short(calls, 0.16, 0.12, 0.22, _res, "call")
+    ps = _pick_short(puts, 0.16, 0.12, 0.22, _sup, "put")
     if not cs or not ps:
         return None
     cl = _pick_long(calls, cs, "call"); pl = _pick_long(puts, ps, "put")
@@ -164,9 +298,12 @@ def build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, 
     p_max_profit = mp_res.get("true_pop")
     true_pop = pr_res.get("true_pop")
     implied = 1 - abs(cs.get("delta") or 0) - abs(ps.get("delta") or 0)
-    es, comp = _edge_score(ticker, "iron_condor", tech, tech.get("vrp"), p_max_profit, implied, sentiment, earnings_days)
+    es, comp = _edge_score(ticker, "iron_condor", tech, tech.get("vrp"), p_max_profit,
+                           implied, sentiment, earnings_days, vol_surface)
+    entry_timing = _timing("iron_condor", tech, price, structure)
     ctx = {"dte": dte, "short_delta": cs.get("delta"), "credit_to_width": credit_ps / width,
-           "iv_rank": tech.get("iv_rank"), "trend": tech.get("trend"), "pop": true_pop, "sentiment": sentiment}
+           "iv_rank": tech.get("iv_rank"), "trend": tech.get("trend"), "pop": true_pop,
+           "sentiment": sentiment, "entry_timing": entry_timing}
     ev = strategies.evaluate("iron_condor", ctx)
     if not ev["qualified"]:
         return None
@@ -183,8 +320,10 @@ def build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, 
         "true_pop_windows": pr_res.get("independent_windows"),
         "implied_pop": round(implied, 3), "edge_score": es,
         "component_breakdown": comp, "skew_score": (comp or {}).get("skew", 0),
+        **_surface_fields(vol_surface),
         "auto_reasoning": f"Iron condor: {ev['news_check']['detail']}.",
         "criteria": ev["criteria"], "news_check": ev["news_check"],
+        "entry_timing": entry_timing,
     })
     return t
 
@@ -230,13 +369,28 @@ def scan_extra(ticker: str, sentiment_map: Dict, price_data=None, calls=None, pu
             except Exception as e:
                 logger.debug(f"[multi_strategy] {ticker}: skew check skipped: {e}")
         sentiment = (sentiment_map.get(ticker, {}) or {}).get("sentiment", "NEUTRAL")
+        # Earnings. This was hardcoded to None, which _edge_score turned into
+        # earnings_days_away=99 — so every bear call and iron condor was scored as though
+        # earnings were three months away, took the full earnings_safety bonus, and could
+        # never trip the blackout regardless of the real date. The auto-open path is
+        # protected by vega_candidates._earnings_clear, but anything surfaced on the board
+        # and logged by hand had no gate at all.
         earnings_days = None
+        try:
+            from data import fundamentals as _fund
+            earnings_days = _fund.days_until_earnings(fetcher.get_earnings_date(ticker))
+        except Exception as e:
+            logger.debug(f"[multi_strategy] {ticker}: earnings lookup failed: {e}")
+        structure = _structure(price_data, tech)
+        vsurf = _vol_surface(ticker, price, calls, puts, "bear_call_spread")
         if want_bc and calls:
-            t = build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings_days)
+            t = build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings_days,
+                                structure, vsurf)
             if t:
                 out.append(t)
         if want_ic and calls and puts:
-            t = build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, earnings_days)
+            t = build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment,
+                                  earnings_days, structure, vsurf)
             if t:
                 out.append(t)
     except Exception as e:

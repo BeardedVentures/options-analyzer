@@ -49,6 +49,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
 from data import fetcher
+from analysis import edge_calculator
+
+_ETF_TICKERS = {w["ticker"] for w in getattr(config, "WATCHLIST", []) if w.get("type") == "ETF"}
 
 # technicals is optional context (IV-Rank / VRP). Degrade gracefully if it errors.
 try:
@@ -114,6 +117,115 @@ def liquidity_ok(opt: dict) -> bool:
     vol = int(opt.get("volume") or 0)
     oi = int(opt.get("open_interest") or 0)
     return vol >= getattr(config, "MIN_OPTION_VOLUME", 100) or oi >= getattr(config, "MIN_OPTION_OPEN_INTEREST", 500)
+
+
+def _earnings_clear(earnings_date, expiration: str, is_etf: bool) -> bool:
+    """True when no earnings print falls inside the position's lifetime.
+
+    Selling a 25-45 DTE credit spread through an earnings report converts a probabilistic edge
+    into a binary event bet — the single largest uncontrolled risk in premium selling, and the
+    reason config.EARNINGS_BLACKOUT_DAYS exists. That knob was defined but enforced nowhere on
+    the auto-open path (the fourth leak of this shape).
+
+    Any earnings on or before expiry disqualifies, which is stricter than the 7-day blackout and
+    the correct test for a position held to expiration.
+
+    Fails CLOSED for a non-ETF with no known earnings date: a missing date is a data gap, and
+    skipping a tradeable name for one cycle costs far less than selling premium into a print.
+    ETFs have no earnings and always pass.
+    """
+    if is_etf:
+        return True
+    if earnings_date is None:
+        return False
+    try:
+        exp = datetime.strptime(str(expiration)[:10], "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return False
+    e = earnings_date.date() if hasattr(earnings_date, "date") else earnings_date
+    try:
+        return e > exp
+    except TypeError:
+        return False
+
+
+def attach_earnings_gate(cands: list, ticker: str, earnings_date, is_etf: bool) -> int:
+    """Annotate the earnings gate and refresh gate counts. Returns candidates blocked."""
+    blocked = 0
+    for c in cands:
+        clear = _earnings_clear(earnings_date, c.get("expiration"), is_etf)
+        c["earnings_date"] = (
+            (earnings_date.date() if hasattr(earnings_date, "date") else earnings_date).isoformat()
+            if earnings_date else None
+        )
+        c["gates"]["earnings_clear"] = clear
+        # build_candidates computed these before this gate existed; keep them truthful.
+        c["gates_passed"] = sum(1 for v in c["gates"].values() if v)
+        c["gates_total"] = len(c["gates"])
+        if not clear:
+            blocked += 1
+    return blocked
+
+
+def _leg_spread_pct(bid, ask) -> float:
+    """Relative bid-ask spread of one leg. Returns inf when unquotable, so it fails the gate."""
+    try:
+        b, a = float(bid or 0), float(ask or 0)
+    except (TypeError, ValueError):
+        return float("inf")
+    mid = (a + b) / 2
+    if mid <= 0 or a <= 0:
+        return float("inf")
+    return (a - b) / mid
+
+
+def _quote_spread_ok(c: dict) -> bool:
+    """Both legs must quote inside MAX_QUOTE_SPREAD_PCT. Checked per leg, not on the spread."""
+    cap = float(getattr(config, "MAX_QUOTE_SPREAD_PCT", 0.35))
+    return (_leg_spread_pct(c.get("short_bid"), c.get("short_ask")) <= cap
+            and _leg_spread_pct(c.get("long_bid"), c.get("long_ask")) <= cap)
+
+
+def attach_true_pop(cands: list, current_price: float, prices_hist) -> int:
+    """Attach the engine's drift-removed POP to fast-scan candidates.
+
+    Without this the candidates JSON carries only pop_implied (1 - |delta|), so every
+    auto-paper trade opened from a snapshot graded against a delta proxy instead of the
+    calibrated signal — `true_pop` was null on all 59 ledger records. Mirrors main.py:608-609
+    exactly: true_pop = P(price > breakeven), p_max_profit = P(price > short strike).
+
+    Returns how many candidates were successfully annotated. Never raises: a history gap must
+    degrade the scan to implied-only, not kill it.
+    """
+    if prices_hist is None or len(prices_hist) < 2 or not current_price:
+        return 0
+    n = 0
+    for c in cands:
+        try:
+            be_distance_pct = (current_price - c["breakeven"]) / current_price
+            otm_distance_pct = (current_price - c["short_strike"]) / current_price
+            dte = int(c.get("dte") or 0)
+            if dte <= 0:
+                continue
+            p_profit = edge_calculator.calculate_true_pop(
+                strike_distance_pct=be_distance_pct,
+                expiration_days=dte,
+                historical_prices=prices_hist,
+            )
+            p_maxprofit = edge_calculator.calculate_true_pop(
+                strike_distance_pct=otm_distance_pct,
+                expiration_days=dte,
+                historical_prices=prices_hist,
+            )
+            c["true_pop"] = p_profit.get("true_pop")
+            c["true_pop_confidence"] = p_profit.get("confidence")
+            c["true_pop_drift_mode"] = p_profit.get("drift_mode")
+            c["p_max_profit"] = p_maxprofit.get("true_pop")
+            if c["true_pop"] is not None:
+                n += 1
+        except Exception:
+            logger.debug("true_pop failed for %s", c.get("ticker"), exc_info=True)
+    return n
 
 
 def build_candidates(ticker: str, puts: list, current_price: float,
@@ -186,6 +298,14 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                     "liquidity": liquidity_ok(short),
                     "pop": best["pop_implied"] >= getattr(config, "MIN_PROBABILITY_OF_PROFIT", 0.72),
                     "dte_window": getattr(config, "MIN_DTE", 21) <= best["dte"] <= getattr(config, "MAX_DTE", 45),
+                    # MAX_QUOTE_SPREAD_PCT existed in config but was enforced NOWHERE — the third
+                    # enforcement leak of this shape. 13 of 130 candidates in the 2026-07-31
+                    # snapshot exceeded it and still qualified. Wide quotes are exactly where the
+                    # mid-vs-natural fill gap is worst, so this gate protects the fill model too.
+                    "quote_spread": _quote_spread_ok(best),
+                    # Natural credit must actually be collectable. ~25% of candidates are debit
+                    # spreads at real prices; they must never reach the auto-open path.
+                    "natural_credit_positive": (best.get("natural_credit_per_share") or 0) > 0,
                 }
                 best["gates"] = g
                 best["gates_passed"] = sum(1 for v in g.values() if v)
@@ -320,7 +440,16 @@ def main():
     ap.add_argument("--max-width", type=float, default=float(getattr(config, "MAX_SPREAD_WIDTH", 5)))
     ap.add_argument("--top", type=int, default=3, help="max candidates shown per ticker")
     ap.add_argument("--tickers", type=str, default="", help="comma list to override the watchlist")
-    ap.add_argument("--no-open", action="store_true")
+    ap.add_argument("--no-open", action="store_true",
+                    help="Do not open the HTML file in a browser after saving.")
+    ap.add_argument("--no-html", action="store_true",
+                    help="Skip writing the HTML file; only write the JSON snapshot. "
+                         "Used by auto_paper_cycle.py to avoid accumulating large HTML files "
+                         "on every scheduled run.")
+    ap.add_argument("--no-save", action="store_true",
+                    help="Skip writing both HTML and JSON output files entirely. "
+                         "Implies --no-open. Useful for interactive/validation runs where "
+                         "you only want the console summary.")
     args = ap.parse_args()
 
     fetcher.clear_cache()
@@ -347,17 +476,58 @@ def main():
             puts = fetcher.get_options_chain(tk, args.min_dte, args.max_dte)
             ctx = vol_context(tk, puts, price)
             cands = build_candidates(tk, puts, price, args.delta_min, args.delta_max, args.max_width)[: args.top]
+
+            # Earnings gate — one calendar lookup per ticker, reused across its candidates.
+            n_earn_blocked = 0
+            if cands and getattr(config, "EARNINGS_GATE_ENABLED", True):
+                _is_etf = tk in _ETF_TICKERS
+                try:
+                    _edt = None if _is_etf else fetcher.get_earnings_date(tk)
+                except Exception:
+                    _edt = None
+                    logger.debug("earnings lookup failed for %s", tk, exc_info=True)
+                n_earn_blocked = attach_earnings_gate(cands, tk, _edt, _is_etf)
+            elif cands:
+                # Gate disabled: still emit the key so the REQUIRED_GATES contract holds.
+                for _c in cands:
+                    _c["gates"]["earnings_clear"] = True
+                    _c["gates_passed"] = sum(1 for v in _c["gates"].values() if v)
+                    _c["gates_total"] = len(_c["gates"])
+
+            # Calibrated POP for the fast path. Needs a long history (the 5d price fetch above
+            # is only for the last close), so pull it once per ticker and reuse for every leg.
+            n_tp = 0
+            if cands:
+                try:
+                    hist = fetcher.get_price_data(tk, period="2y")
+                    n_tp = attach_true_pop(cands, price, hist["Close"] if hist is not None and not hist.empty else None)
+                except Exception:
+                    logger.debug("history fetch failed for %s", tk, exc_info=True)
+
             rows.append({"ticker": tk, "price": price, "ctx": ctx, "candidates": cands})
             best = cands[0] if cands else None
             npass = sum(1 for c in cands if c["gates_passed"] == c["gates_total"])
             total_pass += npass
             if best:
+                tp = best.get("true_pop")
+                tp_s = f"  tPOP {tp*100:.0f}%" if tp is not None else "  tPOP —"
+                if n_earn_blocked:
+                    tp_s += f"  [EARN blocks {n_earn_blocked}/{len(cands)}]"
                 print(f"  {tk:5s}  ${price:8.2f}  best {best['short_strike']:g}/{best['long_strike']:g} "
                       f"{best['expiration']} ({best['dte']}d)  cr ${best['credit_usd']:.0f} "
-                      f"cr/w {best['credit_to_width']*100:.0f}%  Δ{best['short_delta']:.2f}  "
-                      f"gates {best['gates_passed']}/{best['gates_total']}")
+                      f"cr/w {best['credit_to_width']*100:.0f}%  Δ{best['short_delta']:.2f}{tp_s}  "
+                      f"gates {best['gates_passed']}/{best['gates_total']}  [tpop {n_tp}/{len(cands)}]")
             else:
-                print(f"  {tk:5s}  ${price:8.2f}  no candidates in band/DTE")
+                # A bare "no candidates" line is undiagnosable after the fact: on 2026-07-31
+                # 08:36 all 50 tickers returned zero and the snapshot recorded no reason why.
+                # Report where the chain actually died so the next occurrence is readable.
+                _mid = [p for p in puts if p.get("strike") and p.get("mid")]
+                _otm = [p for p in _mid if p["strike"] < price]
+                _dlt = [p for p in _otm if abs(float(p.get("delta") or 0)) > 0]
+                _band = [p for p in _dlt if args.delta_min <= abs(float(p["delta"])) <= args.delta_max]
+                print(f"  {tk:5s}  ${price:8.2f}  no candidates — chain {len(puts)} "
+                      f"→ priced {len(_mid)} → OTM {len(_otm)} → with-Δ {len(_dlt)} "
+                      f"→ in Δ band {args.delta_min:.2f}-{args.delta_max:.2f} {len(_band)}")
         except Exception as e:
             print(f"  {tk:5s}  ERROR {e}")
             logger.debug("error", exc_info=True)
@@ -369,15 +539,34 @@ def main():
         "min_dte": args.min_dte, "max_dte": args.max_dte,
         "delta_min": args.delta_min, "delta_max": args.delta_max, "vix": vix,
     }
-    out_dir = Path(__file__).parent / "output" / "candidates"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    html_path = out_dir / f"candidates_{stamp}.html"
-    json_path = out_dir / f"candidates_{stamp}.json"
-    html_path.write_text(render_html(rows, meta), encoding="utf-8")
-    json_path.write_text(json.dumps({"meta": meta, "rows": rows}, indent=2, default=str), encoding="utf-8")
 
-    print(f"\n  {total_pass} candidate(s) pass ALL gates.  Report: {html_path}\n")
-    if not args.no_open:
+    # --no-save skips all file output (console-only run).
+    # --no-html writes only the JSON (for auto_paper_cycle.py consumption).
+    no_save = args.no_save
+    no_html = args.no_html or no_save
+
+    html_path = None
+    json_path = None
+
+    if not no_save:
+        out_dir = Path(__file__).parent / "output" / "candidates"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        json_path = out_dir / f"candidates_{stamp}.json"
+        json_path.write_text(
+            json.dumps({"meta": meta, "rows": rows}, indent=2, default=str), encoding="utf-8"
+        )
+        if not no_html:
+            html_path = out_dir / f"candidates_{stamp}.html"
+            html_path.write_text(render_html(rows, meta), encoding="utf-8")
+
+    if html_path:
+        print(f"\n  {total_pass} candidate(s) pass ALL gates.  Report: {html_path}\n")
+    elif json_path:
+        print(f"\n  {total_pass} candidate(s) pass ALL gates.  JSON: {json_path}\n")
+    else:
+        print(f"\n  {total_pass} candidate(s) pass ALL gates.  (no files saved)\n")
+
+    if not (args.no_open or no_save) and html_path:
         try:
             webbrowser.open(html_path.as_uri())
         except Exception:

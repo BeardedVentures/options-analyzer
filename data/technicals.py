@@ -257,66 +257,28 @@ def calculate_iv_rank(ticker: str, current_iv: float, close: pd.Series) -> dict:
 def _find_support_resistance(close: pd.Series,
                              high: pd.Series,
                              low: pd.Series,
-                             lookback: int = 60) -> Dict:
+                             lookback: int = None) -> Dict:
     """
-    Identify key support and resistance levels from recent swing highs/lows.
-    Uses a simple local extrema approach over the lookback window.
+    Identify key support and resistance levels.
+
+    Delegates to analysis/levels.py, which uses volatility-scaled zigzag pivots CLUSTERED by
+    price and ranked by touch count and recency. The previous implementation lived here and
+    scanned 2-bar fractals over 60 bars, which marked every two-day wiggle as a level: on
+    2026-08-05 the "nearest support" was 0.0% below spot for QQQ, 0.3% for XLE, 0.6% for WMT,
+    and the three retained levels were usually one price area (QQQ: 720.06 / 720 / 710.08,
+    the first two being the same level duplicated by round-number injection).
+
+    Emits the legacy keys unchanged plus `support_levels` / `resistance_levels` carrying the
+    evidence (touches, recency, strength) for callers that can use it.
     """
-    if len(close) < lookback:
-        lookback = len(close)
-
-    recent_close = close.tail(lookback)
-    recent_high = high.tail(lookback)
-    recent_low = low.tail(lookback)
-
-    current_price = float(close.iloc[-1])
-
-    # Find swing lows (support)
-    swing_lows = []
-    for i in range(2, len(recent_low) - 2):
-        val = recent_low.iloc[i]
-        if (val <= recent_low.iloc[i - 1] and val <= recent_low.iloc[i - 2]
-                and val <= recent_low.iloc[i + 1] and val <= recent_low.iloc[i + 2]):
-            swing_lows.append(float(val))
-
-    # Find swing highs (resistance)
-    swing_highs = []
-    for i in range(2, len(recent_high) - 2):
-        val = recent_high.iloc[i]
-        if (val >= recent_high.iloc[i - 1] and val >= recent_high.iloc[i - 2]
-                and val >= recent_high.iloc[i + 1] and val >= recent_high.iloc[i + 2]):
-            swing_highs.append(float(val))
-
-    # Nearest support below current price
-    supports = sorted([s for s in swing_lows if s < current_price], reverse=True)
-    resistances = sorted([r for r in swing_highs if r > current_price])
-
-    # Add round-number levels near current price
-    round_levels = [round(current_price / step) * step
-                    for step in [5, 10, 25, 50, 100]
-                    if step < current_price * 0.2]
-
-    for lvl in round_levels:
-        if lvl < current_price and lvl not in supports:
-            supports.append(lvl)
-        elif lvl > current_price and lvl not in resistances:
-            resistances.append(lvl)
-
-    supports = sorted(supports, reverse=True)[:3]
-    resistances = sorted(resistances)[:3]
-
-    # 52-week high/low
-    yr_high = float(high.tail(252).max()) if len(high) >= 252 else float(high.max())
-    yr_low = float(low.tail(252).min()) if len(low) >= 252 else float(low.min())
-
-    return {
-        "supports": supports,
-        "resistances": resistances,
-        "nearest_support": supports[0] if supports else None,
-        "nearest_resistance": resistances[0] if resistances else None,
-        "52w_high": round(yr_high, 2),
-        "52w_low": round(yr_low, 2),
-    }
+    from analysis.levels import find_levels
+    try:
+        return find_levels(high.tolist(), low.tolist(), close.tolist(), lookback=lookback)
+    except Exception as exc:
+        logger.warning(f"[levels] detection failed: {exc}")
+        return {"supports": [], "resistances": [], "nearest_support": None,
+                "nearest_resistance": None, "support_levels": [], "resistance_levels": [],
+                "52w_high": None, "52w_low": None}
 
 
 # ─────────────────────────────────────────────
@@ -409,15 +371,31 @@ def _composite_score(price: float,
     else:
         breakdown["not_overbought"] = 0
 
-    # Short strike above key support: +20
-    if short_strike is not None and nearest_support is not None:
-        if short_strike > nearest_support:
-            breakdown["strike_above_support"] = 20
-            total += 20
+    # Short strike sheltered BY key support: +20
+    #
+    # This was inverted until 2026-08-05. It read `short_strike > nearest_support` and paid
+    # 20 points for it — i.e. it rewarded the strike sitting BETWEEN spot and support, which
+    # is the EXPOSED configuration: price falls to the strike without ever testing a level.
+    # The protective geometry is the opposite. A short put wants support ABOVE it, so the
+    # market must break a defended level before the strike is threatened.
+    #
+    # Partial credit matters here: with the old micro-low levels the strike was essentially
+    # always below `nearest_support`, so this branch paid a flat 0 to every bull put — 15
+    # worse than the no-data neutral, a uniform drag on composite_score that carried no
+    # information. Scaling by cushion depth makes the component discriminate again.
+    if short_strike is not None and nearest_support is not None and short_strike > 0:
+        if short_strike < nearest_support:
+            cushion = (nearest_support - short_strike) / short_strike
+            # 0% cushion -> 12 pts (support sits right at the strike, barely a shield),
+            # 5%+ cushion -> full 20.
+            pts = int(round(min(20.0, 12.0 + 8.0 * min(cushion / 0.05, 1.0))))
+            breakdown["strike_sheltered_by_support"] = pts
+            total += pts
         else:
-            breakdown["strike_above_support"] = 0
+            # Support is below the strike: nothing stands between spot and assignment risk.
+            breakdown["strike_sheltered_by_support"] = 0
     else:
-        breakdown["strike_above_support"] = 15  # neutral — no data
+        breakdown["strike_sheltered_by_support"] = 15  # neutral — no data
         total += 15
 
     return {"total": total, "breakdown": breakdown}
@@ -565,9 +543,16 @@ def calculate_all(price_data: pd.DataFrame,
             "above_20sma": price > sma20 if sma20 else None,
             "macd_bullish": macd_line > signal_line,
             "bb_squeeze": bb_width is not None and bb_width < 3.0,
-            "approaching_support": (nearest_support is not None
-                                    and nearest_support > 0
-                                    and (price - nearest_support) / price < 0.02),
+            # Signed: True = price is riding just above a level, False = clear of it, None =
+            # no level to measure against. This was computed and read by nothing at all; it
+            # now feeds the cockpit's level readout, and the None case matters because
+            # "no support found" and "support far away" are very different situations.
+            "approaching_support": (
+                None if not nearest_support or nearest_support <= 0
+                else (price - nearest_support) / price < 0.02),
+            "approaching_resistance": (
+                None if not sr.get("nearest_resistance") or sr["nearest_resistance"] <= 0
+                else (sr["nearest_resistance"] - price) / price < 0.02),
         }
 
         return {
@@ -614,6 +599,10 @@ def calculate_all(price_data: pd.DataFrame,
             "resistances": sr["resistances"],
             "nearest_support": sr["nearest_support"],
             "nearest_resistance": sr["nearest_resistance"],
+            # Levels with their evidence (touches / recency / strength) — used for strike
+            # cushion checks and the cockpit's level readout.
+            "support_levels": sr.get("support_levels", []),
+            "resistance_levels": sr.get("resistance_levels", []),
             "52w_high": sr["52w_high"],
             "52w_low": sr["52w_low"],
             # Trend

@@ -72,7 +72,8 @@ def build():
     for r in rows:
         t, ok, ev = _spread(*r)
         (qualified if ok else rejected).append({**t, "rejection_reason":
-            "; ".join(c["label"] for c in ev["criteria"] if not c["ok"])} if not ok else t)
+            "; ".join(c["label"] for c in ev["criteria"]
+                      if not c["ok"] and not c.get("advisory"))} if not ok else t)
 
     # iron condor (multi-leg) — neutral, needs NEUTRAL news
     ic_extra = {"put_short_strike": 530, "put_long_strike": 525, "call_short_strike": 575, "call_long_strike": 580}
@@ -86,7 +87,8 @@ def build():
                           "Positive breakout themes — directional risk.",
                           extra={"put_short_strike": 455, "put_long_strike": 450, "call_short_strike": 500, "call_long_strike": 505})
     if not ok2:
-        rejected.append({**t2, "rejection_reason": "; ".join(c["label"] for c in ev2["criteria"] if not c["ok"])})
+        rejected.append({**t2, "rejection_reason": "; ".join(
+            c["label"] for c in ev2["criteria"] if not c["ok"] and not c.get("advisory"))})
     else:
         qualified.append(t2)
 

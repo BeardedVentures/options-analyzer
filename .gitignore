@@ -28,8 +28,24 @@ logs/
 # ── Runtime model state (cached in CI; do not commit) ──
 data/iv_history/*.json
 
+# ── Sentiment disk cache (NEWS_CACHE_TTL_MIN, regenerated hourly on every scan) ──
+data/cache/
+
 # ── OS / IDE ─────────────────────────────────────
 .DS_Store
 Thumbs.db
 .vscode/settings.json
 *.swp
+
+# ── Personal trading record & working notes (kept local, never pushed) ──
+# The repo is public. These carry trade-level P&L, win rates and internal session
+# notes — the project's code is shared, the operator's record is not. They live on
+# disk and in the local v0.9-mvp-local tag / feat/entry-timing branch.
+VEGA_Trade_Audit_*.md
+VEGA_vs_Tastytrade_Benchmark_*.md
+VEGA_SESSION_UPDATE_2026-07-09.md
+VEGA_Claude_Code_Session_*.md
+VEGA_VSCode_Handoff_*.md
+VEGA_EntryTiming_AsBuilt_*.md
+VEGA_MVP_RUNBOOK.md
+VEGA_PAPER_DESK_README.md

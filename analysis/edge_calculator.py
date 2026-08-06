@@ -59,6 +59,32 @@ def calculate_vrp(current_iv: float, realized_vol_30d: float) -> Dict:
 # TRUE HISTORICAL PROBABILITY OF PROFIT
 # ─────────────────────────────────────────────
 
+def confidence_tier(n_closed: int) -> Dict:
+    """Statistical confidence in the edge score, as a function of realized sample size.
+
+    An edge score is a claim. At n=10 the 95% CI on the realized win rate spans roughly
+    [30%, 90%] — 61 percentage points — so presenting "72/100" as a precise number
+    misrepresents what is known. Callers should render the score inside this envelope.
+
+    Returns {stars, label, note, n}. Tiers are cumulative sample counts, not performance.
+    """
+    try:
+        n = max(0, int(n_closed))
+    except (TypeError, ValueError):
+        n = 0
+    tiers = [
+        (0,    10, 1, "speculative", "Baseline not yet established"),
+        (11,   30, 2, "emerging",    "Early signal, high variance"),
+        (31,   60, 3, "developing",  "Pattern emerging, track record thin"),
+        (61,  100, 4, "established", "Meaningful sample, calibration in progress"),
+        (101, 10**9, 5, "validated", "Statistically meaningful track record"),
+    ]
+    for lo, hi, stars, label, note in tiers:
+        if lo <= n <= hi:
+            return {"stars": stars, "label": label, "note": note, "n": n}
+    return {"stars": 1, "label": "speculative", "note": "Baseline not yet established", "n": n}
+
+
 def calculate_true_pop(
     strike_distance_pct: float,
     expiration_days: int,
@@ -398,6 +424,8 @@ def calculate_edge_score(
     fundamentals_score: Optional[float] = None,
     skew_raw: Optional[float] = None,
     post_earnings_bonus: int = 0,
+    term_slope: Optional[str] = None,
+    event_expiry_flag: bool = False,
 ) -> Dict:
     """
     Composite edge score combining all factors.
@@ -432,18 +460,32 @@ def calculate_edge_score(
     # ~4.2pp (1990–2018) and ~6.5pp since 2020 (Cboe/CAIA); it essentially never reaches the old
     # 10/20/30pp thresholds, so this 30-point component was permanently pinned at its 5-pt floor.
     # New bands reward the realistic 2–10pp range where the premium-selling edge actually lives.
+    #
+    # RESHAPE (2026-07-23): Original bands compressed 4–10pp into just 8 pts of spread (22→30),
+    # meaning the vast majority of qualified trades clustered in the 22–27 range and VRP stopped
+    # discriminating within the normal operating window. New curve:
+    #   <0pp  →  0  (disqualify)
+    #   0–2   →  8  (thin premium, minimum edge)
+    #   2–3   → 12  (emerging edge — was lumped with 3-4 before)
+    #   3–5   → 17  (solid edge — was 15 for entire 2-4 range)
+    #   5–7   → 22  (strong edge)
+    #   7–9   → 26  (very strong)
+    #   ≥9    → 30  (peak, typically stress events)
+    # This spreads the score from 8→30 across the realistic 0–9pp window instead of 15→30,
+    # giving ~2× more resolution where trades actually live.
     if vrp_pct < 0:
-        # Negative VRP = options cheap = no edge for sellers
         breakdown["vrp"] = 0
         disqualification_reason = f"Negative VRP ({vrp_pct:.1f}pp) — options underpriced, no seller edge"
-    elif vrp_pct >= 10:
+    elif vrp_pct >= 9:
         breakdown["vrp"] = 30
-    elif vrp_pct >= 6:
-        breakdown["vrp"] = 27
-    elif vrp_pct >= 4:
+    elif vrp_pct >= 7:
+        breakdown["vrp"] = 26
+    elif vrp_pct >= 5:
         breakdown["vrp"] = 22
+    elif vrp_pct >= 3:
+        breakdown["vrp"] = 17
     elif vrp_pct >= 2:
-        breakdown["vrp"] = 15
+        breakdown["vrp"] = 12
     else:
         breakdown["vrp"] = 8   # 0–2pp: thin but positive premium
 
@@ -513,8 +555,36 @@ def calculate_edge_score(
     # ── Post-earnings IV-crush bonus (+5, additive — spec §3.5) ──
     breakdown["post_earnings"] = int(post_earnings_bonus or 0)
 
-    total = sum(breakdown.values())
-    total = min(100, max(0, total))
+    # ── Term structure modifier (additive, +5 to -8) ──
+    # IV across expirations, not just at the one being traded. Back months richer than the
+    # front is general nervousness and a good environment to sell into; a front-loaded curve
+    # is imminent event risk; a lone spike at one expiration is a dated catalyst, and selling
+    # premium across it underwrites a binary rather than variance.
+    #
+    # Passed as a keyword, not read off a trade dict — this function takes explicit scalars
+    # and has no `trade` parameter, so the spec's `trade.get("term_slope")` would have raised.
+    # Advisory during calibration: even event_spike only subtracts, it never disqualifies.
+    if getattr(config, "TERM_STRUCTURE_ENABLED", True) and term_slope:
+        adj_map = getattr(config, "TERM_STRUCTURE_SCORE_ADJ", {}) or {}
+        adj = int(adj_map.get(term_slope, 0))
+        # An event dated inside the window is worse than the slope alone implies, but the
+        # two must not stack into a double penalty when the slope IS the event spike.
+        if event_expiry_flag and term_slope != "event_spike":
+            adj = min(adj - 4, -4)
+        breakdown["term_structure"] = adj
+    else:
+        breakdown["term_structure"] = 0
+
+    # ── Score assembly ──
+    # Separate base components (0-100 ceiling) from additive bonuses (skew + post_earnings)
+    # so callers can see what was genuinely earned vs. what was pushed over the line by bonuses.
+    bonus_keys = {"skew", "post_earnings", "term_structure"}
+    base_score_raw = sum(v for k, v in breakdown.items() if k not in bonus_keys)
+    bonus_score = sum(v for k, v in breakdown.items() if k in bonus_keys)
+
+    base_score = min(100, max(0, base_score_raw))
+    total_raw = base_score_raw + bonus_score          # uncapped (can exceed 100)
+    total = min(100, max(0, total_raw))               # capped — used for qualification gate
 
     qualified = (
         total >= config.MIN_EDGE_SCORE
@@ -523,12 +593,21 @@ def calculate_edge_score(
         and edge_points >= 0
     )
 
-    return {
-        "total_score": total,
+    result = {
+        "total_score": total,                         # capped 0–100 — used for qualification
         "component_breakdown": breakdown,
         "qualified": qualified,
         "disqualification_reason": disqualification_reason,
+        "base_score": base_score,                     # base components only, capped at 100
+        "bonus_score": bonus_score,                   # skew + post_earnings additive points
     }
+
+    # Expose raw (uncapped) score when config opts in — lets callers distinguish a true 100
+    # from a 80-base trade boosted by skew/post-earnings. Qualification still uses total (capped).
+    if getattr(config, "SCORE_DISPLAY_UNCAPPED", False):
+        result["raw_score"] = min(120, max(0, total_raw))  # hard cap at 120 for display sanity
+
+    return result
 
 
 # ─────────────────────────────────────────────
@@ -570,6 +649,7 @@ def calculate_spread_metrics(
     long_put_strike: float,
     current_price: float,
     long_put_mid: Optional[float] = None,
+    p_profit: Optional[float] = None,
 ) -> Dict:
     """
     Calculate spread credit, max loss, and position sizing for a bull put spread.
@@ -578,11 +658,15 @@ def calculate_spread_metrics(
         short_put: option dict (the one we're selling)
         long_put_strike: strike of the protective long put
         current_price: underlying price
+        long_put_mid: mid price of the long leg (optional; estimated if absent)
+        p_profit: true POP at breakeven (decimal 0–1) — used for EV ROC calculation
 
     Returns:
         credit_per_share, credit_usd, max_loss_usd, spread_width,
         contracts_allowed, profit_target_usd, stop_loss_usd,
-        strike_distance_usd, strike_distance_pct
+        strike_distance_usd, strike_distance_pct,
+        gross_roc, net_realized_roc, ev_roc (when EV_ROC_ENABLED),
+        roc_sanity_flag (True when gross ROC exceeds ROC_SANITY_FLAG_THRESHOLD)
     """
     short_strike = short_put["strike"]
     short_mid = short_put.get("mid", 0)
@@ -630,7 +714,14 @@ def calculate_spread_metrics(
     strike_distance_usd = round(current_price - short_strike, 2)
     strike_distance_pct = round(strike_distance_usd / current_price * 100, 2)
 
-    return {
+    # ── ROC metrics ──
+    # gross_roc: raw max-profit / max-loss (what most scanners display)
+    gross_roc = round(credit_per_share / max_loss_per_share, 4) if max_loss_per_share > 0 else 0.0
+
+    # roc_sanity_flag: warn when gross ROC looks inflated (narrow spread, rich credit)
+    roc_sanity_flag = gross_roc > getattr(config, "ROC_SANITY_FLAG_THRESHOLD", 0.50)
+
+    metrics = {
         "credit_per_share": credit_per_share,
         "credit_usd": credit_usd,
         "spread_width": spread_width,
@@ -643,4 +734,31 @@ def calculate_spread_metrics(
         "stop_loss_usd": stop_loss_usd,
         "strike_distance_usd": strike_distance_usd,
         "strike_distance_pct": strike_distance_pct,
+        "gross_roc": gross_roc,
+        "gross_roc_pct": round(gross_roc * 100, 1),
+        "roc_sanity_flag": roc_sanity_flag,
     }
+
+    # net_realized_roc and ev_roc — only when enabled and max_loss is known
+    if getattr(config, "EV_ROC_ENABLED", True) and max_loss_per_share > 0:
+        # Round-trip commission for a single contract (open + close, 2 legs each)
+        commission_rt = getattr(config, "COMMISSION_PER_CONTRACT_PER_LEG", 0.54) * \
+                        getattr(config, "LEGS_PER_SPREAD", 2) * 2  # open + close
+        # Convert to per-share basis (100 shares per contract)
+        commission_per_share = commission_rt / 100.0
+
+        target_pct = getattr(config, "TARGET_PROFIT_PCT", 0.50)
+        realized_credit = (credit_per_share * target_pct) - commission_per_share
+        net_realized_roc = round(realized_credit / max_loss_per_share, 4)
+        metrics["net_realized_roc"] = net_realized_roc
+        metrics["net_realized_roc_pct"] = round(net_realized_roc * 100, 1)
+
+        # EV ROC requires p_profit (true POP at breakeven). If not provided, omit.
+        if p_profit is not None and 0.0 < p_profit < 1.0:
+            # Expected value: win (net_realized_roc × p_profit) minus max loss (1.0) × (1 − p_profit)
+            ev_roc = round((net_realized_roc * p_profit) - (1.0 * (1.0 - p_profit)), 4)
+            metrics["ev_roc"] = ev_roc
+            metrics["ev_roc_pct"] = round(ev_roc * 100, 1)
+            metrics["ev_roc_positive"] = ev_roc > 0  # quick boolean for filtering/display
+
+    return metrics

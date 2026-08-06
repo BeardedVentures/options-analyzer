@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VEGA Paper Desk — Redesign Mockup</title>
+<style>
+:root{
+  /* Neutral ink scale — hierarchy comes from these, not from color */
+  --ink:#1f2937; --ink-2:#4b5563; --ink-3:#6b7280; --line:#e7e9ee; --line-2:#eef0f4;
+  --bg:#f5f6f8; --card:#ffffff;
+  /* One non-money accent (indigo) + one warning (amber). Blue/amber = colorblind-safe pair. */
+  --accent:#4f46e5; --accent-soft:#eef0ff; --warn:#b45309; --warn-soft:#fff4e5;
+  /* GREEN/RED are reserved EXCLUSIVELY for money: P/L, wins, losses. */
+  --pos:#12805c; --pos-soft:#e9f7f1; --neg:#c23b3b; --neg-soft:#fdecec;
+  --gate-pass:#3f4a8a; --gate-fail:#c98a1a;
+  --radius:12px;
+}
+*{box-sizing:border-box}
+body{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;background:var(--bg);color:var(--ink);
+  -webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+.wrap{max-width:1280px;margin:0 auto;padding:22px 24px 60px}
+a{color:var(--accent)}
+
+/* ── Header ─────────────────────────────────────────── */
+.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+.badge{font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+.btn{font:inherit;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;transition:transform .08s ease,box-shadow .12s ease,background .12s}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--accent);color:#fff;box-shadow:0 1px 0 rgba(79,70,229,.35)}
+.btn-primary:hover{background:#4338ca}
+.btn-go{background:var(--accent);color:#fff;padding:6px 14px}
+.btn-go:hover{background:#4338ca}
+.sub{color:var(--ink-3);font-size:12px;margin:8px 0 4px}
+.scan-note{background:var(--accent-soft);border:1px solid #dfe1fb;color:#37339c;border-radius:10px;padding:9px 14px;font-size:13px;margin:12px 0 4px;display:flex;align-items:center;gap:9px}
+
+/* ── Scorecard ──────────────────────────────────────── */
+.cards{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:14px 0 6px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:11px 13px;position:relative}
+.card .lab{font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.card .val{font-size:23px;font-weight:700;margin:3px 0 1px;letter-spacing:-.02em}
+.card .s{font-size:10.5px;color:var(--ink-3)}
+.card.muted .val{color:#aeb4bf}                     /* premature stat: greyed, not trusted */
+.card.muted::after{content:"n=1";position:absolute;top:10px;right:11px;font-size:9px;font-weight:700;color:#b9bec8;
+  border:1px solid #e2e5ea;border-radius:6px;padding:1px 5px}
+.val.pos{color:var(--pos)} .val.neg{color:var(--neg)}
+.prog{height:5px;border-radius:3px;background:#eef0f4;overflow:hidden;margin-top:7px}
+.prog>i{display:block;height:100%;background:var(--accent);border-radius:3px}
+
+/* ── Hero: the day's best setup ─────────────────────── */
+.hero{display:flex;gap:18px;align-items:center;background:linear-gradient(180deg,#ffffff,#fbfbff);
+  border:1px solid #e3e4f5;border-left:4px solid var(--accent);border-radius:var(--radius);padding:14px 18px;margin:16px 0 6px;
+  box-shadow:0 1px 2px rgba(31,41,55,.04)}
+.hero .flag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);margin-bottom:3px}
+.hero .line{font-size:17px;font-weight:700;letter-spacing:-.01em}
+.hero .why{color:var(--ink-3);font-size:12.5px;margin-top:3px}
+.hero .prio{margin-left:auto;text-align:center;padding-left:18px;border-left:1px solid var(--line)}
+.hero .prio .n{font-size:34px;font-weight:800;line-height:1;color:var(--accent);letter-spacing:-.03em}
+.hero .prio .c{font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em}
+
+/* ── Table ──────────────────────────────────────────── */
+.tablecard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin-top:10px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead .grp th{font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);font-weight:700;
+  padding:9px 10px 3px;text-align:left;border-bottom:0}
+thead .col th{font-size:11px;color:var(--ink-3);font-weight:600;padding:2px 10px 8px;text-align:right;border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--card)}
+thead .col th.l{text-align:left}
+.grp-sep{border-left:1px solid var(--line-2)}
+tbody td{padding:9px 10px;border-bottom:1px solid var(--line-2);text-align:right;vertical-align:middle}
+tbody td.l{text-align:left}
+tbody tr{transition:background .1s ease}
+tbody tr:hover{background:#f8f9ff}
+tbody tr:last-child td{border-bottom:0}
+.tk{font-weight:700;font-size:14px}
+.tk .px{font-weight:400;color:var(--ink-3);font-size:11px;margin-left:5px}
+.muted-cell{color:var(--ink-3);font-size:11px}
+.big{font-weight:600;font-size:13.5px}
+.sub2{color:var(--ink-3);font-size:10.5px;margin-top:1px}
+.mono{font-variant-numeric:tabular-nums}
+
+/* Priority hero cell: value + micro-bar (length = preattentive magnitude) */
+.prio-cell{min-width:96px}
+.prio-cell .n{font-weight:800;font-size:16px;color:var(--ink);letter-spacing:-.02em}
+.pbar{height:4px;border-radius:2px;background:#edeefb;margin-top:4px;overflow:hidden}
+.pbar>i{display:block;height:100%;background:var(--accent);border-radius:2px}
+
+/* POP with confidence shading */
+.pop .n{font-weight:600}
+.popbar{height:4px;border-radius:2px;background:#eef0f4;margin-top:4px;overflow:hidden}
+.popbar>i{display:block;height:100%;background:#8b93c9;border-radius:2px}
+
+/* Gate dots: fill/shape encodes pass/fail — reads with zero color */
+.gates{display:inline-flex;gap:4px;align-items:center}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.dot.pass{background:var(--gate-pass)}
+.dot.fail{background:transparent;border:1.6px solid var(--gate-fail)}
+.gate-count{font-size:11px;color:var(--ink-3);margin-left:6px;font-weight:600}
+.gate-count.all{color:var(--pos)}
+
+/* Money cells — the ONLY place green/red appear */
+.money-pos{color:var(--pos);font-weight:600}
+.money-neg{color:var(--neg);font-weight:600}
+
+/* payoff sparkline */
+svg.pay{vertical-align:middle;display:block}
+
+/* Log confirmation pulse + toast */
+@keyframes pulse{0%{background:#e9f7f1}100%{background:transparent}}
+tr.logged{animation:pulse 1.1s ease}
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;
+  background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;
+  transition:opacity .2s,transform .2s;pointer-events:none;z-index:50;box-shadow:0 6px 24px rgba(0,0,0,.18)}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* spinner */
+.spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;
+  display:inline-block;animation:rot .7s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+.legend{margin-top:22px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 18px;font-size:12.5px;color:var(--ink-2)}
+.legend h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3)}
+.legend .row{display:flex;gap:10px;align-items:baseline;margin:5px 0}
+.legend b{color:var(--ink)}
+.foot{color:var(--ink-3);font-size:11px;margin-top:20px;line-height:1.6}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media(max-width:1080px){.cards{grid-template-columns:repeat(3,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Header -->
+  <div class="top">
+    <h1>VEGA Paper Desk</h1>
+    <span class="badge">PAPER</span>
+    <button class="btn btn-primary" id="rescan">↻ Rescan today</button>
+  </div>
+  <div class="sub num">2026-07-14 08:34 · AI disabled (no credits) · Robinhood fees ≈ $2.16 round-trip/contract · localhost only</div>
+  <div class="scan-note"><span>✓</span><span>Scan complete — <b>117 candidates</b> across <b class="num">50/50</b> names priced.</span></div>
+
+  <!-- Scorecard: progress bar shows sample maturity; premature stats greyed -->
+  <div class="cards">
+    <div class="card">
+      <div class="lab">Closed</div><div class="val num">1</div><div class="s">of 30 target</div>
+      <div class="prog"><i style="width:3.3%"></i></div>
+    </div>
+    <div class="card">
+      <div class="lab">Win rate</div><div class="val num">100%</div><div class="s num">1W / 0L / 0S</div>
+    </div>
+    <div class="card">
+      <div class="lab">Net P/L</div><div class="val pos num">+$14</div><div class="s">after RH fees</div>
+    </div>
+    <div class="card muted">
+      <div class="lab">Expectancy</div><div class="val num">+$13.84</div><div class="s">net / ct / trade</div>
+    </div>
+    <div class="card muted">
+      <div class="lab">Profit factor</div><div class="val num">∞</div><div class="s">&gt;1 winning</div>
+    </div>
+    <div class="card muted">
+      <div class="lab">Calibration</div><div class="val num">+24pp</div><div class="s">real − POP</div>
+    </div>
+  </div>
+  <div class="sub">Greyed cards need ~10 closes to mean anything. The bar under “Closed” shows you’re 1 of 30 — the numbers know how green they are.</div>
+
+  <!-- Hero: the single best setup today -->
+  <div class="hero">
+    <div id="hero-pay"></div>
+    <div>
+      <div class="flag">★ Top setup today</div>
+      <div class="line num">QQQ 690 / 689 · 31 DTE</div>
+      <div class="why num">71% POP · 39% ROI · $28 credit on $72 risk · passes all 8 gates. The cleanest premium on the board.</div>
+    </div>
+    <div class="prio">
+      <div class="n num">60</div><div class="c">Priority</div>
+    </div>
+  </div>
+
+  <!-- Main board -->
+  <div class="tablecard">
+    <table>
+      <thead>
+        <tr class="grp">
+          <th colspan="4" class="l">Trade</th>
+          <th colspan="4" class="grp-sep l">Edge — is it worth taking?</th>
+          <th colspan="4" class="grp-sep l">Risk &amp; Greeks</th>
+          <th colspan="1" class="grp-sep l">Quality</th>
+          <th colspan="1" class="grp-sep l"></th>
+        </tr>
+        <tr class="col">
+          <th class="l">Ticker</th><th class="l">Payoff</th><th class="l">Strikes</th><th>Exp</th>
+          <th class="grp-sep">Priority ▼</th><th>POP</th><th>ROI</th><th>Cr/W</th>
+          <th class="grp-sep">Credit</th><th>Δ</th><th>θ/day</th><th>IV-Rk</th>
+          <th class="grp-sep l">Gates</th>
+          <th class="grp-sep">Log</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Why-it-works legend -->
+  <div class="legend">
+    <h3>What changed &amp; why (the science)</h3>
+    <div class="row"><b>Numbers right-aligned, tabular figures.</b>&nbsp;Magnitude reads from digit position — columns become vertical bar charts you scan in one pass. <span class="muted-cell">(Tufte / Few)</span></div>
+    <div class="row"><b>Color means one thing.</b>&nbsp;Green &amp; red appear <b>only</b> on money (P/L, wins). Everything else is neutral ink so the eye isn’t pulled by decoration.</div>
+    <div class="row"><b>Gate dots, not words.</b>&nbsp;8 dots in fixed order — filled = pass, ringed = fail. Which gates failed is now a shape you glance at, not a list you read. Fill/shape works without color (8% of men are red-green colorblind).</div>
+    <div class="row"><b>One hero number per row.</b>&nbsp;Priority is largest + backed by a length bar (preattentive magnitude) + a ▼ marks it as the sort key. Everything else steps down the type scale.</div>
+    <div class="row"><b>Confidence is visible.</b>&nbsp;The scorecard greys stats that only have n=1 behind them and shows a 1-of-30 progress bar — the interface signals how much to trust each number.</div>
+    <div class="row"><b>Hero card + micro-interactions.</b>&nbsp;The day’s best setup is lifted out (Von Restorff); Log pulses + toasts; Rescan spins. Feedback under 400ms keeps you in flow.</div>
+  </div>
+
+  <div class="foot">Mockup — static sample data from the 2026-07-14 08:34 scan. Payoff: green = P/L at expiration; red dot = break-even; dashed = current price.
+  Net/Unrealized P/L are after Robinhood round-trip fees. Educational tool — not financial advice; every order is your own.</div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── sample data (from the screenshot) ───────────────────────────────
+// gates order: IV, Δ, buffer, cr/w, credit, liq, POP, DTE  (true = pass)
+const ROWS = [
+  {tk:"QQQ",px:718.57,short:690,long:689,exp:"2026-08-14",dte:31,prio:60,pop:71,popd:73,src:"model",roi:39,crw:28,credit:28,cps:0.28,d:-0.27,th:27,ivr:59,ivm:"Est",
+   gates:[true,true,true,true,true,true,true,true]},
+  {tk:"QQQ",px:718.57,short:685,long:680,exp:"2026-08-21",dte:38,prio:59,pop:73,popd:75,src:"model",roi:33,crw:25,credit:125,cps:1.25,d:-0.25,th:23,ivr:59,ivm:"Est",
+   gates:[true,true,true,true,true,true,true,true]},
+  {tk:"IWM",px:294.79,short:280,long:275,exp:"2026-08-21",dte:38,prio:54,pop:81,popd:80,src:"model",roi:22,crw:18,credit:89,cps:0.89,d:-0.21,th:8,ivr:11,ivm:"Est",
+   gates:[false,true,true,true,true,true,true,true]},
+  {tk:"QQQ",px:718.57,short:695,long:694,exp:"2026-08-14",dte:31,prio:54,pop:67,popd:70,src:"model",roi:45,crw:31,credit:31,cps:0.31,d:-0.30,th:28,ivr:59,ivm:"Est",
+   gates:[true,true,true,true,true,true,false,true]},
+  {tk:"SPY",px:749.95,short:722,long:721,exp:"2026-08-21",dte:38,prio:47,pop:80,popd:79,src:"model",roi:19,crw:16,credit:16,cps:0.16,d:-0.21,th:13,ivr:25,ivm:"Est",
+   gates:[false,true,true,true,false,true,true,true]},
+  {tk:"SPY",px:749.95,short:725,long:724,exp:"2026-08-21",dte:38,prio:46,pop:78,popd:77,src:"model",roi:22,crw:18,credit:18,cps:0.18,d:-0.23,th:14,ivr:25,ivm:"Est",
+   gates:[false,true,true,true,false,true,true,true]},
+  {tk:"SPY",px:749.95,short:727,long:726,exp:"2026-08-21",dte:38,prio:46,pop:76,popd:76,src:"model",roi:24,crw:19,credit:19,cps:0.19,d:-0.24,th:14,ivr:25,ivm:"Est",
+   gates:[false,true,true,true,false,true,true,true]},
+];
+const GATE_NAMES=["IV-Rank","Delta cap","OTM buffer","Credit/Width","Min credit","Liquidity","POP","DTE"];
+
+// ── bull-put payoff sparkline ───────────────────────────────────────
+function payoff(short,long,credit,width,spot,w=150,h=46){
+  const maxpl=credit*100, minpl=-(width-credit)*100;
+  const lo=long-Math.max(width*0.6,1), hi=short+Math.max(width*0.9,spot?Math.max(1,spot-short):1);
+  const hi2=spot?Math.max(hi,spot*1.005):hi, pad=5, span=(hi2-lo)||1, rng=(maxpl-minpl)||1;
+  const px=p=>pad+(p-lo)/span*(w-2*pad), py=v=>(h-pad)-(v-minpl)/rng*(h-2*pad);
+  const be=short-credit;
+  const pts=[[lo,minpl],[long,minpl],[short,maxpl],[hi2,maxpl]].map(([p,v])=>`${px(p).toFixed(1)},${py(v).toFixed(1)}`).join(" ");
+  let spotLine="";
+  if(spot&&spot>=lo&&spot<=hi2){const sx=px(spot);spotLine=`<line x1="${sx.toFixed(1)}" y1="${pad}" x2="${sx.toFixed(1)}" y2="${h-pad}" stroke="#4f46e5" stroke-width="1" stroke-dasharray="2,2"/>`;}
+  return `<svg class="pay" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <line x1="${pad}" y1="${py(0).toFixed(1)}" x2="${w-pad}" y2="${py(0).toFixed(1)}" stroke="#e5e7eb" stroke-width="1"/>
+    <polyline points="${pts}" fill="none" stroke="#12805c" stroke-width="1.8" stroke-linejoin="round"/>
+    <circle cx="${px(be).toFixed(1)}" cy="${py(0).toFixed(1)}" r="2.6" fill="#c23b3b"/>${spotLine}</svg>`;
+}
+
+function gateDots(g){
+  const dots=g.map((p,i)=>`<span class="dot ${p?'pass':'fail'}" title="${GATE_NAMES[i]}: ${p?'pass':'FAIL'}"></span>`).join("");
+  const n=g.filter(Boolean).length;
+  return `<span class="gates">${dots}</span><span class="gate-count ${n===8?'all':''}">${n}/8</span>`;
+}
+
+const tbody=document.getElementById("tbody");
+ROWS.forEach((r,idx)=>{
+  const tr=document.createElement("tr");
+  tr.innerHTML=`
+    <td class="l"><span class="tk">${r.tk}</span><span class="px num">$${r.px.toFixed(2)}</span></td>
+    <td class="l">${payoff(r.short,r.long,r.cps,r.short-r.long,r.px)}</td>
+    <td class="l"><span class="big num">${r.short}/${r.long}</span><div class="sub2 num">w${(r.short-r.long)}·be $${(r.short-r.cps).toFixed(2)}</div></td>
+    <td><span class="num">${r.exp.slice(5)}</span><div class="sub2 num">${r.dte}d</div></td>
+    <td class="grp-sep prio-cell"><span class="n num">${r.prio}</span><div class="pbar"><i style="width:${r.prio}%"></i></div></td>
+    <td class="pop"><span class="n num">${r.pop}%</span><div class="popbar"><i style="width:${r.pop}%"></i></div><div class="sub2 num">Δ ${r.popd}%</div></td>
+    <td><span class="num">${r.roi}%</span></td>
+    <td><span class="num muted-cell">${r.crw}%</span></td>
+    <td class="grp-sep"><span class="big num">$${r.credit}</span><div class="sub2 num">$${r.cps.toFixed(2)}/sh</div></td>
+    <td><span class="num">${r.d.toFixed(2)}</span></td>
+    <td><span class="num money-pos">+$${r.th}</span></td>
+    <td><span class="num">${r.ivr}</span><div class="sub2">${r.ivm}</div></td>
+    <td class="grp-sep l">${gateDots(r.gates)}</td>
+    <td class="grp-sep"><button class="btn btn-go" data-row="${idx}">Log</button></td>`;
+  tbody.appendChild(tr);
+});
+
+// hero payoff
+document.getElementById("hero-pay").innerHTML=payoff(690,689,0.28,1,718.57,190,58);
+
+// ── micro-interactions ──────────────────────────────────────────────
+const toast=document.getElementById("toast");
+function showToast(msg){toast.textContent=msg;toast.classList.add("show");clearTimeout(toast._t);toast._t=setTimeout(()=>toast.classList.remove("show"),1900);}
+tbody.addEventListener("click",e=>{
+  const b=e.target.closest("button[data-row]"); if(!b) return;
+  const r=ROWS[+b.dataset.row], tr=b.closest("tr");
+  tr.classList.remove("logged"); void tr.offsetWidth; tr.classList.add("logged");
+  showToast(`✓ Logged ${r.tk} ${r.short}/${r.long} ×1`);
+});
+document.getElementById("rescan").addEventListener("click",function(){
+  const btn=this, old=btn.innerHTML; btn.disabled=true; btn.innerHTML='<span class="spin"></span>Scanning live chains…';
+  setTimeout(()=>{btn.disabled=false;btn.innerHTML=old;showToast("✓ Rescan complete — 117 candidates");},1600);
+});
+</script>
+</body>
+</html>

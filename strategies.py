@@ -84,8 +84,15 @@ def validate_news(strategy: str, sentiment: str) -> Dict:
     return {"ok": True, "verdict": "NEUTRAL", "detail": f"News '{s}' — no conflict"}
 
 
-def _chk(label: str, ok: bool, detail: str = "") -> Dict:
-    return {"label": label, "ok": bool(ok), "detail": detail}
+def _chk(label: str, ok: bool, detail: str = "", advisory: bool = False) -> Dict:
+    """A criterion row. `advisory=True` marks a row that INFORMS but never disqualifies:
+    it renders amber in the cockpit exactly like a hard failure, but is excluded from the
+    `qualified` computation below. Callers (multi_strategy.py, lottery_scanner.py) return
+    None on `not qualified`, so anything appended without this flag is a hard block."""
+    row = {"label": label, "ok": bool(ok), "detail": detail}
+    if advisory:
+        row["advisory"] = True
+    return row
 
 
 def evaluate(strategy: str, ctx: Dict) -> Dict:
@@ -143,7 +150,23 @@ def evaluate(strategy: str, ctx: Dict) -> Dict:
     news = validate_news(strategy, ctx.get("sentiment"))
     crit.append(_chk("News validates thesis", news["ok"], news["detail"]))
 
-    qualified = all(c["ok"] for c in crit)
+    # Entry timing — pattern phase (advisory). Populated by the caller via
+    # analysis.entry_timing.assess_entry_timing(); absent means the module is disabled.
+    timing = ctx.get("entry_timing") or {}
+    if timing:
+        readiness = timing.get("readiness", "NEUTRAL")
+        phase = (timing.get("phase") or "").replace("_", " ").title()
+        rsi_val = timing.get("rsi_at_signal")
+        rsi_txt = f" (RSI {rsi_val:.0f})" if isinstance(rsi_val, (int, float)) else ""
+        crit.append(_chk(
+            f"Entry timing {timing.get('readiness_icon', '')}".strip(),
+            timing.get("timing_gate_pass", True),
+            f"{readiness} — {phase}{rsi_txt}",
+            advisory=True,
+        ))
+
+    # Advisory rows never disqualify — see _chk().
+    qualified = all(c["ok"] for c in crit if not c.get("advisory"))
     return {"qualified": qualified, "criteria": crit, "news_check": news, "spec_label": spec["label"]}
 
 
@@ -167,6 +190,16 @@ if __name__ == "__main__":
         # ...and the thesis must still be enforced, not merely satisfied by normalization.
         ("bear_call", {"dte": 33, "short_delta": 0.20, "credit_to_width": 0.22, "iv_rank": 62, "trend": "STRONG_UP", "pop": 0.78, "sentiment": "NEGATIVE"}, False),
         ("iron_condor", {"dte": 30, "short_delta": 0.14, "credit_to_width": 0.32, "iv_rank": 48, "trend": "STRONG_UP", "pop": 0.70, "sentiment": "NEUTRAL"}, False),
+        # --- Entry timing is ADVISORY: a failing timing row must NOT disqualify. ---
+        # multi_strategy.py / lottery_scanner.py return None on `not qualified`, so if this
+        # ever regresses, every bear call and condor with mid-range RSI silently disappears.
+        ("bull_put", {"dte": 30, "short_delta": -0.23, "credit_to_width": 0.57, "iv_rank": 68, "trend": "up", "pop": 0.84, "sentiment": "NEUTRAL",
+                      "entry_timing": {"readiness": "EARLY", "phase": "EARLY_PULLBACK", "timing_gate_pass": False, "rsi_at_signal": 62.0}}, True),
+        ("bear_call", {"dte": 33, "short_delta": 0.20, "credit_to_width": 0.22, "iv_rank": 62, "trend": "down", "pop": 0.78, "sentiment": "NEGATIVE",
+                       "entry_timing": {"readiness": "CAUTION", "phase": "EARLY_BOUNCE", "timing_gate_pass": False, "rsi_at_signal": 38.0}}, True),
+        # ...but a genuine hard failure still blocks even when timing is OPTIMAL.
+        ("bull_put", {"dte": 30, "short_delta": -0.23, "credit_to_width": 0.57, "iv_rank": 68, "trend": "up", "pop": 0.84, "sentiment": "NEGATIVE",
+                      "entry_timing": {"readiness": "OPTIMAL", "phase": "REVERSAL_SETUP", "timing_gate_pass": True, "rsi_at_signal": 44.0}}, False),
     ]
     assert normalize_trend("NEUTRAL") == "flat" and normalize_trend("STRONG_DOWN") == "down"
     assert normalize_trend("flat") == "flat" and normalize_trend(None) == ""

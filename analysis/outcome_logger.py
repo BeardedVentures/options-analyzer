@@ -41,6 +41,14 @@ def _trade_id(scan_ts: str, ticker: str, short_strike, long_strike, expiration) 
     return f"{ticker}-{short_strike}/{long_strike}-{expiration}-{date}"
 
 
+def _same_strike(a, b) -> bool:
+    """Strikes arrive as float or str depending on the caller (form post vs candidate json)."""
+    try:
+        return abs(float(a) - float(b)) < 1e-9
+    except (TypeError, ValueError):
+        return a == b
+
+
 def _read_all() -> List[Dict]:
     if not OUTCOMES_FILE.exists():
         return []
@@ -76,9 +84,13 @@ def _round_trip_cost_per_contract() -> float:
 
 def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
                      entry_credit_per_share: float, dte=None, delta=None,
-                     iv_rank=None, implied_pop=None, contracts: int = 1,
+                     iv_rank=None, implied_pop=None, true_pop=None, p_max_profit=None,
+                     contracts: int = 1, fill_model: str = "natural",
+                     natural_credit_per_share=None, mid_credit_per_share=None,
                      source: str = "manual", note: Optional[str] = None,
-                     theta=None) -> str:
+                     theta=None, allow_duplicate: bool = False,
+                     edge_score=None, vrp=None, technical_score=None,
+                     term_slope=None, skew_steepness=None, vix_at_entry=None) -> str:
     """
     Open a PAPER position from a real candidate (or manual entry). Records the entry credit you
     would realistically collect; net P/L on close subtracts Robinhood round-trip commissions.
@@ -88,7 +100,29 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
     existing_ids = {r.get("id") for r in rows}
     ts = datetime.now().isoformat()
     tid = _trade_id(ts, ticker, short_strike, long_strike, expiration)
-    if tid in existing_ids:  # ensure uniqueness for repeat same-day paper entries
+
+    # Re-opening a spread that is ALREADY open is a double-write, not a new position.
+    # This used to fall straight through to the uniquifier below, which minted a -HHMMSS id and
+    # let the duplicate live as an independent trade: it marked, stopped out and double-counted
+    # its loss. That is exactly what happened to META 570/565 exp 2026-08-07, logged twice 24s
+    # apart on 2026-07-13 and closed twice at -$256.16. Reject it unless the caller is explicitly
+    # adding to an existing position.
+    if not allow_duplicate:
+        dup = next((r for r in rows
+                    if r.get("status") == "open"
+                    and r.get("ticker") == ticker
+                    and r.get("expiration") == expiration
+                    and _same_strike(r.get("short_strike"), short_strike)
+                    and _same_strike(r.get("long_strike"), long_strike)), None)
+        if dup:
+            raise ValueError(
+                f"{ticker} {short_strike}/{long_strike} {expiration} is already open as "
+                f"{dup.get('id')} — refusing to log a duplicate. "
+                f"Pass allow_duplicate=True to deliberately add to the position."
+            )
+
+    # Same-day re-entry AFTER the previous one closed is legitimate; keep those ids unique.
+    if tid in existing_ids:
         tid = f"{tid}-{datetime.now().strftime('%H%M%S')}"
 
     width = None
@@ -126,12 +160,62 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
         "modeled_credit_per_share": credit,
         "modeled_credit_usd": round(credit * 100, 2),
         "actual_fill_credit": credit,
+        # FILL COHORT. "mid" = entered at the mid (every trade before 2026-08-02) — an
+        # unachievable price that overstated collectable credit by ~75%. "natural" = entered at
+        # bid/ask, what a real fill collects. Marks and closes MUST use the same basis the position
+        # was entered on, or a mid-entry position exited at natural double-counts the pessimism and
+        # is neither an honest record nor a fair benchmark. Kept, not deleted: the mid cohort is
+        # still a valid record of what the selection logic picked — it just cannot be compared
+        # against, or pooled with, natural-fill results.
+        "fill_model": fill_model,
+        # Both sides of the fill on record, not just the one booked. `actual_fill_credit` is what
+        # the trade is scored on; these two make the gap measurable per trade so the 75.5% figure
+        # from the 2026-08-02 audit can be tracked over time instead of re-derived from snapshots.
+        # NULL on legacy rows — not recoverable after the fact.
+        "natural_credit_per_share": natural_credit_per_share,
+        "mid_credit_per_share": mid_credit_per_share,
         "estimated_round_trip_cost_per_contract": _round_trip_cost_per_contract(),
         "delta": delta,
         "short_theta": theta,
         "iv_rank": iv_rank,
-        "modeled_pop": implied_pop,
+        # true_pop = drift-removed (calibrated) POP from the engine edge calculator.
+        # implied_pop = delta-derived market-implied POP (1 - abs(delta)).
+        # modeled_pop stores true_pop when available; falls back to implied_pop so
+        # the CLV tracker and calibration grader always have a usable POP field.
+        "true_pop": true_pop,
+        "modeled_pop": true_pop if true_pop is not None else implied_pop,
         "implied_pop": implied_pop,
+        # Which probability modeled_pop actually came from. The auto-open path reads
+        # output/candidates/*.json, whose schema has NO true_pop field (it is engine-only,
+        # computed in main.py via edge_calculator.calculate_true_pop and absent from the
+        # vega_candidates fast scan). So auto-paper trades grade against a delta-derived
+        # proxy, not the calibrated signal. Record that explicitly rather than letting the
+        # fallback stay invisible — calibration stats must be able to segregate the two.
+        "pop_source": "true_pop" if true_pop is not None else "implied_pop",
+        # P(price > short strike) — the apples-to-apples counterpart to implied_pop (1 - |delta|),
+        # which is also measured at the short strike. true_pop is measured at BREAKEVEN, so
+        # comparing it against implied_pop overstates edge. Edge scoring must use this field.
+        "p_max_profit": p_max_profit,
+        # ── Score components at entry ──
+        # The calibration engine's whole job is correlating what the engine BELIEVED at entry
+        # against what actually happened. None of these were recorded, so on 58 closed trades
+        # not one score component could be tested — the feedback loop had no inputs. They are
+        # NULL on every trade logged before 2026-08-05 and are not recoverable after the fact,
+        # so calibration counts only trades that carry them.
+        # Which close logic governed this trade. The 45 stop-outs in this ledger were killed
+        # by a 1.5x credit stop marked natural-in/natural-out, which fired at t=0 on bid-ask
+        # spread alone — a mechanism that no longer exists. Pooling those with trades closed
+        # by thesis judgment would make the record neither an honest history nor a fair
+        # benchmark, exactly as the fill_model cohorts already are. Absent = legacy.
+        "close_logic": ("ravens_v1" if getattr(_config, "RAVENS_FRAMEWORK_ENABLED", False)
+                        else "credit_stop"),
+        "close_decision_basis": getattr(_config, "CLOSE_DECISION_MARK_BASIS", "natural"),
+        "edge_score": edge_score,
+        "vrp": vrp,
+        "technical_score": technical_score,
+        "term_slope": term_slope,
+        "skew_steepness": skew_steepness,
+        "vix_at_entry": vix_at_entry,
         "max_loss_per_contract": (round((width - credit) * 100, 2) if (width and credit < width) else None),
         # Live mark (updated on each rescan while open) → unrealized P/L
         "current_mark": None,
@@ -151,6 +235,47 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
     _write_all(rows)
     logger.info(f"[outcomes] Opened paper trade {tid}")
     return tid
+
+
+LEGACY_CLOSE_LOGIC = "credit_stop_1.5x_natural"
+
+
+def close_cohort(record: Dict) -> str:
+    """Which close-logic regime governed a trade.
+
+    Read through this rather than off the raw field: history is deliberately NOT rewritten,
+    so trades predating the marker carry no field and are reported as the legacy cohort.
+    Mutating closed records to add metadata would edit a trading history that should stay
+    exactly as it was written.
+    """
+    return record.get("close_logic") or LEGACY_CLOSE_LOGIC
+
+
+def _append_to_list_field(trade_id: str, field: str, entry: Dict) -> bool:
+    """Append to a list field on an OPEN trade, creating it if absent."""
+    rows = _read_all()
+    for r in rows:
+        if r.get("id") == trade_id and r.get("status") == "open":
+            r.setdefault(field, []).append(entry)
+            _write_all(rows)
+            return True
+    return False
+
+
+def append_stress_snapshot(trade_id: str, snapshot: Dict) -> bool:
+    """What a position looked like the moment it came under pressure.
+
+    Muninn needs this and nothing has ever recorded it — which is why Memory starts blind and
+    cannot be backfilled. A close record knows a trade was stopped; it does not know what the
+    chart looked like when it happened. Appended, never overwritten: the first time a position
+    is stressed is a different fact from the fifth.
+    """
+    return _append_to_list_field(trade_id, "stress_snapshots", snapshot)
+
+
+def append_raven_alert(trade_id: str, alert: Dict) -> bool:
+    """A HOLD_TENSION or MUNINN_BLIND divergence, kept for the cockpit and for audit."""
+    return _append_to_list_field(trade_id, "raven_alerts", alert)
 
 
 def set_mark(trade_id: str, current_mark_per_share: float) -> bool:
@@ -221,7 +346,9 @@ def record_modeled_trades(scan_ts: str, session_type: str, qualified_trades: Lis
                 "edge_score": t.get("edge_score"),
                 "edge_points": t.get("edge_points"),
                 "p_max_profit": t.get("p_max_profit"),
-                "modeled_pop": t.get("true_pop"),
+                # true_pop stored separately so CLV / calibration graders have the raw field.
+                "true_pop": t.get("true_pop"),
+                "modeled_pop": t.get("true_pop"),   # calibrated POP is the primary model signal
                 "implied_pop": t.get("implied_pop"),
                 # Ground truth (filled in later by you via log_outcome.py)
                 "actual_fill_credit": None,     # real credit per share you collected
@@ -265,12 +392,22 @@ def set_close(trade_id: str, exit_price: float, outcome: str,
     realized net P/L per contract = gross P/L - estimated round-trip costs.
     Returns True if the id was found.
     """
-    rows = _read_all()
+    # MONEY PATH — failures here silently lose realized outcomes, which is the one thing the
+    # Gate-1 ledger exists to capture. Log loudly and re-raise; never swallow.
+    try:
+        rows = _read_all()
+    except Exception:
+        logger.error("[CLOSE] failed to read ledger while closing %s", trade_id, exc_info=True)
+        raise
+
     for r in rows:
         if r.get("id") == trade_id:
             fill = r.get("actual_fill_credit")
             if fill is None:
                 fill = r.get("modeled_credit_per_share") or 0.0
+                logger.warning(
+                    "[CLOSE] %s has no actual_fill_credit; falling back to modeled credit %s. "
+                    "Realized P&L for this trade is modelled, not achieved.", trade_id, fill)
             r["exit_price"] = round(float(exit_price), 2)
             gross_pl = round((float(fill) - float(exit_price)) * 100, 2)
             est_cost = float(r.get("estimated_round_trip_cost_per_contract") or 0.0)
@@ -283,8 +420,17 @@ def set_close(trade_id: str, exit_price: float, outcome: str,
             r["exit_reason"] = reason
             r["status"] = "closed"
             r["closed_at"] = datetime.utcnow().isoformat()
-            _write_all(rows)
+            try:
+                _write_all(rows)
+            except Exception:
+                logger.error("[CLOSE] failed to persist close for %s (exit=%s outcome=%s)",
+                             trade_id, exit_price, outcome, exc_info=True)
+                raise
+            logger.info("[CLOSE] %s exit=%.2f outcome=%s reason=%s gross=%.2f net=%.2f",
+                        trade_id, float(exit_price), r["outcome"], reason, gross_pl, net_pl)
             return True
+
+    logger.warning("[CLOSE] trade id not found in ledger: %s — nothing closed", trade_id)
     return False
 
 

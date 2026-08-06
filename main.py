@@ -15,6 +15,7 @@ from analysis import edge_calculator, strike_validator, synthesizer
 from output import renderer, emailer
 import strategies
 import multi_strategy
+from environment import heat_assessment
 
 
 # VEGA: JARVIS integration (non-blocking — scan completes even if tower unreachable)
@@ -22,6 +23,11 @@ try:
     from vega_ingest import post_to_jarvis
     VEGA_INGEST_ENABLED = True
 except ImportError:
+    VEGA_INGEST_ENABLED = False
+
+# Local intraday refreshes (the cockpit's 15-min board scan) set VEGA_NO_JARVIS=1 so only the
+# 2x/day GitHub Actions scan feeds the remote JARVIS cockpit — no duplicate intraday posts.
+if os.getenv("VEGA_NO_JARVIS", "").strip().lower() in ("1", "true", "yes"):
     VEGA_INGEST_ENABLED = False
 
 logger = logging.getLogger(__name__)
@@ -181,8 +187,20 @@ def select_bull_put_pair(
     current_price: float,
     ticker: str,
     diagnostics: Optional[Dict] = None,
+    support_levels: Optional[List[Dict]] = None,
 ) -> Optional[Tuple[Dict, Dict, Dict]]:
-    """Pick a short/long put pair that forms a valid same-expiration credit spread."""
+    """Pick a short/long put pair that forms a valid same-expiration credit spread.
+
+    Ranks by net realized ROC, then — among pairs whose ROC is within
+    LEVEL_STRIKE_ROC_TOLERANCE of the best — prefers the short strike with a real support
+    level standing above it. Selling beneath a level the market has defended more than once
+    is the core structural edge available to a put seller, and until 2026-08-05 selection
+    ignored levels entirely: it was delta, DTE and credit only.
+
+    Deliberately a tie-break inside a tolerance band rather than a term in the rank or a
+    hard filter. Structure should never cost meaningful ROC, and it must never empty the
+    board on names where no level happens to sit in the right place.
+    """
     diag_counts: Dict[str, int] = {}
 
     def _bump(reason: str) -> None:
@@ -251,6 +269,11 @@ def select_bull_put_pair(
 
     short_candidates.sort(key=lambda x: x[0])
 
+    # Multi-strike comparison: instead of returning the FIRST valid pair (closest DTE/delta),
+    # collect EVERY pair that clears all gates and rank by net realized ROC. For a name with
+    # several viable short strikes this evaluates all of them and keeps the best-ROC spread,
+    # which can materially shift the selected structure.
+    valid_pairs: List[Tuple[Dict, Dict, Dict, float]] = []
     for _, short_put in short_candidates:
         long_candidates = [
             opt for opt in options
@@ -300,7 +323,6 @@ def select_bull_put_pair(
                 continue
 
             if spread_width < min_spread_width:
-                credit_per_share = float(metrics.get("credit_per_share", 0) or 0)
                 credit_to_width = credit_per_share / spread_width if spread_width > 0 else 0
                 allow_narrow = getattr(config, "ALLOW_NARROW_SPREAD_EXCEPTION", True)
                 min_credit_to_width = getattr(config, "NARROW_SPREAD_MIN_CREDIT_TO_WIDTH", 0.30)
@@ -308,15 +330,109 @@ def select_bull_put_pair(
                     _bump("narrow_spread_exception_failed")
                     continue
 
-            if diagnostics is not None:
-                diagnostics["short_candidates_count"] = len(short_candidates)
-                diagnostics["top_reasons"] = sorted(diag_counts.items(), key=lambda x: x[1], reverse=True)[:6]
-            return short_put, long_put, metrics
+            # Rank key: net realized ROC when available (accounts for profit target + commissions),
+            # else raw gross ROC. Higher is better.
+            roc_rank = metrics.get("net_realized_roc")
+            if roc_rank is None:
+                roc_rank = metrics.get("gross_roc", 0.0)
+            valid_pairs.append((short_put, long_put, metrics, float(roc_rank or 0.0)))
 
     if diagnostics is not None:
         diagnostics["short_candidates_count"] = len(short_candidates)
+        diagnostics["valid_pairs_count"] = len(valid_pairs)
         diagnostics["top_reasons"] = sorted(diag_counts.items(), key=lambda x: x[1], reverse=True)[:6]
-    return None
+
+    if not valid_pairs:
+        return None
+
+    valid_pairs.sort(key=lambda p: p[3], reverse=True)
+
+    # ── Structural tie-break: prefer a short strike sheltered by a real support level ──
+    best_roc = valid_pairs[0][3]
+    if (getattr(config, "LEVEL_AWARE_STRIKES", True) and support_levels
+            and best_roc > 0 and len(valid_pairs) > 1):
+        try:
+            from analysis.levels import strike_cushion
+            tol = float(getattr(config, "LEVEL_STRIKE_ROC_TOLERANCE", 0.10))
+            target_buf = float(getattr(config, "LEVEL_TARGET_BUFFER_PCT", 0.02))
+            min_buf = float(getattr(config, "LEVEL_MIN_BUFFER_PCT", 0.005))
+            floor_roc = best_roc * (1.0 - tol)
+
+            def _shelter(pair) -> float:
+                cush = strike_cushion(pair[0].get("strike"), support_levels, "put",
+                                      min_buffer_pct=min_buf)
+                if not cush:
+                    return 0.0
+                # Strength of the level, discounted when it sits almost on top of the strike
+                # (a level at the strike is not much of a shield).
+                depth = min(1.0, (cush["buffer_pct"] or 0.0) / target_buf) if target_buf else 1.0
+                return (cush["strength"] / 100.0) * depth
+
+            contenders = [p for p in valid_pairs if p[3] >= floor_roc]
+            scored = [(_shelter(p), p[3], p) for p in contenders]
+            scored.sort(key=lambda s: (s[0], s[1]), reverse=True)
+            if scored and scored[0][0] > 0:
+                chosen = scored[0][2]
+                if diagnostics is not None:
+                    diagnostics["level_shelter_score"] = round(scored[0][0], 3)
+                    diagnostics["level_shelter_roc_given_up"] = round(best_roc - chosen[3], 6)
+                    diagnostics["level_shelter_contenders"] = len(contenders)
+                return chosen[0], chosen[1], chosen[2]
+        except Exception as e:
+            # Structure is a preference, never a requirement — fall back to pure ROC.
+            logger.warning(f"[levels] strike shelter preference skipped for {ticker}: {e}")
+
+    best = valid_pairs[0]
+    return best[0], best[1], best[2]
+
+
+def _structure_read(price_data, tech: Dict) -> Dict:
+    """Chart-shape read for the entry-timing advisory. Returns {} on any failure — a bad
+    structure read must degrade the timing chip to momentum-only, never break a scan."""
+    if not getattr(config, "STRUCTURE_ENABLED", True):
+        return {}
+    try:
+        from analysis.structure import detect_structure
+        if price_data is None or price_data.empty:
+            return {}
+        bars = int(getattr(config, "STRUCTURE_LOOKBACK_DAYS", 180))
+        df = price_data.tail(bars)
+        return detect_structure(
+            highs=df["High"].tolist(), lows=df["Low"].tolist(), closes=df["Close"].tolist(),
+            volumes=df["Volume"].tolist() if "Volume" in df else None,
+            # Rich levels (clustered, strength-ranked) so "at support" agrees with
+            # nearest_support rather than answering from the raw price list.
+            supports=(tech or {}).get("support_levels") or (tech or {}).get("supports"),
+            resistances=(tech or {}).get("resistance_levels") or (tech or {}).get("resistances"))
+    except Exception as e:
+        logger.warning("[structure] read failed: %s", e)
+        return {}
+
+
+def _horizon_read(strategy, current_price, tech, short_put, metrics, entry_timing) -> Dict:
+    """Calibrate the structural read to THIS trade's clock and side.
+
+    Structure and levels are computed over a fixed window with no knowledge of how long the
+    trade lives. A level three expected-moves away cannot be tested before expiry, and a
+    pattern needing 20 more bars is irrelevant to a 12-day spread. {} on any failure.
+    """
+    if not getattr(config, "HORIZON_CALIBRATION_ENABLED", True):
+        return {}
+    try:
+        from analysis.horizon import calibrate
+        return calibrate(
+            strategy=strategy,
+            spot=current_price,
+            iv=(short_put or {}).get("iv") or tech.get("current_iv"),
+            dte=(short_put or {}).get("dte"),
+            short_strike=(short_put or {}).get("strike"),
+            support_levels=tech.get("support_levels"),
+            resistance_levels=tech.get("resistance_levels"),
+            structure=(entry_timing or {}).get("structure"),
+        )
+    except Exception as e:
+        logger.warning("[horizon] calibration failed: %s", e)
+        return {}
 
 
 def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional[Dict], Optional[Dict], Dict]:
@@ -349,8 +465,44 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     if not options:
         return _avoid("No options chain in DTE range", "NO_OPTIONS", technicals._empty_result(ticker))
 
+    # Levels are needed BEFORE strike selection, and technicals runs after it (it wants the
+    # chosen strike), so detect them straight off price_data here.
+    _levels: Dict = {}
+    if getattr(config, "LEVEL_AWARE_STRIKES", True):
+        try:
+            from analysis.levels import find_levels
+            _levels = find_levels(price_data["High"].tolist(), price_data["Low"].tolist(),
+                                  price_data["Close"].tolist())
+        except Exception as e:
+            logger.warning(f"[levels] detection failed for {ticker}: {e}")
+
+    # ── Volatility surface (advisory) ──
+    # Term structure needs a WIDER expiry window than the trading chain, so it is its own
+    # fetch. Skew depth needs both sides of the book, which the put-only trading chain cannot
+    # provide. Any failure degrades to {} — a surface read must never break a scan.
+    vol_surface: Dict = {}
+    if getattr(config, "TERM_STRUCTURE_ENABLED", True):
+        try:
+            from analysis.vol_surface import get_term_structure, get_skew_depth
+            _chain_by_exp = fetcher.get_chain_by_expiry(ticker)
+            if _chain_by_exp:
+                vol_surface["term"] = get_term_structure(_chain_by_exp, current_price)
+            if getattr(config, "SKEW_SCORING_ENABLED", True):
+                _calls = fetcher.get_call_options_chain(ticker, config.MIN_DTE, config.MAX_DTE)
+                if _calls and options:
+                    # Literal rather than the `strategy` local: that is not bound until
+                    # line ~552, well after this point, and referencing it here raised
+                    # UnboundLocalError on every ticker — caught by the except, so skew
+                    # silently read "unknown" while term structure worked. screen_ticker is
+                    # the bull-put engine path; the strategy is known statically.
+                    vol_surface["skew"] = get_skew_depth(
+                        options, _calls, current_price, strategy="bull_put_spread")
+        except Exception as e:
+            logger.warning("[vol_surface] read failed for %s: %s", ticker, e)
+
     pair_diag: Dict = {}
-    pair = select_bull_put_pair(options, current_price, ticker, diagnostics=pair_diag)
+    pair = select_bull_put_pair(options, current_price, ticker, diagnostics=pair_diag,
+                                support_levels=_levels.get("support_levels"))
     if not pair:
         return _avoid(
             "No valid same-expiration credit spread found",
@@ -476,6 +628,17 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
             tech,
         )
 
+    # Wire EV ROC: p_profit (true POP at breakeven) is only known here, after pair selection,
+    # so recompute the spread metrics with it to populate ev_roc / net_realized_roc. Inputs are
+    # identical to the pair-selection call, so every non-EV field is unchanged.
+    metrics = edge_calculator.calculate_spread_metrics(
+        short_put,
+        long_put.get("strike"),
+        current_price,
+        long_put_mid=long_put.get("mid"),
+        p_profit=p_profit,
+    ) or metrics
+
     edge_score = edge_calculator.calculate_edge_score(
         ticker=ticker,
         strategy=strategy,
@@ -487,6 +650,8 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         fundamentals_score=fundamentals_eval.get("score"),
         skew_raw=skew_raw,
         post_earnings_bonus=post_earnings_bonus,
+        term_slope=(vol_surface.get("term") or {}).get("slope"),
+        event_expiry_flag=bool((vol_surface.get("term") or {}).get("event_expiry")),
     )
 
     if not edge_score.get("qualified"):
@@ -582,6 +747,14 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "implied_pop": implied_pop,
         "edge_points": edge_points,
         "edge_score": edge_score.get("total_score"),
+        "raw_score": edge_score.get("raw_score", edge_score.get("total_score")),   # uncapped 0–120
+        "base_score": edge_score.get("base_score", edge_score.get("total_score")), # base components only
+        "bonus_score": edge_score.get("bonus_score", 0),                           # skew + post_earnings
+        "gross_roc_pct": metrics.get("gross_roc_pct"),
+        "net_realized_roc_pct": metrics.get("net_realized_roc_pct"),
+        "ev_roc_pct": metrics.get("ev_roc_pct"),
+        "ev_roc_positive": metrics.get("ev_roc_positive"),
+        "roc_sanity_flag": metrics.get("roc_sanity_flag", False),
         "component_breakdown": edge_score.get("component_breakdown"),
         "skew_vol_pts": skew_raw,
         "skew_score": (edge_score.get("component_breakdown") or {}).get("skew", 0),
@@ -595,7 +768,22 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "sma20": tech.get("sma20"),
         "sma50": tech.get("sma50"),
         "sma200": tech.get("sma200"),
+        # ── Volatility surface ──
+        "term_structure": (vol_surface.get("term") or {}),
+        "term_slope": (vol_surface.get("term") or {}).get("slope", "unknown"),
+        "term_spread_pts": (vol_surface.get("term") or {}).get("term_spread_pts"),
+        "term_confidence": (vol_surface.get("term") or {}).get("confidence"),
+        "event_expiry_date": (vol_surface.get("term") or {}).get("event_expiry"),
+        "event_expiry_flag": bool((vol_surface.get("term") or {}).get("event_expiry")),
+        "skew_depth": (vol_surface.get("skew") or {}),
+        "skew_steepness": (vol_surface.get("skew") or {}).get("skew_steepness", "unknown"),
+        "skew_20d": (vol_surface.get("skew") or {}).get("skew_20d"),
+        "skew_40d": (vol_surface.get("skew") or {}).get("skew_40d"),
         "nearest_support": tech.get("nearest_support"),
+        "nearest_resistance": tech.get("nearest_resistance"),
+        # Levels with their evidence, so the cockpit can show WHY a level counts.
+        "support_levels": tech.get("support_levels", []),
+        "resistance_levels": tech.get("resistance_levels", []),
         "news_sentiment": news_status,
         "news_summary": sentiment.get("market_impact_summary"),
         "fundamentals_score": fundamentals_eval.get("score"),
@@ -608,6 +796,48 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "auto_reasoning": f"IV Rank {tech.get('iv_rank', 0):.0f}, VRP {tech.get('vrp', 0):.1f}pp, edge {edge_points:.1f} pts.",
         "trade_type": trade_type,
     }
+
+    # ── Entry timing / pattern phase (advisory — does not block) ──
+    # Surfaces WHERE in the pullback this signal fired. A bull put sold early in a pullback
+    # collects less credit for the same delta than one sold late, once put skew has steepened.
+    entry_timing: Dict = {}
+    if getattr(config, "ENTRY_TIMING_ENABLED", True):
+        try:
+            from analysis.entry_timing import assess_entry_timing
+            structure = _structure_read(price_data, tech)
+            entry_timing = assess_entry_timing(
+                strategy=strategy, tech=tech, current_price=current_price,
+                structure=structure)
+            if not entry_timing.get("timing_gate_pass", True):
+                warnings.append(
+                    f"Timing {entry_timing['readiness']} "
+                    f"({entry_timing['phase'].replace('_', ' ').title()}) — {entry_timing['reason']}"
+                )
+        except Exception as e:
+            logger.warning("[timing] entry_timing assessment failed: %s", e)
+    trade["entry_timing"] = entry_timing
+    # Horizon calibration reads the structure that entry_timing just produced, so it has to
+    # run after it — the same ordering trap the vol-surface block hit with `strategy`.
+    trade["horizon"] = _horizon_read(
+        strategy, current_price, tech, short_put, metrics, entry_timing)
+
+    # ── Environment heat gauge (advisory — does not block) ──
+    env_heat: Dict = {}
+    if getattr(config, "ENVIRONMENT_GATE_ENABLED", False):
+        try:
+            env_heat = heat_assessment(trade)
+            # Hard-block if HOT and action is flip_or_stand_aside (optional — kept advisory for now).
+            # rec = env_heat.get("recommendation", {})
+            # if env_heat.get("band") == "hot" and rec.get("action") == "flip_or_stand_aside":
+            #     return _avoid("Environment HOT — flip or stand aside", "ENV_HOT", tech)
+        except Exception as e:
+            logger.warning("[env] heat_assessment failed: %s", e)
+
+    trade["env_heat"] = env_heat.get("heat")
+    trade["env_band"] = env_heat.get("band")
+    trade["env_drivers"] = env_heat.get("drivers", [])
+    trade["env_action"] = env_heat.get("recommendation", {}).get("action")
+    trade["env_rationale"] = env_heat.get("recommendation", {}).get("rationale")
 
     return trade, None, tech
 
@@ -1001,18 +1231,39 @@ def run_scan(session_type: str) -> None:
                 logger.warning(f"[scan] multi_strategy {ticker}: {_e}")
             if trade:
                 logger.debug(f"[scan] Qualified trade for {ticker}: edge={trade.get('edge_score')}")
+                _strategy_fail = ""
                 try:
                     _ev = strategies.evaluate("bull_put", {
                         "dte": trade.get("dte"), "short_delta": trade.get("delta"),
                         "credit_to_width": (trade.get("credit_to_width_pct") or 0) / 100.0,
                         "iv_rank": trade.get("iv_rank"), "trend": trade.get("trend"),
                         "pop": trade.get("true_pop"),
+                        "entry_timing": trade.get("entry_timing"),
                         "sentiment": (sentiment_map.get(ticker, {}) or {}).get("sentiment")})
                     trade["criteria"] = _ev["criteria"]; trade["news_check"] = _ev["news_check"]
                     trade["needs_validation"] = False
-                except Exception:
-                    pass
-                qualified_trades.append(trade)
+                    # Enforce the fitted criteria. `qualified` used to be computed here and
+                    # thrown away, so a bull put could reach the board with "Regime fits
+                    # thesis" visibly failing — WMT on 2026-08-05 surfaced with trend DOWN.
+                    # Advisory rows (entry timing) are excluded from `qualified` by design,
+                    # so this blocks on hard criteria only. multi_strategy.py has always
+                    # enforced this for bear call / condor; the bull-put path was the outlier.
+                    if not _ev["qualified"]:
+                        _strategy_fail = "; ".join(
+                            c["label"] for c in _ev["criteria"]
+                            if not c["ok"] and not c.get("advisory"))
+                except Exception as _e:
+                    # Fail open: a bug in evaluate() must not silently empty the board.
+                    logger.warning(f"[scan] strategies.evaluate failed for {ticker}: {_e}")
+                if _strategy_fail:
+                    logger.debug(f"[scan] {ticker} failed strategy criteria: {_strategy_fail}")
+                    avoided.append({
+                        "ticker": ticker,
+                        "reason": f"Failed bull put criteria: {_strategy_fail}",
+                        "category": "STRATEGY_CRITERIA",
+                    })
+                else:
+                    qualified_trades.append(trade)
             else:
                 logger.debug(f"[scan] Avoided {ticker}: {avoid.get('category') if avoid else 'UNKNOWN'}")
                 avoid_payload = {
@@ -1105,6 +1356,16 @@ def run_scan(session_type: str) -> None:
     # ── Sector correlation bucketing ─────────────────────────────────────
     qualified_trades = _apply_sector_limit(qualified_trades)
 
+    # ── Final ranking by EV ROC (true expected-value ordering) ───────────
+    # Two-tier: trades with an EV ROC rank above those without (bootstrap: p_profit may be
+    # absent for some names). Within each tier, sort by the available signal descending.
+    def _ev_sort_key(t: Dict):
+        ev = t.get("ev_roc_pct")
+        if ev is not None:
+            return (1, ev)                       # EV-scored trades rank above non-EV
+        return (0, t.get("edge_score") or 0)     # fall back to quality signal
+
+    qualified_trades.sort(key=_ev_sort_key, reverse=True)
 
     synthesis = synthesizer.synthesize_tipsheet(
         session_type=session_type,

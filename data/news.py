@@ -221,14 +221,81 @@ def _gpt4o_batch_sentiment(ticker_headlines: Dict[str, List[str]]) -> Dict[str, 
 _sentiment_cache: Dict[str, Dict] = {}
 _headlines_cache: Dict[str, List[str]] = {}
 
+# Persistent (cross-process) sentiment cache. The cockpit re-scans the board every ~15 min but
+# only re-scrapes news ~hourly; the 15-min scans in between load this file instead of hitting the
+# headline APIs (and the GPT-4o sentiment call) again. Written by whichever run does a fresh scrape.
+_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+_DISK_CACHE_PATH = os.path.join(_CACHE_DIR, "sentiment_cache.json")
 
-def analyze_all_tickers(tickers: List[str]) -> Dict[str, Dict]:
+
+def _cache_age_minutes(updated_at: str) -> Optional[float]:
+    """Age of an ISO-8601 timestamp in minutes, or None if unparseable."""
+    from datetime import datetime
+    try:
+        updated = datetime.fromisoformat(updated_at)
+        return (datetime.now(updated.tzinfo) - updated).total_seconds() / 60.0
+    except Exception:
+        return None
+
+
+def _load_disk_cache(tickers: List[str], max_age_min: float) -> Optional[Dict[str, Dict]]:
+    """Return the on-disk sentiment map if it's fresh enough and covers every requested ticker."""
+    try:
+        with open(_DISK_CACHE_PATH, "r", encoding="utf-8") as fh:
+            blob = json.load(fh)
+    except (FileNotFoundError, ValueError, OSError):
+        return None
+    age = _cache_age_minutes(blob.get("updated_at", ""))
+    if age is None or age > max_age_min:
+        return None
+    sentiment = blob.get("sentiment") or {}
+    if not all(t in sentiment for t in tickers):
+        return None  # watchlist changed — force a fresh scrape
+    logger.info(f"[news] Using disk sentiment cache (age {age:.0f} min ≤ {max_age_min:.0f} min TTL)")
+    _sentiment_cache.update(sentiment)
+    _headlines_cache.update(blob.get("headlines") or {})
+    return dict(sentiment)
+
+
+def _save_disk_cache(sentiment: Dict[str, Dict], headlines: Dict[str, List[str]]) -> None:
+    from datetime import datetime
+    try:
+        os.makedirs(_CACHE_DIR, exist_ok=True)
+        payload = {
+            "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "sentiment": sentiment,
+            "headlines": headlines,
+        }
+        with open(_DISK_CACHE_PATH, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, default=str)
+    except Exception as exc:  # cache write must never break a scan
+        logger.warning(f"[news] Could not write sentiment cache: {exc}")
+
+
+def analyze_all_tickers(
+    tickers: List[str],
+    force_refresh: bool = False,
+    max_age_min: Optional[float] = None,
+) -> Dict[str, Dict]:
     """
     Fetch headlines and score sentiment for all tickers in one pass.
-    Caches results. Call once per session, then use get_ticker_sentiment().
+
+    Uses a persistent disk cache (data/cache/sentiment_cache.json): if that cache is younger than
+    the TTL (config.NEWS_CACHE_TTL_MIN, override via max_age_min) and covers every requested ticker,
+    it is returned without re-scraping — this is what lets the cockpit's 15-min board refreshes stay
+    cheap while news genuinely re-scrapes only ~hourly. Pass force_refresh=True (the hourly path) to
+    always scrape and rewrite the cache.
 
     Returns {ticker: sentiment_dict}
     """
+    if max_age_min is None:
+        max_age_min = float(getattr(config, "NEWS_CACHE_TTL_MIN", 60))
+
+    if not force_refresh:
+        cached = _load_disk_cache(tickers, max_age_min)
+        if cached is not None:
+            return cached
+
     from data import fetcher
 
     # Fetch headlines for all tickers
@@ -250,7 +317,11 @@ def analyze_all_tickers(tickers: List[str]) -> Dict[str, Dict]:
             headlines = ticker_headlines.get(ticker, [])
             _sentiment_cache[ticker] = _keyword_sentiment(headlines)
 
-    logger.info(f"[news] Sentiment analysis complete for {len(tickers)} tickers")
+    _save_disk_cache(
+        {t: _sentiment_cache[t] for t in tickers if t in _sentiment_cache},
+        {t: _headlines_cache.get(t, []) for t in tickers},
+    )
+    logger.info(f"[news] Sentiment analysis complete for {len(tickers)} tickers (fresh scrape)")
     return _sentiment_cache
 
 

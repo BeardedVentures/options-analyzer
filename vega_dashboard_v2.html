@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VEGA Paper Desk — Full Redesign v2</title>
+<style>
+:root{
+  --ink:#1f2937; --ink-2:#4b5563; --ink-3:#6b7280; --ink-4:#9aa1ad;
+  --line:#e7e9ee; --line-2:#eef0f4; --bg:#f4f5f8; --card:#fff;
+  --accent:#4f46e5; --accent-2:#4338ca; --accent-soft:#eef0ff; --accent-bd:#dfe1fb;
+  --warn:#b45309; --warn-soft:#fff4e5;
+  /* money: green=profit, orange=loss (Robinhood convention, colorblind-safer than red) */
+  --profit:#12a150; --profit-fill:rgba(18,161,80,.16); --profit-soft:#e9f7f0;
+  --loss:#f2760c;   --loss-fill:rgba(242,118,12,.16);   --loss-soft:#fdf0e5;
+  --be:#111827; --gate-pass:#3f4a8a; --gate-fail:#d69a34;
+  --radius:12px;
+}
+*{box-sizing:border-box}
+body{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+.wrap{max-width:1340px;margin:0 auto;padding:22px 24px 70px}
+
+/* header */
+.top{display:flex;align-items:center;gap:13px;flex-wrap:wrap}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+.badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--accent-soft);color:var(--accent);letter-spacing:.03em}
+.btn{font:inherit;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;transition:transform .08s,background .12s,box-shadow .12s}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--accent);color:#fff;box-shadow:0 1px 0 rgba(79,70,229,.35)}
+.btn-primary:hover{background:var(--accent-2)}
+.btn-go{background:var(--accent);color:#fff;padding:6px 13px;font-size:12px}
+.btn-go:hover{background:var(--accent-2)}
+.sub{color:var(--ink-3);font-size:12px;margin:8px 0 2px}
+.scan-note{background:var(--accent-soft);border:1px solid var(--accent-bd);color:#37339c;border-radius:10px;padding:9px 14px;font-size:13px;margin:12px 0 2px;display:flex;align-items:center;gap:9px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);margin:26px 0 9px;font-weight:700}
+
+/* scorecard */
+.cards{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;margin:14px 0 4px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:11px 13px;position:relative}
+.card .lab{font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.card .val{font-size:22px;font-weight:700;margin:3px 0 1px;letter-spacing:-.02em}
+.card .s{font-size:10px;color:var(--ink-3)}
+.card.muted .val{color:#b4bac4}
+.card.muted::after{content:"n=1";position:absolute;top:10px;right:11px;font-size:9px;font-weight:700;color:#c2c7d0;border:1px solid #e5e8ed;border-radius:6px;padding:1px 5px}
+.val.pos{color:var(--profit)} .val.neg{color:var(--loss)}
+.prog{height:5px;border-radius:3px;background:#eef0f4;overflow:hidden;margin-top:7px}
+.prog>i{display:block;height:100%;background:var(--accent);border-radius:3px}
+
+/* hero */
+.hero{display:flex;gap:20px;align-items:center;background:linear-gradient(180deg,#fff,#fbfbff);border:1px solid var(--accent-bd);border-left:4px solid var(--accent);border-radius:var(--radius);padding:14px 18px;margin:14px 0 2px;box-shadow:0 1px 2px rgba(31,41,55,.04)}
+.hero .flag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);margin-bottom:3px}
+.hero .line{font-size:17px;font-weight:700;letter-spacing:-.01em}
+.hero .why{color:var(--ink-3);font-size:12.5px;margin-top:3px}
+.hero .stats{display:flex;gap:16px;margin-left:auto;padding-left:18px;border-left:1px solid var(--line);text-align:center}
+.hero .stat .n{font-size:22px;font-weight:800;line-height:1;letter-spacing:-.02em}
+.hero .stat .n.prio{color:var(--accent);font-size:30px}
+.hero .stat .c{font-size:9.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;margin-top:3px}
+
+/* table */
+.tablecard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin-top:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead .grp th{font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-4);font-weight:700;padding:9px 10px 3px;text-align:left}
+thead .col th{font-size:10.5px;color:var(--ink-3);font-weight:600;padding:1px 10px 8px;text-align:right;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card);white-space:nowrap}
+thead .col th.l{text-align:left}
+.gsep{border-left:1px solid var(--line-2)}
+tbody td{padding:8px 10px;border-bottom:1px solid var(--line-2);text-align:right;vertical-align:middle}
+tbody td.l{text-align:left}
+tbody tr.main{cursor:pointer;transition:background .1s}
+tbody tr.main:hover{background:#f8f9ff}
+.tk{font-weight:700;font-size:13.5px}.tk .px{font-weight:400;color:var(--ink-3);font-size:10.5px;margin-left:4px}
+.big{font-weight:600;font-size:13px}.s2{color:var(--ink-3);font-size:10px;margin-top:1px}
+.dim{color:var(--ink-3)}
+.prio-cell{min-width:78px}.prio-cell .n{font-weight:800;font-size:15px;letter-spacing:-.02em}
+.pbar{height:4px;border-radius:2px;background:#edeefb;margin-top:3px;overflow:hidden}.pbar>i{display:block;height:100%;background:var(--accent)}
+.pop .n{font-weight:600}
+.em .n{font-weight:600}
+.money-pos{color:var(--profit);font-weight:600}
+.expand-hint{color:var(--ink-4);font-size:10px;margin-left:2px}
+/* liquidity meter */
+.liq{display:inline-flex;gap:2px;align-items:flex-end;height:13px}
+.liq i{width:3px;background:#cfd4dc;border-radius:1px}
+.liq i.on{background:var(--accent)}
+.liq i:nth-child(1){height:5px}.liq i:nth-child(2){height:9px}.liq i:nth-child(3){height:13px}
+/* gate dots */
+.gates{display:inline-flex;gap:3.5px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot.pass{background:var(--gate-pass)}.dot.fail{background:transparent;border:1.5px solid var(--gate-fail)}
+.gc{font-size:10.5px;color:var(--ink-3);margin-left:5px;font-weight:600}.gc.all{color:var(--profit)}
+svg.pay{display:block;vertical-align:middle}
+.stand{font-size:10px;margin-top:1px}
+/* detail row */
+tr.detail td{padding:0;border-bottom:1px solid var(--line-2);background:#fbfcff}
+.dwrap{display:grid;grid-template-columns:380px 1fr;gap:20px;padding:16px 18px}
+.dchart .plbig{font-size:22px;font-weight:800;letter-spacing:-.02em}
+.dchart .plbig.p{color:var(--profit)}.dchart .plbig.l{color:var(--loss)}
+.dchart .pllab{font-size:11px;color:var(--ink-3);margin-bottom:6px}
+.dlegend{display:flex;gap:14px;margin-top:10px;font-size:11.5px;flex-wrap:wrap}
+.dlegend .it{display:flex;align-items:center;gap:5px}.dlegend .d{width:8px;height:8px;border-radius:50%}
+.dlegend b{color:var(--ink)}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px 16px;align-content:start}
+.mg{}
+.mg h4{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-4);margin:0 0 6px;font-weight:700;border-bottom:1px solid var(--line-2);padding-bottom:3px}
+.mrow{display:flex;justify-content:space-between;font-size:12px;margin:3px 0}
+.mrow span{color:var(--ink-3)}.mrow b{font-weight:600}
+.mrow b.p{color:var(--profit)}.mrow b.l{color:var(--loss)}
+.gate-list{font-size:11px;line-height:1.7}
+.gate-list .ok{color:var(--gate-pass)}.gate-list .no{color:var(--warn);font-weight:600}
+
+/* open positions */
+.pos{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+.poscard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;display:flex;gap:16px;align-items:center}
+.poscard .plbig{font-size:22px;font-weight:800}.poscard .plbig.p{color:var(--profit)}.poscard .plbig.l{color:var(--loss)}
+.poscard .t{font-weight:700}.poscard .sub2{font-size:11px;color:var(--ink-3)}
+
+/* legend / toast / spinner */
+.legend{margin-top:24px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:15px 19px;font-size:12.5px;color:var(--ink-2)}
+.legend h3{margin:0 0 9px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3)}
+.legend .r{margin:6px 0}.legend b{color:var(--ink)}
+.pill{display:inline-block;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:5px;margin-right:6px;vertical-align:1px}
+.pill.rh{background:var(--profit-soft);color:var(--profit)}.pill.tt{background:var(--accent-soft);color:var(--accent)}.pill.sci{background:#f1f2f4;color:var(--ink-3)}
+.foot{color:var(--ink-3);font-size:11px;margin-top:20px;line-height:1.6}
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;transition:opacity .2s,transform .2s;pointer-events:none;z-index:60;box-shadow:0 6px 24px rgba(0,0,0,.18)}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;display:inline-block;animation:rot .7s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes rot{to{transform:rotate(360deg)}}
+@keyframes pulse{0%{background:var(--profit-soft)}100%{background:transparent}}
+tr.logged td{animation:pulse 1.1s ease}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media(max-width:1200px){.cards{grid-template-columns:repeat(4,1fr)}.pos{grid-template-columns:1fr}.dwrap{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <h1>VEGA Paper Desk</h1>
+    <span class="badge">PAPER</span>
+    <button class="btn btn-primary" id="rescan">↻ Rescan today</button>
+  </div>
+  <div class="sub num">2026-07-14 08:34 · AI disabled (no credits) · Robinhood fees ≈ $2.16 round-trip/contract · localhost only</div>
+  <div class="scan-note"><span>✓</span><span>Scan complete — <b>117 candidates</b> across <b class="num">50/50</b> names priced.</span></div>
+
+  <!-- Scorecard with confidence awareness -->
+  <div class="cards">
+    <div class="card"><div class="lab">Closed</div><div class="val num">1</div><div class="s">of 30 target</div><div class="prog"><i style="width:3.3%"></i></div></div>
+    <div class="card"><div class="lab">Win rate</div><div class="val num">100%</div><div class="s num">1W / 0L / 0S</div></div>
+    <div class="card"><div class="lab">Net P/L</div><div class="val pos num">+$14</div><div class="s">after RH fees</div></div>
+    <div class="card muted"><div class="lab">Expectancy</div><div class="val num">+$13.84</div><div class="s">net / ct / trade</div></div>
+    <div class="card muted"><div class="lab">Profit factor</div><div class="val num">∞</div><div class="s">&gt;1 winning</div></div>
+    <div class="card muted"><div class="lab">Calibration</div><div class="val num">+24pp</div><div class="s">real − POP</div></div>
+    <div class="card"><div class="lab">Open risk</div><div class="val num">$0</div><div class="s">0 open</div></div>
+  </div>
+  <div class="sub">Greyed cards need ~10 closes to mean anything — the interface signals how much to trust each number.</div>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div id="hero-pay"></div>
+    <div>
+      <div class="flag">★ Top setup today</div>
+      <div class="line num">QQQ 690 / 689 · 31 DTE</div>
+      <div class="why num">Short strike sits ~0.9× outside the expected move (±$33) · passes all 8 gates · deepest liquidity on the board.</div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="n prio num">60</div><div class="c">Priority</div></div>
+      <div class="stat"><div class="n num">71%</div><div class="c">POP</div></div>
+      <div class="stat"><div class="n num">78%</div><div class="c">P50</div></div>
+      <div class="stat"><div class="n num">39%</div><div class="c">RoC</div></div>
+    </div>
+  </div>
+
+  <h2>Candidates <span class="dim" style="text-transform:none;letter-spacing:0;font-weight:400">— click any row for the full risk graph &amp; Greeks</span></h2>
+  <div class="tablecard">
+    <table>
+      <thead>
+        <tr class="grp">
+          <th colspan="4" class="l">Trade</th>
+          <th colspan="4" class="gsep l">Edge — is it worth taking?</th>
+          <th colspan="4" class="gsep l">Risk &amp; Greeks</th>
+          <th colspan="1" class="gsep l">Quality</th>
+          <th colspan="1" class="gsep l"></th>
+        </tr>
+        <tr class="col">
+          <th class="l">Ticker</th><th class="l">P/L now</th><th class="l">Strikes</th><th>Exp</th>
+          <th class="gsep">Priority ▼</th><th>POP / P50</th><th>RoC</th><th>Exp.Move</th>
+          <th class="gsep">Δ</th><th>θ/day</th><th>IV R·%</th><th>Liq</th>
+          <th class="gsep l">Gates</th>
+          <th class="gsep">Log</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <h2>Open positions <span class="dim" style="text-transform:none;letter-spacing:0;font-weight:400">— live unrealized P/L, Robinhood-style</span></h2>
+  <div class="pos" id="positions"></div>
+
+  <div class="legend">
+    <h3>What's in the rebuild &amp; where it came from</h3>
+    <div class="r"><span class="pill rh">RH</span><b>Robinhood P/L chart.</b> Shaded green-profit / orange-loss zones split at zero, a “price now” line, and dots for max-profit / max-loss / break-even. In-row it shows your <b>current standing</b>; expand for the full graph.</div>
+    <div class="r"><span class="pill tt">TT</span><b>tastytrade metrics.</b> <b>Expected Move</b> (is the short strike outside what the market prices?), <b>P50</b> (chance of hitting 50% profit — matches your manage-at-50% rule), <b>Return on Capital</b>, <b>IV Rank + IV%</b>, a <b>liquidity</b> meter, and full Greeks (Δ θ Vega Gamma) in the detail panel.</div>
+    <div class="r"><span class="pill sci">UX</span><b>Perception science.</b> Numbers right-aligned + tabular so magnitude reads by position; color spent only on money; gates as fill/shape dots (colorblind-safe); one hero number per row; confidence-aware scorecard; progressive disclosure via expandable rows.</div>
+  </div>
+
+  <div class="foot">Mockup — sample data from the 2026-07-14 08:34 scan; Expected Move / P50 / Greeks illustrative. Green = profit, orange = loss, black = break-even, vertical line = current price. Educational tool — not financial advice; every order is your own.</div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── bull put spread P/L ─────────────────────────────────────────────
+function plAt(S,short,long,credit,width){
+  const mx=credit*100, mn=-(width-credit)*100;
+  if(S>=short) return mx; if(S<=long) return mn;
+  return mn+(S-long)/(short-long)*(mx-mn);
+}
+// Robinhood-style shaded chart
+function chart(short,long,credit,width,spot,w,h,opts={}){
+  const mx=credit*100, mn=-(width-credit)*100, be=short-credit;
+  const lo=long-width*0.85, hi=Math.max(short+width*1.25,(spot||short)+width*0.55);
+  const padX=8,padT=12,padB=12, yTop=(mx*1.25)||10, yBot=(mn*1.25)||-10;
+  const span=(hi-lo)||1, rng=(yTop-yBot)||1;
+  const X=p=>padX+(p-lo)/span*(w-2*padX), Y=v=>padT+(yTop-v)/rng*(h-padT-padB);
+  const z=Y(0);
+  const curve=[[lo,mn],[long,mn],[short,mx],[hi,mx]].map(([p,v])=>`${X(p).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
+  const profit=`${X(be).toFixed(1)},${z.toFixed(1)} ${X(short).toFixed(1)},${Y(mx).toFixed(1)} ${X(hi).toFixed(1)},${Y(mx).toFixed(1)} ${X(hi).toFixed(1)},${z.toFixed(1)}`;
+  const loss=`${X(lo).toFixed(1)},${z.toFixed(1)} ${X(lo).toFixed(1)},${Y(mn).toFixed(1)} ${X(long).toFixed(1)},${Y(mn).toFixed(1)} ${X(be).toFixed(1)},${z.toFixed(1)}`;
+  const dt=opts.detail;
+  let dots=`<circle cx="${X(be).toFixed(1)}" cy="${z.toFixed(1)}" r="${dt?3.4:2.4}" fill="var(--be)"/>`;
+  if(dt){ dots+=`<circle cx="${X(short).toFixed(1)}" cy="${Y(mx).toFixed(1)}" r="3.4" fill="var(--profit)"/>`+
+               `<circle cx="${X(long).toFixed(1)}" cy="${Y(mn).toFixed(1)}" r="3.4" fill="var(--loss)"/>`; }
+  let pl="",pdot="",lab="";
+  if(spot){
+    const sx=X(spot), pv=plAt(spot,short,long,credit,width), col=pv>=0?"var(--profit)":"var(--loss)";
+    pl=`<line x1="${sx.toFixed(1)}" y1="${padT-4}" x2="${sx.toFixed(1)}" y2="${h-padB+4}" stroke="#111827" stroke-width="1"/>`;
+    pdot=`<circle cx="${sx.toFixed(1)}" cy="${Y(pv).toFixed(1)}" r="${dt?4:3}" fill="${col}" stroke="#fff" stroke-width="1.3"/>`;
+    if(dt&&opts.priceLabel) lab=`<text x="${sx.toFixed(1)}" y="${padT-4}" text-anchor="middle" font-size="10" fill="#374151" font-weight="600">${opts.priceLabel}</text>`;
+  }
+  return `<svg class="pay" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <polygon points="${loss}" fill="var(--loss-fill)"/><polygon points="${profit}" fill="var(--profit-fill)"/>
+    <line x1="${padX}" y1="${z.toFixed(1)}" x2="${w-padX}" y2="${z.toFixed(1)}" stroke="#d1d5db"/>
+    <polyline points="${curve}" fill="none" stroke="#374151" stroke-width="1.8" stroke-linejoin="round"/>
+    ${pl}${dots}${pdot}${lab}</svg>`;
+}
+function liqMeter(level){ // 1-3
+  return `<span class="liq" title="liquidity">${[1,2,3].map(i=>`<i class="${i<=level?'on':''}"></i>`).join("")}</span>`;
+}
+const GATES=["IV-Rank","Delta cap","OTM buffer","Credit/Width","Min credit","Liquidity","POP","DTE"];
+function gateDots(g){
+  const d=g.map((p,i)=>`<span class="dot ${p?'pass':'fail'}" title="${GATES[i]}: ${p?'pass':'FAIL'}"></span>`).join("");
+  const n=g.filter(Boolean).length;
+  return `<span class="gates">${d}</span><span class="gc ${n===8?'all':''}">${n}/8</span>`;
+}
+
+// ── data (2026-07-14 scan; EM/P50/Greeks illustrative) ──────────────
+const ROWS=[
+ {tk:"QQQ",px:718.57,s:690,l:689,c:0.28,dte:31,exp:"08-14",prio:60,pop:71,p50:78,roc:39,credit:28,em:33.5,emR:[685.1,752.0],
+  d:-0.27,th:27,vega:-8.1,gamma:.012,ivr:59,ivm:"Est",ivp:56,liq:3,oi:14200,vol:5300,spr:0.02,gates:[true,true,true,true,true,true,true,true]},
+ {tk:"QQQ",px:718.57,s:685,l:680,c:1.25,dte:38,exp:"08-21",prio:59,pop:73,p50:80,roc:33,credit:125,em:37.1,emR:[681.5,755.7],
+  d:-0.25,th:23,vega:-11.4,gamma:.009,ivr:59,ivm:"Est",ivp:56,liq:3,oi:9800,vol:3100,spr:0.03,gates:[true,true,true,true,true,true,true,true]},
+ {tk:"IWM",px:294.79,s:280,l:275,c:0.89,dte:38,exp:"08-21",prio:54,pop:81,p50:87,roc:22,credit:89,em:17.1,emR:[277.7,311.9],
+  d:-0.21,th:8,vega:-4.6,gamma:.021,ivr:11,ivm:"Est",ivp:18,liq:2,oi:6400,vol:1900,spr:0.04,gates:[false,true,true,true,true,true,true,true]},
+ {tk:"QQQ",px:718.57,s:695,l:694,c:0.31,dte:31,exp:"08-14",prio:54,pop:67,p50:74,roc:45,credit:31,em:33.5,emR:[685.1,752.0],
+  d:-0.30,th:28,vega:-8.6,gamma:.014,ivr:59,ivm:"Est",ivp:56,liq:3,oi:11700,vol:4200,spr:0.02,gates:[true,true,true,true,true,true,false,true]},
+ {tk:"SPY",px:749.95,s:722,l:721,c:0.16,dte:38,exp:"08-21",prio:47,pop:80,p50:86,roc:19,credit:16,em:31.4,emR:[718.6,781.4],
+  d:-0.21,th:13,vega:-9.2,gamma:.008,ivr:25,ivm:"Est",ivp:31,liq:3,oi:22400,vol:8700,spr:0.01,gates:[false,true,true,true,false,true,true,true]},
+ {tk:"SPY",px:749.95,s:725,l:724,c:0.18,dte:38,exp:"08-21",prio:46,pop:78,p50:84,roc:22,credit:18,em:31.4,emR:[718.6,781.4],
+  d:-0.23,th:14,vega:-9.0,gamma:.009,ivr:25,ivm:"Est",ivp:31,liq:3,oi:18900,vol:7200,spr:0.01,gates:[false,true,true,true,false,true,true,true]},
+ {tk:"SPY",px:749.95,s:727,l:726,c:0.19,dte:38,exp:"08-21",prio:46,pop:76,p50:82,roc:24,credit:19,em:31.4,emR:[718.6,781.4],
+  d:-0.24,th:14,vega:-8.8,gamma:.009,ivr:25,ivm:"Est",ivp:31,liq:3,oi:16100,vol:6100,spr:0.02,gates:[false,true,true,true,false,true,true,true]},
+];
+
+const tbody=document.getElementById("tbody");
+ROWS.forEach((r,i)=>{
+  const w=r.s-r.l, be=r.s-r.c, bpr=(w-r.c)*100, maxprofit=r.c*100, cush=(r.px-be)/r.px*100;
+  const emMult=((r.px-r.s)/r.em).toFixed(1); // how far short strike is vs 1x EM
+  // main row
+  const tr=document.createElement("tr"); tr.className="main"; tr.dataset.i=i;
+  tr.innerHTML=`
+    <td class="l"><span class="tk">${r.tk}<span class="px num">$${r.px.toFixed(2)}</span></span></td>
+    <td class="l">${chart(r.s,r.l,r.c,w,r.px,150,50)}</td>
+    <td class="l"><span class="big num">${r.s}/${r.l}</span><div class="s2 num">w${w} · be $${be.toFixed(2)}</div></td>
+    <td><span class="num">${r.exp}</span><div class="s2 num">${r.dte}d</div></td>
+    <td class="gsep prio-cell"><span class="n num">${r.prio}</span><div class="pbar"><i style="width:${r.prio}%"></i></div></td>
+    <td class="pop"><span class="n num">${r.pop}%</span><div class="s2 num">P50 ${r.p50}%</div></td>
+    <td><span class="num big">${r.roc}%</span><div class="s2 num">$${r.credit}</div></td>
+    <td class="em"><span class="n num">±$${r.em.toFixed(0)}</span><div class="s2 num">short ${emMult}× EM</div></td>
+    <td class="gsep"><span class="num">${r.d.toFixed(2)}</span></td>
+    <td><span class="num money-pos">+$${r.th}</span></td>
+    <td><span class="num">${r.ivr}<span class="s2" style="display:inline"> ${r.ivm}</span></span><div class="s2 num">IV ${r.ivp}%</div></td>
+    <td>${liqMeter(r.liq)}</td>
+    <td class="gsep l">${gateDots(r.gates)}</td>
+    <td class="gsep"><button class="btn btn-go" data-log="${i}">Log</button></td>`;
+  tbody.appendChild(tr);
+  // detail row
+  const dtr=document.createElement("tr"); dtr.className="detail"; dtr.style.display="none"; dtr.dataset.for=i;
+  const standCls = cush>=0?'p':'l';
+  const gateList=r.gates.map((p,gi)=>`<span class="${p?'ok':'no'}">${p?'✓':'✕'} ${GATES[gi]}</span>`).join("<br>");
+  dtr.innerHTML=`<td colspan="14"><div class="dwrap">
+    <div class="dchart">
+      <div class="plbig ${standCls} num">${cush.toFixed(1)}%</div>
+      <div class="pllab">cushion to break-even · ${r.tk} ${r.s}/${r.l} · ${r.dte} DTE</div>
+      ${chart(r.s,r.l,r.c,w,r.px,360,150,{detail:true,priceLabel:r.tk+" $"+r.px.toFixed(2)})}
+      <div class="dlegend">
+        <span class="it"><span class="d" style="background:var(--profit)"></span>Max profit <b>+$${maxprofit.toFixed(0)}</b></span>
+        <span class="it"><span class="d" style="background:var(--loss)"></span>Max loss <b>−$${bpr.toFixed(0)}</b></span>
+        <span class="it"><span class="d" style="background:var(--be)"></span>Break-even <b>$${be.toFixed(2)}</b></span>
+      </div>
+    </div>
+    <div class="metrics">
+      <div class="mg"><h4>Greeks</h4>
+        <div class="mrow"><span>Delta</span><b class="num">${r.d.toFixed(2)}</b></div>
+        <div class="mrow"><span>Theta/day</span><b class="num p">+$${r.th}</b></div>
+        <div class="mrow"><span>Vega</span><b class="num">${r.vega.toFixed(1)}</b></div>
+        <div class="mrow"><span>Gamma</span><b class="num">${r.gamma.toFixed(3)}</b></div>
+      </div>
+      <div class="mg"><h4>Capital</h4>
+        <div class="mrow"><span>Credit</span><b class="num p">+$${r.credit}</b></div>
+        <div class="mrow"><span>Max loss / BPR</span><b class="num l">−$${bpr.toFixed(0)}</b></div>
+        <div class="mrow"><span>Return on cap</span><b class="num">${r.roc}%</b></div>
+        <div class="mrow"><span>Cr / width</span><b class="num">${(r.c/w*100).toFixed(0)}%</b></div>
+      </div>
+      <div class="mg"><h4>Probability</h4>
+        <div class="mrow"><span>POP (exp)</span><b class="num">${r.pop}%</b></div>
+        <div class="mrow"><span>P50 (mc)</span><b class="num">${r.p50}%</b></div>
+        <div class="mrow"><span>Δ-implied</span><b class="num">${Math.round((1-Math.abs(r.d))*100)}%</b></div>
+        <div class="mrow"><span>Break-even</span><b class="num">$${be.toFixed(2)}</b></div>
+      </div>
+      <div class="mg"><h4>Vol &amp; Move</h4>
+        <div class="mrow"><span>IV Rank</span><b class="num">${r.ivr} ${r.ivm}</b></div>
+        <div class="mrow"><span>IV %</span><b class="num">${r.ivp}%</b></div>
+        <div class="mrow"><span>Exp. move</span><b class="num">±$${r.em.toFixed(0)}</b></div>
+        <div class="mrow"><span>Move range</span><b class="num">${r.emR[0].toFixed(0)}–${r.emR[1].toFixed(0)}</b></div>
+      </div>
+      <div class="mg"><h4>Liquidity</h4>
+        <div class="mrow"><span>Rating</span><b>${['','Thin','Good','Deep'][r.liq]}</b></div>
+        <div class="mrow"><span>Open interest</span><b class="num">${r.oi.toLocaleString()}</b></div>
+        <div class="mrow"><span>Volume</span><b class="num">${r.vol.toLocaleString()}</b></div>
+        <div class="mrow"><span>Bid/ask width</span><b class="num">$${r.spr.toFixed(2)}</b></div>
+      </div>
+      <div class="mg" style="grid-column:span 2"><h4>Gates (${r.gates.filter(Boolean).length}/8)</h4>
+        <div class="gate-list" style="columns:2">${gateList}</div>
+      </div>
+      <div class="mg"><h4>Structure</h4>
+        <div class="mrow"><span>Short / Long</span><b class="num">${r.s}/${r.l}</b></div>
+        <div class="mrow"><span>Width</span><b class="num">$${w}</b></div>
+        <div class="mrow"><span>DTE</span><b class="num">${r.dte}</b></div>
+        <div class="mrow"><span>Short vs EM</span><b class="num">${emMult}×</b></div>
+      </div>
+    </div>
+  </div></td>`;
+  tbody.appendChild(dtr);
+});
+
+document.getElementById("hero-pay").innerHTML=chart(690,689,0.28,1,718.57,190,58);
+
+// open positions (Robinhood-style live P/L)
+const POS=[
+ {tk:"QQQ",s:690,l:689,c:0.28,exp:"08-14",dte:29,mark:715.2},
+ {tk:"SPY",s:722,l:721,c:0.16,exp:"08-21",dte:36,mark:720.6},
+];
+const posEl=document.getElementById("positions");
+POS.forEach(p=>{
+  const w=p.s-p.l, pv=plAt(p.mark,p.s,p.l,p.c,w), cls=pv>=0?'p':'l';
+  posEl.insertAdjacentHTML("beforeend",
+    `<div class="poscard">${chart(p.s,p.l,p.c,w,p.mark,180,64,{})}
+     <div><div class="plbig ${cls} num">${pv>=0?'+':'−'}$${Math.abs(pv).toFixed(0)}</div>
+     <div class="t num">${p.tk} ${p.s}/${p.l}</div>
+     <div class="sub2 num">unrealized · price now $${p.mark.toFixed(2)} · ${p.dte}d left</div></div></div>`);
+});
+
+// ── interactions ────────────────────────────────────────────────────
+const toast=document.getElementById("toast");
+function showToast(m){toast.textContent=m;toast.classList.add("show");clearTimeout(toast._t);toast._t=setTimeout(()=>toast.classList.remove("show"),1900);}
+tbody.addEventListener("click",e=>{
+  const log=e.target.closest("button[data-log]");
+  if(log){ e.stopPropagation(); const r=ROWS[+log.dataset.log], tr=log.closest("tr");
+    tr.classList.remove("logged"); void tr.offsetWidth; tr.classList.add("logged");
+    showToast(`✓ Logged ${r.tk} ${r.s}/${r.l} ×1`); return; }
+  const main=e.target.closest("tr.main"); if(!main) return;
+  const det=tbody.querySelector(`tr.detail[data-for="${main.dataset.i}"]`);
+  det.style.display = det.style.display==="none" ? "table-row" : "none";
+});
+document.getElementById("rescan").addEventListener("click",function(){
+  const b=this,o=b.innerHTML; b.disabled=true; b.innerHTML='<span class="spin"></span>Scanning live chains…';
+  setTimeout(()=>{b.disabled=false;b.innerHTML=o;showToast("✓ Rescan complete — 117 candidates");},1600);
+});
+</script>
+</body>
+</html>

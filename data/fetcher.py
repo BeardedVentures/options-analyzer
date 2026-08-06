@@ -601,6 +601,51 @@ def _quality_filter_options(records: List[Dict], ticker: str, source: str) -> Li
     return valid
 
 
+def get_chain_by_expiry(ticker: str,
+                        min_dte: int = None,
+                        max_dte: int = None,
+                        max_expirations: int = 6) -> Dict[str, List[Dict]]:
+    """Chain grouped by expiration, for the volatility term structure.
+
+    Spans a WIDER DTE window than the trading chain (default 5-120 vs the 25-45 the engine
+    trades) because the whole point is comparing the front month against the back. Returns {}
+    on any failure and never raises — a term-structure read is advisory and must not be able
+    to break a scan.
+
+    Implementation note: the brief specified reusing a helper called
+    `_polygon_options_chain()`. No such function exists in this module; the real entry point
+    is `get_options_chain()`, which handles the Polygon-then-yfinance fallback, the quality
+    filter and caching. Building on the named-but-absent helper would have failed on import.
+    """
+    if min_dte is None:
+        min_dte = int(getattr(config, "TERM_STRUCTURE_MIN_DTE", 5))
+    if max_dte is None:
+        max_dte = int(getattr(config, "TERM_STRUCTURE_MAX_DTE", 120))
+    try:
+        rows = get_options_chain(ticker, min_dte, max_dte)
+        if not rows:
+            return {}
+        by_expiry: Dict[str, List[Dict]] = {}
+        for r in rows:
+            exp = r.get("expiration")
+            if exp:
+                by_expiry.setdefault(str(exp)[:10], []).append(r)
+        # Sample ACROSS the DTE span, don't just take the nearest N. On SPY the nearest six
+        # expirations are 5, 6, 7, 8, 9 and 16 DTE — six adjacent weeklies whose farthest
+        # point does not even reach the 25-45 window the engine trades. Comparing front
+        # against back is the entire purpose, so the endpoints must be far apart.
+        keys = sorted(by_expiry.keys())
+        if len(keys) > max_expirations:
+            last = len(keys) - 1
+            idxs = sorted({round(i * last / (max_expirations - 1))
+                           for i in range(max_expirations)})
+            keys = [keys[i] for i in idxs]
+        return {k: by_expiry[k] for k in keys}
+    except Exception as e:
+        logger.warning(f"[fetcher] get_chain_by_expiry failed for {ticker}: {e}")
+        return {}
+
+
 def get_options_chain(ticker: str,
                       min_dte: int = None,
                       max_dte: int = None) -> List[Dict]:
