@@ -134,12 +134,14 @@ def test_credit_gates_evaluate_the_basis_that_actually_gets_filled():
     import inspect
 
     import vega_candidates as vc
-    src = inspect.getsource(vc.build_candidates)
-    assert 'best["natural_credit_usd"]' in src, "min_credit_usd must gate the natural credit"
-    assert 'best["natural_credit_to_width"]' in src, "credit_to_width must gate natural"
+    from analysis import assessment as A
+    # The gates now live in ONE place; assert against that rather than the caller.
+    gsrc = inspect.getsource(A.evaluate_gates)
+    assert '"natural_credit_usd"' in gsrc, "min_credit_usd must gate the natural credit"
+    assert '"natural_credit_to_width"' in gsrc, "credit_to_width must gate natural"
     # And the pair chosen per short leg must be ranked on the same basis, or ranking on mid
     # can discard a pair that would have passed the natural gate.
-    assert 'natural_ctw > best["natural_credit_to_width"]' in src
+    assert 'natural_ctw > best["natural_credit_to_width"]' in inspect.getsource(vc.build_candidates)
 
 
 def test_a_spread_that_is_rich_on_mid_and_worthless_on_natural_is_rejected():
@@ -189,15 +191,28 @@ def test_shelter_is_in_the_enforcement_contract():
     assert "support_shelter" in config.REQUIRED_GATES
 
 
-def test_scanner_emits_every_gate_it_promises():
-    """Contract check against the whole scanner, not one function: `earnings_clear` is applied
-    by the ticker loop (one calendar lookup reused across that ticker's candidates) rather
-    than inside build_candidates, and scoping this to build_candidates alone would fail on a
-    gate that is correctly enforced elsewhere."""
+def test_the_contract_has_exactly_one_implementation():
+    """Every REQUIRED_GATES key must be emitted by analysis.assessment.evaluate_gates, and
+    that must be the only implementation. Two engines checking the same config constants is
+    the shape behind four enforcement leaks — IV rank, POP floor, quote spread, and the
+    mid-versus-natural credit basis."""
     import inspect
 
     import config
-    import vega_candidates as vc
-    src = inspect.getsource(vc)
+    from analysis import assessment as A
+    src = inspect.getsource(A.evaluate_gates)
     for key in config.REQUIRED_GATES:
-        assert f'"{key}"' in src, f"{key} is required but never emitted by the scanner"
+        assert f'"{key}"' in src, f"{key} is required but not emitted by evaluate_gates"
+
+
+def test_evaluate_gates_refuses_to_drift_from_the_contract(monkeypatch):
+    """If a gate is added to REQUIRED_GATES and not implemented, the scan must fail loudly
+    rather than open trades against a rule nothing checks."""
+    import config
+    from analysis import assessment as A
+    monkeypatch.setattr(config, "REQUIRED_GATES",
+                        list(config.REQUIRED_GATES) + ["a_gate_nobody_implemented"],
+                        raising=False)
+    with pytest.raises(AssertionError, match="does not emit required gates"):
+        A.evaluate_gates({"short_strike": 100.0, "dte": 30, "short_leg": {},
+                          "side": "put", "pop": 0.8}, {"ticker": "T", "spot": 110.0})

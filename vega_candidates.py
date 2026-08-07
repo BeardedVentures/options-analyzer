@@ -228,6 +228,18 @@ def attach_true_pop(cands: list, current_price: float, prices_hist) -> int:
     return n
 
 
+def _assess_candidate(spread: dict, ctx: dict) -> dict:
+    """Delegate to the shared assessment. Degrades to gates-only if the analysis layer is
+    unavailable — a scan must never fail because an advisory signal did."""
+    from analysis import assessment as A
+    try:
+        return A.assess(spread, ctx, strategy=A.BULL_PUT)
+    except Exception as e:
+        logger_msg = f"[candidates] assessment failed for {ctx.get('ticker')}: {e}"
+        print("  " + logger_msg)
+        return {"gates": A.evaluate_gates(spread, ctx), "analysis": {}, "narrative": ""}
+
+
 def _shelter_ok(short_strike, support_levels) -> bool:
     """True when a real support level stands above the short strike.
 
@@ -249,7 +261,7 @@ def _shelter_ok(short_strike, support_levels) -> bool:
 
 def build_candidates(ticker: str, puts: list, current_price: float,
                      delta_min: float, delta_max: float, max_width: float,
-                     support_levels: list = None) -> list:
+                     support_levels: list = None, assess_ctx: dict = None) -> list:
     """Enumerate real bull-put spreads for one ticker. No gate filtering — annotate only."""
     cands = []
     # group by expiration
@@ -321,38 +333,29 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                 if best is None or natural_ctw > best["natural_credit_to_width"]:
                     best = cand
             if best:
-                # gate annotations (what the strict scanner checks)
-                g = {
-                    "delta_cap": abs(best["short_delta"]) <= getattr(config, "SHORT_STRIKE_MAX_DELTA", 0.30),
-                    "otm_buffer": otm_buffer_ok(ticker, current_price, best["short_strike"]),
-                    "credit_to_width": best["natural_credit_to_width"] >= getattr(config, "MIN_CREDIT_TO_WIDTH_PCT", 0.15),
-                    "min_credit_usd": best["natural_credit_usd"] >= getattr(config, "MIN_CREDIT_USD", 25),
-                    "liquidity": liquidity_ok(short),
-                    "pop": best["pop_implied"] >= getattr(config, "MIN_PROBABILITY_OF_PROFIT", 0.72),
-                    "dte_window": getattr(config, "MIN_DTE", 21) <= best["dte"] <= getattr(config, "MAX_DTE", 45),
-                    # MAX_QUOTE_SPREAD_PCT existed in config but was enforced NOWHERE — the third
-                    # enforcement leak of this shape. 13 of 130 candidates in the 2026-07-31
-                    # snapshot exceeded it and still qualified. Wide quotes are exactly where the
-                    # mid-vs-natural fill gap is worst, so this gate protects the fill model too.
-                    "quote_spread": _quote_spread_ok(best),
-                    # Natural credit must actually be collectable. ~25% of candidates are debit
-                    # spreads at real prices; they must never reach the auto-open path.
-                    "natural_credit_positive": (best.get("natural_credit_per_share") or 0) > 0,
-                    # STRUCTURAL SHELTER. Is there a level the market has actually defended
-                    # between spot and the short strike?
-                    #
-                    # This path placed strikes on delta and OTM percentage alone — it never
-                    # consulted a support level, so a strike could sit in open air with
-                    # nothing to break on the way down. On 2026-08-07 both GDX trades were
-                    # the only two of five entries whose strike sat ABOVE every real support
-                    # (nearest support 1.3-1.5 expected moves BELOW it), and both were the
-                    # only two that died the same day. The three with a level above the
-                    # strike all survived.
-                    #
-                    # A same-day stop on a 30+ DTE thesis is an entry problem, not an exit
-                    # one. This is the entry check that was missing.
-                    "support_shelter": _shelter_ok(best.get("short_strike"), support_levels),
-                }
+                # ONE definition of the gates. This block previously re-implemented the same
+                # config constants that main.py also checked, which is the shape behind four
+                # enforcement leaks (IV rank, POP floor, quote spread, mid-vs-natural credit).
+                # analysis/assessment.py owns the contract now; adding a rule there enforces
+                # it on both the cockpit and the auto-trader by construction.
+                best["side"] = "put"
+                best["short_leg"] = short
+                best["pop"] = best["pop_implied"]
+                # Gate first — cheap. Only a candidate that survives earns the expensive
+                # surface read and the full narrative. Analysis follows selection.
+                from analysis import assessment as _A2
+                g = _A2.evaluate_gates(best, assess_ctx)
+                if all(g.values()):
+                    _A2.enrich_surface(assess_ctx)
+                    _asmt = _assess_candidate(best, assess_ctx)
+                    g = _asmt["gates"]
+                    best["analysis"] = _asmt["analysis"]
+                    best["narrative"] = _asmt["narrative"]
+                else:
+                    best["analysis"] = {}
+                    best["narrative"] = ("Blocked by "
+                                         + ", ".join(k for k, v in g.items() if not v) + ".")
+                best.pop("short_leg", None)   # not JSON-serialisable and already summarised
                 best["gates"] = g
                 best["gates_passed"] = sum(1 for v in g.values() if v)
                 best["gates_total"] = len(g)
@@ -514,48 +517,53 @@ def main():
     print(f"\nVEGA candidates · DTE {args.min_dte}-{args.max_dte} · Δ {args.delta_min}-{args.delta_max} · {len(tickers)} tickers\n")
     for tk in tickers:
         try:
-            # 1y, not 5d: the support levels this path now gates on need real history.
-            px = fetcher.get_price_data(tk, period="1y")
+            # ONE history fetch per ticker, 2y — reused by the level detector AND the
+            # calibrated-POP pass below, which used to pull its own 2y series separately.
+            px = fetcher.get_price_data(tk, period="2y")
             price = float(px["Close"].iloc[-1]) if px is not None and not px.empty else None
             if not price:
                 print(f"  {tk:5s}  no price — skipped")
                 continue
-            _sup = None
-            try:
-                from analysis.levels import find_levels
-                _sup = find_levels(px["High"].tolist(), px["Low"].tolist(),
-                                   px["Close"].tolist()).get("support_levels")
-            except Exception as _e:
-                print(f"  {tk:5s}  levels unavailable ({_e}) — shelter gate passes open")
             puts = fetcher.get_options_chain(tk, args.min_dte, args.max_dte)
             ctx = vol_context(tk, puts, price)
+            # ONE market context per ticker, shared by every spread on it. Previously each
+            # path re-fetched price history and chains independently, per scan.
+            # GATE PHASE ONLY — price history (for levels) plus the chain already in hand.
+            # The volatility surface is deliberately not loaded here: it gates nothing and
+            # costs two more chain fetches per ticker. Survivors get it below.
+            from analysis import assessment as _A
+            # Earnings resolved BEFORE the build so the shared gate owns it. It was applied
+            # after build_candidates, which meant a candidate could pass every gate, earn the
+            # expensive surface read, and only then be rejected for an earnings date — three
+            # wasted enrichments on CRWD alone in the 17:18 scan.
+            _is_etf = tk in _ETF_TICKERS
+            _earn_days = None
+            if getattr(config, "EARNINGS_GATE_ENABLED", True) and not _is_etf:
+                try:
+                    from data import fundamentals as _fund
+                    _earn_days = _fund.days_until_earnings(fetcher.get_earnings_date(tk))
+                except Exception:
+                    logger.debug("earnings lookup failed for %s", tk, exc_info=True)
+            assess_ctx = _A.load_context(tk, price_data=px, puts=puts, tech=ctx,
+                                         earnings_days=_earn_days)
+            _sup = (assess_ctx.get("levels") or {}).get("support_levels")
             cands = build_candidates(tk, puts, price, args.delta_min, args.delta_max,
-                                     args.max_width, support_levels=_sup)[: args.top]
+                                     args.max_width, support_levels=_sup,
+                                     assess_ctx=assess_ctx)[: args.top]
 
             # Earnings gate — one calendar lookup per ticker, reused across its candidates.
             n_earn_blocked = 0
-            if cands and getattr(config, "EARNINGS_GATE_ENABLED", True):
-                _is_etf = tk in _ETF_TICKERS
-                try:
-                    _edt = None if _is_etf else fetcher.get_earnings_date(tk)
-                except Exception:
-                    _edt = None
-                    logger.debug("earnings lookup failed for %s", tk, exc_info=True)
-                n_earn_blocked = attach_earnings_gate(cands, tk, _edt, _is_etf)
-            elif cands:
-                # Gate disabled: still emit the key so the REQUIRED_GATES contract holds.
-                for _c in cands:
-                    _c["gates"]["earnings_clear"] = True
-                    _c["gates_passed"] = sum(1 for v in _c["gates"].values() if v)
-                    _c["gates_total"] = len(_c["gates"])
+            # earnings_clear is set by analysis.assessment.evaluate_gates during the build.
+            n_earn_blocked = sum(1 for _c in cands
+                                 if not (_c.get("gates") or {}).get("earnings_clear", True))
 
             # Calibrated POP for the fast path. Needs a long history (the 5d price fetch above
             # is only for the last close), so pull it once per ticker and reuse for every leg.
             n_tp = 0
             if cands:
                 try:
-                    hist = fetcher.get_price_data(tk, period="2y")
-                    n_tp = attach_true_pop(cands, price, hist["Close"] if hist is not None and not hist.empty else None)
+                    n_tp = attach_true_pop(cands, price,
+                                           px["Close"] if px is not None and not px.empty else None)
                 except Exception:
                     logger.debug("history fetch failed for %s", tk, exc_info=True)
 
