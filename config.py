@@ -112,7 +112,25 @@ REQUIRED_GATES = [
     "quote_spread",
     "natural_credit_positive",
     "earnings_clear",
+    "support_shelter",
 ]
+
+# Structural shelter gate. The auto-open path placed strikes on delta and OTM percentage
+# alone and never consulted a support level, so a short strike could sit in open air with
+# nothing to break on the way down.
+#
+# Evidence, 2026-08-07 — the first full day under the new close logic. Five entries:
+#   SMH  strike -0.55 sigma, nearest support -0.43  (support ABOVE strike)  survived
+#   NEE  strike -0.65 sigma, nearest support -0.24  (support ABOVE strike)  survived
+#   COP  strike -0.58 sigma, nearest support -0.41  (support ABOVE strike)  survived
+#   GDX  strike -0.59 sigma, nearest support -1.26  (strike in OPEN AIR)    died same day
+#   GDX  strike -0.72 sigma, nearest support -1.54  (strike in OPEN AIR)    died same day
+# The two failures were exactly the two with no defended level above the strike.
+#
+# A same-day stop on a 30+ DTE thesis is an entry problem, not an exit one. Cost measured on
+# the 2026-08-07 14:39 snapshot: 67 candidates passing the credit gates -> 36 with shelter.
+# Fails OPEN when levels are unavailable, so a data gap cannot empty the board.
+SUPPORT_SHELTER_GATE_ENABLED = True
 
 # Kill switch for the earnings gate. It fails CLOSED for a non-ETF whose earnings date cannot be
 # resolved, so a mass yfinance calendar outage would block every equity candidate (ETFs still

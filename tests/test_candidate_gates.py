@@ -150,3 +150,54 @@ def test_a_spread_that_is_rich_on_mid_and_worthless_on_natural_is_rejected():
     assert mid_credit * 100 >= config.MIN_CREDIT_USD          # would have passed on mid
     assert not (natural_credit * 100 >= config.MIN_CREDIT_USD)  # correctly fails on natural
     assert not ((natural_credit / width) >= config.MIN_CREDIT_TO_WIDTH_PCT)
+
+
+# ── Structural shelter gate (bug found live 2026-08-07) ───────────────────────────────────────
+
+def test_shelter_gate_rejects_a_strike_sitting_in_open_air():
+    """The auto-open path placed strikes on delta and OTM percentage alone and never consulted
+    a support level. On 2026-08-07 both GDX trades were the only two of five entries whose
+    strike sat ABOVE every real support — nearest support 1.3-1.5 expected moves BELOW it —
+    and both were the only two that died the same day. The three with a level above the strike
+    all survived. A same-day stop on a 30+ DTE thesis is an entry problem."""
+    import vega_candidates as vc
+    gdx = [{"price": 73.01, "touches": 3, "strength": 55.0}]   # support far BELOW the strike
+    smh = [{"price": 545.38, "touches": 3, "strength": 60.0}]  # support ABOVE the strike
+    assert vc._shelter_ok(82.0, gdx) is False
+    assert vc._shelter_ok(535.0, smh) is True
+
+
+def test_shelter_gate_fails_open_on_missing_levels():
+    """A data gap must not empty the board. The earnings gate fails CLOSED by design; this one
+    cannot, because a level read depends on price history that is routinely thin."""
+    import vega_candidates as vc
+    assert vc._shelter_ok(82.0, None) is True
+    assert vc._shelter_ok(82.0, []) is True
+
+
+def test_shelter_gate_is_switchable(monkeypatch):
+    import config
+    import vega_candidates as vc
+    monkeypatch.setattr(config, "SUPPORT_SHELTER_GATE_ENABLED", False, raising=False)
+    assert vc._shelter_ok(82.0, [{"price": 73.0, "touches": 3, "strength": 55.0}]) is True
+
+
+def test_shelter_is_in_the_enforcement_contract():
+    """REQUIRED_GATES is what makes _auto_open_from_candidates refuse to open when a gate goes
+    missing — the mechanism that turns a silent widening into a loud failure."""
+    import config
+    assert "support_shelter" in config.REQUIRED_GATES
+
+
+def test_scanner_emits_every_gate_it_promises():
+    """Contract check against the whole scanner, not one function: `earnings_clear` is applied
+    by the ticker loop (one calendar lookup reused across that ticker's candidates) rather
+    than inside build_candidates, and scoping this to build_candidates alone would fail on a
+    gate that is correctly enforced elsewhere."""
+    import inspect
+
+    import config
+    import vega_candidates as vc
+    src = inspect.getsource(vc)
+    for key in config.REQUIRED_GATES:
+        assert f'"{key}"' in src, f"{key} is required but never emitted by the scanner"

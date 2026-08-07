@@ -228,8 +228,28 @@ def attach_true_pop(cands: list, current_price: float, prices_hist) -> int:
     return n
 
 
+def _shelter_ok(short_strike, support_levels) -> bool:
+    """True when a real support level stands above the short strike.
+
+    Fails OPEN when levels are unavailable (too little history, fetch failure): a data gap
+    must not silently reject every candidate the way the earnings gate's fail-closed design
+    could. When SUPPORT_SHELTER_GATE_ENABLED is off this always passes.
+    """
+    if not getattr(config, "SUPPORT_SHELTER_GATE_ENABLED", True):
+        return True
+    if not support_levels:
+        return True
+    try:
+        from analysis.levels import strike_cushion
+        return strike_cushion(float(short_strike), support_levels, "put",
+                              min_buffer_pct=float(getattr(config, "LEVEL_MIN_BUFFER_PCT", 0.005))) is not None
+    except Exception:
+        return True
+
+
 def build_candidates(ticker: str, puts: list, current_price: float,
-                     delta_min: float, delta_max: float, max_width: float) -> list:
+                     delta_min: float, delta_max: float, max_width: float,
+                     support_levels: list = None) -> list:
     """Enumerate real bull-put spreads for one ticker. No gate filtering — annotate only."""
     cands = []
     # group by expiration
@@ -318,6 +338,20 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                     # Natural credit must actually be collectable. ~25% of candidates are debit
                     # spreads at real prices; they must never reach the auto-open path.
                     "natural_credit_positive": (best.get("natural_credit_per_share") or 0) > 0,
+                    # STRUCTURAL SHELTER. Is there a level the market has actually defended
+                    # between spot and the short strike?
+                    #
+                    # This path placed strikes on delta and OTM percentage alone — it never
+                    # consulted a support level, so a strike could sit in open air with
+                    # nothing to break on the way down. On 2026-08-07 both GDX trades were
+                    # the only two of five entries whose strike sat ABOVE every real support
+                    # (nearest support 1.3-1.5 expected moves BELOW it), and both were the
+                    # only two that died the same day. The three with a level above the
+                    # strike all survived.
+                    #
+                    # A same-day stop on a 30+ DTE thesis is an entry problem, not an exit
+                    # one. This is the entry check that was missing.
+                    "support_shelter": _shelter_ok(best.get("short_strike"), support_levels),
                 }
                 best["gates"] = g
                 best["gates_passed"] = sum(1 for v in g.values() if v)
@@ -480,14 +514,23 @@ def main():
     print(f"\nVEGA candidates · DTE {args.min_dte}-{args.max_dte} · Δ {args.delta_min}-{args.delta_max} · {len(tickers)} tickers\n")
     for tk in tickers:
         try:
-            px = fetcher.get_price_data(tk, period="5d")
+            # 1y, not 5d: the support levels this path now gates on need real history.
+            px = fetcher.get_price_data(tk, period="1y")
             price = float(px["Close"].iloc[-1]) if px is not None and not px.empty else None
             if not price:
                 print(f"  {tk:5s}  no price — skipped")
                 continue
+            _sup = None
+            try:
+                from analysis.levels import find_levels
+                _sup = find_levels(px["High"].tolist(), px["Low"].tolist(),
+                                   px["Close"].tolist()).get("support_levels")
+            except Exception as _e:
+                print(f"  {tk:5s}  levels unavailable ({_e}) — shelter gate passes open")
             puts = fetcher.get_options_chain(tk, args.min_dte, args.max_dte)
             ctx = vol_context(tk, puts, price)
-            cands = build_candidates(tk, puts, price, args.delta_min, args.delta_max, args.max_width)[: args.top]
+            cands = build_candidates(tk, puts, price, args.delta_min, args.delta_max,
+                                     args.max_width, support_levels=_sup)[: args.top]
 
             # Earnings gate — one calendar lookup per ticker, reused across its candidates.
             n_earn_blocked = 0
