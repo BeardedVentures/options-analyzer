@@ -268,6 +268,15 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                     credit_usd = round(credit * 100, 2)
                     max_loss = round((width - credit) * 100, 2)
                 natural = round(float(short.get("bid") or 0) - float(long_opt.get("ask") or 0), 2)
+                # DECIDE ON THE BASIS YOU EXECUTE ON. credit/credit_usd/ctw above are MID
+                # values, but auto_paper_cycle opens at `natural`. Gating and ranking on mid
+                # while filling at natural is the same gate/execution mismatch REQUIRED_GATES
+                # exists to prevent, and it is what let GDX 82/81 open twice on 2026-08-07
+                # for $9 and $7 of credit against a $25 minimum: mid said $31 and $29. Both
+                # were closed by the wolf floor within the same cycle for -$45.16 each,
+                # because a $7 credit on a $1-wide spread is dead at inception.
+                natural_usd = round(natural * 100, 2)
+                natural_ctw = round(natural / width, 3) if width else 0
                 ctw = round(credit / width, 3) if width else 0
                 breakeven = round(short["strike"] - credit, 2)
                 pop_implied = round(1 - d, 3)
@@ -278,6 +287,7 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                     "short_bid": short.get("bid"), "short_ask": short.get("ask"), "short_mid": short.get("mid"),
                     "long_bid": long_opt.get("bid"), "long_ask": long_opt.get("ask"), "long_mid": long_opt.get("mid"),
                     "credit_per_share": credit, "credit_usd": credit_usd, "natural_credit_per_share": natural,
+                    "natural_credit_usd": natural_usd, "natural_credit_to_width": natural_ctw,
                     "width_usd": round(width * 100, 2), "max_loss_usd": max_loss,
                     "credit_to_width": ctw, "breakeven": breakeven, "roi": roi,
                     "short_delta": round(float(short.get("delta") or 0), 3), "pop_implied": pop_implied,
@@ -286,15 +296,17 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                     "short_volume": int(short.get("volume") or 0), "short_oi": int(short.get("open_interest") or 0),
                 }
                 # keep the widest credit/width per short leg (best premium efficiency)
-                if best is None or ctw > best["credit_to_width"]:
+                # Rank on the natural basis too — picking the best mid spread and then
+                # gating the natural one can discard a pair that would have qualified.
+                if best is None or natural_ctw > best["natural_credit_to_width"]:
                     best = cand
             if best:
                 # gate annotations (what the strict scanner checks)
                 g = {
                     "delta_cap": abs(best["short_delta"]) <= getattr(config, "SHORT_STRIKE_MAX_DELTA", 0.30),
                     "otm_buffer": otm_buffer_ok(ticker, current_price, best["short_strike"]),
-                    "credit_to_width": best["credit_to_width"] >= getattr(config, "MIN_CREDIT_TO_WIDTH_PCT", 0.15),
-                    "min_credit_usd": best["credit_usd"] >= getattr(config, "MIN_CREDIT_USD", 25),
+                    "credit_to_width": best["natural_credit_to_width"] >= getattr(config, "MIN_CREDIT_TO_WIDTH_PCT", 0.15),
+                    "min_credit_usd": best["natural_credit_usd"] >= getattr(config, "MIN_CREDIT_USD", 25),
                     "liquidity": liquidity_ok(short),
                     "pop": best["pop_implied"] >= getattr(config, "MIN_PROBABILITY_OF_PROFIT", 0.72),
                     "dte_window": getattr(config, "MIN_DTE", 21) <= best["dte"] <= getattr(config, "MAX_DTE", 45),

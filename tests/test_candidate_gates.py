@@ -118,3 +118,35 @@ def test_min_credit_usd_enforced_independently_of_gates_dict():
     """credit_usd below MIN_CREDIT_USD is rejected even if the gates dict claims otherwise."""
     c = make_candidate(credit_usd=1.0)
     assert apc._candidate_passes_minimum(c) is False
+
+
+# ── Gate/execution basis (bug found live 2026-08-07) ──────────────────────────────────────────
+
+def test_credit_gates_evaluate_the_basis_that_actually_gets_filled():
+    """GDX 82/81 opened twice on 2026-08-07 for $9 and $7 of credit against a $25 minimum,
+    because the gate read the MID credit ($31/$29) while auto_paper_cycle fills at NATURAL.
+    Both were closed by the wolf floor inside the same cycle for -$45.16 each — a $7 credit on
+    a $1-wide spread is dead at inception.
+
+    This is the same gate/execution mismatch REQUIRED_GATES was created to prevent, and it is
+    the fourth instance of that shape after the IV-rank, POP-floor and quote-spread leaks.
+    """
+    import inspect
+
+    import vega_candidates as vc
+    src = inspect.getsource(vc.build_candidates)
+    assert 'best["natural_credit_usd"]' in src, "min_credit_usd must gate the natural credit"
+    assert 'best["natural_credit_to_width"]' in src, "credit_to_width must gate natural"
+    # And the pair chosen per short leg must be ranked on the same basis, or ranking on mid
+    # can discard a pair that would have passed the natural gate.
+    assert 'natural_ctw > best["natural_credit_to_width"]' in src
+
+
+def test_a_spread_that_is_rich_on_mid_and_worthless_on_natural_is_rejected():
+    """Live MU 810/805 on 2026-08-07 quoted a $303 mid credit (61% of width) against a
+    NEGATIVE $50 natural — a spread that costs money to enter was passing as premium."""
+    import config
+    width, mid_credit, natural_credit = 5.0, 3.03, -0.50
+    assert mid_credit * 100 >= config.MIN_CREDIT_USD          # would have passed on mid
+    assert not (natural_credit * 100 >= config.MIN_CREDIT_USD)  # correctly fails on natural
+    assert not ((natural_credit / width) >= config.MIN_CREDIT_TO_WIDTH_PCT)

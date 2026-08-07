@@ -255,6 +255,33 @@ WATCHLIST = [
     {"ticker": "GDX",  "type": "ETF",   "note": "Gold Miners ETF — strong VRP"},
     {"ticker": "XLV",  "type": "ETF",   "note": "Healthcare Sector ETF"},
     {"ticker": "ARKK", "type": "ETF",   "note": "ARK Innovation — disruptive tech, high IV"},
+
+    # ── Crypto (2) ──
+    # IBIT/COIN trade on crypto sentiment, not equity macro — zero equity correlation,
+    # structurally elevated IV, and a new VRP dimension the rest of the book doesn't touch.
+    # Sector cap keeps combined crypto exposure to 2 positions max.
+    {"ticker": "IBIT", "type": "ETF",   "note": "iShares Bitcoin ETF — crypto exposure, high IV, zero equity correlation"},
+    {"ticker": "COIN", "type": "Stock", "note": "Coinbase — crypto proxy, very high IV, liquid options"},
+
+    # ── Semiconductor ETF (1) ──
+    # SMH gives broad-sector semi coverage with better VRP stability than individual names.
+    # Complements the existing NVDA/AMD/QCOM/MU individual positions without duplicating them.
+    {"ticker": "SMH",  "type": "ETF",   "note": "VanEck Semiconductor ETF — sector VRP, complements individual semi names"},
+
+    # ── Biotech ETF (1) ──
+    # XBI has among the highest structural VRP of any ETF. The existing healthcare names
+    # (JNJ, PFE, UNH, ABBV, AMGN) are pharma/insurance — XBI fills the biotech gap.
+    {"ticker": "XBI",  "type": "ETF",   "note": "SPDR S&P Biotech ETF — chronically high VRP, best premium-selling ETF in healthcare space"},
+
+    # ── Fixed Income / Macro (1) ──
+    # TLT is the only non-equity, non-crypto name on the watchlist — complete diversification.
+    # Rates vol has been structurally elevated since 2022. Already in SPY_BUFFER_TICKERS.
+    {"ticker": "TLT",  "type": "ETF",   "note": "iShares 20+ Year Treasury — rates vol, macro diversifier, zero equity correlation"},
+
+    # ── Cybersecurity (1) ──
+    # CrowdStrike is the sector leader with consistently high IV and liquid options.
+    # Fills the cybersecurity gap — a major growth sector absent from the current watchlist.
+    {"ticker": "CRWD", "type": "Stock", "note": "CrowdStrike — cybersecurity leader, high IV, growing sector"},
 ]
 
 # ─────────────────────────────────────────────
@@ -411,6 +438,21 @@ TICKER_SECTORS: dict = {
     # ── Sector/Broad ETFs ──
     "XLV":  "healthcare_etf",
     "ARKK": "tech_etf",
+    "SMH":  "tech_etf",
+
+    # ── Biotech ──
+    "XBI":  "biotech",
+
+    # ── Fixed Income / Macro ──
+    "TLT":  "fixed_income",
+
+    # ── Crypto ──
+    # Separate sector so crypto correlation is capped independently of equities.
+    "IBIT": "crypto",
+    "COIN": "crypto",
+
+    # ── Cybersecurity ──
+    "CRWD": "cybersecurity",
 }
 
 # ─────────────────────────────────────────────
