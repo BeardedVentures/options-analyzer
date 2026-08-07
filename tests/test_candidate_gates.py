@@ -216,3 +216,38 @@ def test_evaluate_gates_refuses_to_drift_from_the_contract(monkeypatch):
     with pytest.raises(AssertionError, match="does not emit required gates"):
         A.evaluate_gates({"short_strike": 100.0, "dte": 30, "short_leg": {},
                           "side": "put", "pop": 0.8}, {"ticker": "T", "spot": 110.0})
+
+
+# ── One engine: board and robot must agree ────────────────────────────────────────────────────
+
+def test_the_engine_enforces_the_shared_contract():
+    """Recording the shared gates was not enough. On 2026-08-07 XBI passed every engine check
+    and still failed support_shelter, so the cockpit would have displayed a trade the
+    auto-trader refuses to open. A system that shows one standard and trades another is the
+    exact defect this convergence removes."""
+    import inspect
+
+    import main
+    src = inspect.getsource(main.screen_ticker)
+    assert "ASSESSMENT_GATES" in src, "engine must reject on shared-gate failure"
+    assert "_asmt[\"gates\"]" in src
+
+
+def test_both_paths_call_the_same_gate_implementation():
+    import inspect
+
+    import main
+    import vega_candidates as vc
+    assert "assessment" in inspect.getsource(main.screen_ticker)
+    assert "evaluate_gates" in inspect.getsource(vc.build_candidates)
+
+
+def test_edge_score_lives_in_the_shared_core():
+    """Ranking lived only in main.py, so the scanner sorted on a local heuristic while the
+    board sorted on the real score — two orderings of one opportunity set."""
+    import inspect
+
+    from analysis import assessment as A
+    src = inspect.getsource(A.assess)
+    assert "calculate_edge_score" in src
+    assert '"edge_score"' in src

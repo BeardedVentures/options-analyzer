@@ -797,29 +797,49 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "trade_type": trade_type,
     }
 
-    # ── Entry timing / pattern phase (advisory — does not block) ──
-    # Surfaces WHERE in the pullback this signal fired. A bull put sold early in a pullback
-    # collects less credit for the same delta than one sold late, once put skew has steepened.
+    # ── Shared assessment (analysis/assessment.py) ──
+    # This block used to re-run structure, entry timing and horizon locally, duplicating what
+    # the scanner does. Both now call one implementation, so the board and the auto-trader
+    # cannot describe the same trade differently.
     entry_timing: Dict = {}
-    if getattr(config, "ENTRY_TIMING_ENABLED", True):
-        try:
-            from analysis.entry_timing import assess_entry_timing
-            structure = _structure_read(price_data, tech)
-            entry_timing = assess_entry_timing(
-                strategy=strategy, tech=tech, current_price=current_price,
-                structure=structure)
-            if not entry_timing.get("timing_gate_pass", True):
-                warnings.append(
-                    f"Timing {entry_timing['readiness']} "
-                    f"({entry_timing['phase'].replace('_', ' ').title()}) — {entry_timing['reason']}"
-                )
-        except Exception as e:
-            logger.warning("[timing] entry_timing assessment failed: %s", e)
-    trade["entry_timing"] = entry_timing
-    # Horizon calibration reads the structure that entry_timing just produced, so it has to
-    # run after it — the same ordering trap the vol-surface block hit with `strategy`.
-    trade["horizon"] = _horizon_read(
-        strategy, current_price, tech, short_put, metrics, entry_timing)
+    try:
+        from analysis import assessment as _A
+        _actx = _A.load_context(ticker, price_data=price_data, puts=options,
+                                tech=tech, sentiment=sentiment_label,
+                                earnings_days=days_to_earnings)
+        _actx["term_structure"] = (vol_surface.get("term") or {})
+        _actx["skew"] = (vol_surface.get("skew") or {})
+        _actx["_surface_loaded"] = True          # already fetched above for the edge score
+        _aspread = {
+            "short_strike": short_put["strike"], "long_strike": long_put["strike"],
+            "dte": short_put.get("dte"), "side": "put", "short_leg": short_put,
+            "short_delta": short_put.get("delta"), "short_iv": short_put.get("iv"),
+            "natural_credit_per_share": metrics.get("credit_per_share"),
+            "natural_credit_usd": metrics.get("credit_usd"),
+            "natural_credit_to_width": (trade.get("credit_to_width_pct") or 0) / 100.0,
+            "pop": p_profit, "true_pop": p_profit,
+            "implied_pop": implied_pop,
+        }
+        _asmt = _A.assess(_aspread, _actx, strategy=_A.BULL_PUT)
+        entry_timing = (_asmt["analysis"].get("entry_timing") or {})
+        trade["entry_timing"] = entry_timing
+        trade["horizon"] = _asmt["analysis"].get("horizon") or {}
+        trade["assessment_gates"] = _asmt["gates"]
+        trade["narrative"] = _asmt["narrative"]
+        if not entry_timing.get("timing_gate_pass", True):
+            warnings.append(
+                f"Timing {entry_timing.get('readiness')} — {entry_timing.get('reason', '')}")
+        # ENFORCE the shared contract. Recording it was not enough: on 2026-08-07 XBI passed
+        # every engine check and still failed support_shelter, so the board would have shown a
+        # trade the auto-trader refuses to open. One standard or none.
+        _failed = [k for k, v in _asmt["gates"].items() if not v]
+        if _failed:
+            return _avoid(f"Failed shared gates: {', '.join(_failed)}",
+                          "ASSESSMENT_GATES", tech)
+    except Exception as e:
+        logger.warning("[assessment] shared assessment failed for %s: %s", ticker, e)
+        trade.setdefault("entry_timing", {})
+        trade.setdefault("horizon", {})
 
     # ── Environment heat gauge (advisory — does not block) ──
     env_heat: Dict = {}

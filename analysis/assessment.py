@@ -314,6 +314,39 @@ def assess(spread: Dict, ctx: Dict, strategy: str = BULL_PUT) -> Dict:
     except Exception:
         a["shelter"] = {}
 
+    # ── Edge score ──
+    # Ranking lived only in main.py, so the scanner sorted on a local heuristic while the
+    # board sorted on the real score — two orderings of the same opportunity set. Computed
+    # here when the probability inputs are present; skipped, not faked, when they are not.
+    out["edge_score"] = None
+    out["edge_components"] = {}
+    try:
+        true_pop = spread.get("true_pop")
+        implied = spread.get("implied_pop")
+        if implied is None and spread.get("short_delta") is not None:
+            implied = 1 - abs(float(spread["short_delta"]))
+        if true_pop is not None and implied is not None:
+            from analysis import edge_calculator as ec
+            ep = ec.calculate_edge_points(true_pop, implied).get("edge_points", 0)
+            ts = ctx.get("term_structure") or {}
+            es = ec.calculate_edge_score(
+                ticker=ctx.get("ticker"), strategy=strategy,
+                technical_score=(ctx.get("tech") or {}).get("composite_score", 50) or 50,
+                vrp_pct=(ctx.get("tech") or {}).get("vrp", 0) or 0,
+                edge_points=ep,
+                news_sentiment=(ctx.get("sentiment") or "NEUTRAL"),
+                earnings_days_away=(ctx.get("earnings_days")
+                                    if ctx.get("earnings_days") is not None else 99),
+                fundamentals_score=(ctx.get("tech") or {}).get("fundamentals_score"),
+                skew_raw=(ctx.get("tech") or {}).get("skew_vol_pts"),
+                term_slope=ts.get("slope"),
+                event_expiry_flag=bool(ts.get("event_expiry")))
+            out["edge_score"] = es.get("total_score")
+            out["edge_components"] = es.get("component_breakdown") or {}
+            out["edge_points"] = ep
+    except Exception as e:
+        logger.debug("[assessment] edge score failed: %s", e)
+
     out["narrative"] = _narrate(out, spread, ctx)
     return out
 
