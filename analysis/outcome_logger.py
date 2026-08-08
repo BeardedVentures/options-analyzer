@@ -90,7 +90,9 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
                      source: str = "manual", note: Optional[str] = None,
                      theta=None, allow_duplicate: bool = False,
                      edge_score=None, vrp=None, technical_score=None,
-                     term_slope=None, skew_steepness=None, vix_at_entry=None) -> str:
+                     term_slope=None, skew_steepness=None, vix_at_entry=None,
+                     atm_iv_at_entry=None, rv_at_entry=None,
+                     expected_move_at_entry=None, pop_gap_at_entry=None) -> str:
     """
     Open a PAPER position from a real candidate (or manual entry). Records the entry credit you
     would realistically collect; net P/L on close subtracts Robinhood round-trip commissions.
@@ -216,6 +218,24 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
         "term_slope": term_slope,
         "skew_steepness": skew_steepness,
         "vix_at_entry": vix_at_entry,
+        # ── Raw entry state ──
+        # The score components above are the engine's CONCLUSIONS. These four are the
+        # measurements those conclusions were drawn from, and without them a calibration run
+        # can only ask "was the score right?" — never "was the score wrong because the inputs
+        # were wrong, or because the weighting was?". `vrp` already stores the IV-RV spread;
+        # storing its two halves separately is what makes the spread decomposable after the
+        # fact. NULL on every trade before 2026-08-08 and not recoverable.
+        "atm_iv_at_entry": atm_iv_at_entry,
+        "rv_at_entry": rv_at_entry,
+        # 1 sigma over the holding period, in dollars: spot * iv * sqrt(dte/365).
+        # Calendar days, matching analysis.horizon.expected_move — the same unit the strike
+        # distance and the level cushions are already measured in, so they stay comparable.
+        "expected_move_at_entry": expected_move_at_entry,
+        # true_pop - implied_pop. THE model-edge claim: how much probability the engine thinks
+        # it sees that the market's delta does not. Every trade asserts it and nothing recorded
+        # it, so the one number VEGA most needs graded was the one number never written down.
+        # Negative means the engine is LESS confident than the market — worth knowing too.
+        "pop_gap_at_entry": pop_gap_at_entry,
         "max_loss_per_contract": (round((width - credit) * 100, 2) if (width and credit < width) else None),
         # Live mark (updated on each rescan while open) → unrealized P/L
         "current_mark": None,

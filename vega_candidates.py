@@ -44,6 +44,7 @@ import webbrowser
 from datetime import datetime
 from itertools import groupby
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -186,6 +187,25 @@ def _quote_spread_ok(c: dict) -> bool:
             and _leg_spread_pct(c.get("long_bid"), c.get("long_ask")) <= cap)
 
 
+def set_pop_gap(c: dict) -> Optional[float]:
+    """true_pop - pop_implied: the model-edge claim, written down.
+
+    Every trade asserts that the engine's drift-removed probability beats the one the market's
+    delta implies. That assertion was computed nowhere and stored nowhere, so the central claim
+    of the whole system was the one number the ledger could never grade.
+
+    None — not 0.0 — when true_pop is absent. The fast scan has no calibrated POP until
+    attach_true_pop runs, and a zero would read as "no edge claimed" rather than "no claim
+    made"; the calibration engine has to be able to tell those apart. Called from both
+    build_candidates and attach_true_pop because true_pop arrives on different paths at
+    different times, and it is idempotent by construction.
+    """
+    tp = c.get("true_pop")
+    c["pop_gap"] = (round(float(tp) - float(c.get("pop_implied") or 0), 4)
+                    if tp is not None else None)
+    return c["pop_gap"]
+
+
 def attach_true_pop(cands: list, current_price: float, prices_hist) -> int:
     """Attach the engine's drift-removed POP to fast-scan candidates.
 
@@ -221,6 +241,7 @@ def attach_true_pop(cands: list, current_price: float, prices_hist) -> int:
             c["true_pop_confidence"] = p_profit.get("confidence")
             c["true_pop_drift_mode"] = p_profit.get("drift_mode")
             c["p_max_profit"] = p_maxprofit.get("true_pop")
+            set_pop_gap(c)          # true_pop only exists now; the build-time call saw None
             if c["true_pop"] is not None:
                 n += 1
         except Exception:
@@ -359,6 +380,7 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                 best["gates"] = g
                 best["gates_passed"] = sum(1 for v in g.values() if v)
                 best["gates_total"] = len(g)
+                set_pop_gap(best)
                 # simple ranking score: reward premium efficiency + delta near 0.20 target + liquidity
                 # Rank on the SAME basis the gates enforce and the desk fills: natural, not mid.
                 # Ranking on mid while gating on natural made the scan log lie about its own

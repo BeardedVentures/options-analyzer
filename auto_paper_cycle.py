@@ -171,6 +171,50 @@ def _missing_gates(c: Dict) -> List[str]:
     return [k for k in getattr(config, "REQUIRED_GATES", ()) if k not in gates]
 
 
+def _entry_state(c: Dict, ctx: Dict) -> Dict:
+    """The raw measurements behind the entry, pulled from the candidate and its row context.
+
+    Every field degrades to None independently. A missing IV must not cost the trade its
+    pop_gap, and a fast-scan candidate with no calibrated true_pop must record None rather
+    than a zero that would later read as "the engine claimed no edge".
+    """
+    def _f(x):
+        try:
+            return float(x) if x is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    atm_iv = _f(ctx.get("atm_iv")) or _f(c.get("short_iv"))
+    spot = _f(ctx.get("spot")) or _f(ctx.get("price"))
+    dte = c.get("dte")
+
+    em = None
+    if atm_iv and spot and dte:
+        try:
+            from analysis.horizon import expected_move
+            # Reuse rather than reimplement: horizon already defines the 1-sigma move as
+            # spot*iv*sqrt(dte/365) over CALENDAR days, and the strike distances and level
+            # cushions on the board are already expressed in that unit. A second formula here
+            # — on 252 trading days, say — would overstate the move by ~20% and make the two
+            # silently incomparable.
+            em = expected_move(spot, atm_iv, int(dte))
+            em = round(em, 4) if em is not None else None
+        except Exception as e:                       # pragma: no cover - defensive
+            _log(f"expected_move failed for {c.get('ticker')}: {e}")
+
+    true_pop = _f(c.get("true_pop") or c.get("pop_true"))
+    gap = c.get("pop_gap")
+    if gap is None and true_pop is not None:
+        gap = round(true_pop - (_f(c.get("pop_implied")) or 0.0), 4)
+
+    return {
+        "atm_iv_at_entry": round(atm_iv, 4) if atm_iv else None,
+        "rv_at_entry": (lambda r: round(r, 4) if r else None)(_f(ctx.get("rv"))),
+        "expected_move_at_entry": em,
+        "pop_gap_at_entry": gap,
+    }
+
+
 def _candidate_passes_minimum(c: Dict, verbose: bool = False) -> bool:
     """Gate a candidate for auto-open. `verbose` logs the failing gates for picked candidates.
 
@@ -370,6 +414,14 @@ def _auto_open_from_candidates(cand_data: Dict, source_file: str) -> int:
                 )
                 continue
 
+            # Raw entry state. The score components below are the engine's CONCLUSIONS; these
+            # are the measurements they were drawn from. Without them a calibration run can
+            # only ask whether a score was right, never whether it was wrong because the
+            # inputs were wrong or because the weighting was. All of it is already sitting in
+            # the row context — it was simply never persisted.
+            _ctx = row.get("ctx") or {}
+            _entry = _entry_state(c, _ctx)
+
             tid = ol.open_paper_trade(
                 ticker=ticker,
                 short_strike=c["short_strike"],
@@ -400,7 +452,11 @@ def _auto_open_from_candidates(cand_data: Dict, source_file: str) -> int:
                 technical_score=c.get("composite_score") or c.get("technical_score"),
                 term_slope=c.get("term_slope"),
                 skew_steepness=c.get("skew_steepness"),
-                vix_at_entry=(row.get("ctx") or {}).get("vix"),
+                vix_at_entry=_ctx.get("vix"),
+                atm_iv_at_entry=_entry["atm_iv_at_entry"],
+                rv_at_entry=_entry["rv_at_entry"],
+                expected_move_at_entry=_entry["expected_move_at_entry"],
+                pop_gap_at_entry=_entry["pop_gap_at_entry"],
             )
             # Write down every falsifiable claim this trade carries. The engine has always
             # made these assertions and always discarded them, which is why nothing it
