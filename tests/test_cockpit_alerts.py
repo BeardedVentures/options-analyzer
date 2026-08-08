@@ -183,3 +183,66 @@ def test_board_freshness_kept_its_own_cell_under_its_real_name(temp_dq):
     assert ">Chain quality<" in html
     assert ">Data quality<" not in html, "the misleading label must be gone from the UI"
     assert "20%" in html and "GDX" in html
+
+
+# ── Payoff diagram, two modes (P1-7) ──────────────────────────────────────────────────────────
+
+def _svg(**kw):
+    return app.payoff_svg(100.0, 95.0, 1.20, 5.0, **kw)
+
+
+def test_both_modes_mark_max_profit_and_max_loss():
+    """The break-even dot alone shows where the trade turns and not what it risks getting
+    there — and on a credit spread the loss endpoint is by far the larger number."""
+    for mode in ("candidate", "position"):
+        svg = _svg(mode=mode)
+        assert svg.count("<circle") == 3, "break-even, max profit and max loss"
+        assert 'fill="#00C97A"' in svg and 'fill="#F0455A"' in svg
+
+
+def test_candidate_mode_shows_cushion_and_no_pl():
+    svg = _svg(spot=110.0, mode="candidate")
+    assert "9.1% cushion" in svg
+    assert "$" not in svg
+
+
+def test_cushion_can_be_passed_explicitly():
+    assert "12.0% cushion" in _svg(mode="candidate", cushion_pct=0.12)
+
+
+def test_position_mode_shows_unrealized_and_mark_not_cushion():
+    svg = _svg(mode="position", unrealized=-45.16, current_mark=1.55)
+    assert "$-45" in svg and "@$1.55" in svg
+    assert "cushion" not in svg
+
+
+def test_a_winning_position_reads_green_and_a_losing_one_red():
+    assert 'fill="#00C97A">$+80' in _svg(mode="position", unrealized=80.0)
+    assert 'fill="#F0455A">$-80' in _svg(mode="position", unrealized=-80.0)
+
+
+def test_the_mark_is_never_plotted_as_a_point_on_the_curve():
+    """This curve is P/L AT EXPIRY. A position's mark today carries time value the curve does
+    not describe, so drawing it on the line would assert a P/L the trade is not at. It is a
+    label, and the circle count proves no fourth point was added."""
+    assert _svg(mode="position", unrealized=-45.0, current_mark=1.55).count("<circle") == 3
+
+
+def test_an_unmarked_position_renders_without_labels():
+    svg = _svg(mode="position")
+    assert svg.startswith("<svg") and "$" not in svg
+
+
+def test_the_default_mode_is_unchanged_for_existing_callers():
+    assert _svg() == _svg(mode="candidate")
+
+
+def test_a_junk_spread_still_renders_nothing():
+    assert app.payoff_svg(None, 95.0, 1.20, 5.0) == ""
+    assert app.payoff_svg(100.0, 95.0, 1.20, 0) == ""
+
+
+def test_open_positions_use_position_mode():
+    src = inspect.getsource(app.open_section)
+    assert 'mode="position"' in src
+    assert "unrealized=" in src and "current_mark=" in src

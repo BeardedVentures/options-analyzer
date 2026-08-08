@@ -158,7 +158,19 @@ def market_status():
 # ─────────────────────────────────────────────────────────────────────────────
 # Visual P&L payoff diagram (bull put spread) — inline SVG, dark theme
 # ─────────────────────────────────────────────────────────────────────────────
-def payoff_svg(short, long_, credit, width, spot=None, w=180, h=58):
+def payoff_svg(short, long_, credit, width, spot=None, w=180, h=58,
+               mode="candidate", cushion_pct=None, unrealized=None, current_mark=None):
+    """The spread's P/L at expiry, in two modes.
+
+    CANDIDATE mode answers "how much room does this have?" — the cushion between spot and the
+    short strike, which is the number that decides whether to open it.
+
+    POSITION mode answers "where is this now?" — unrealized P/L and the current mark.
+
+    The mark is deliberately NOT plotted as a point on the curve. This curve is P/L AT EXPIRY,
+    and a position's mark today includes time value that the curve does not describe; drawing
+    it on the line would assert the trade is at a P/L it is not at. It gets a label instead.
+    """
     short = _f(short); long_ = _f(long_); credit = _f(credit); width = _f(width)
     if None in (short, long_, credit, width) or width <= 0:
         return ""
@@ -187,13 +199,38 @@ def payoff_svg(short, long_, credit, width, spot=None, w=180, h=58):
         sx = px(sp)
         spot_line = (f'<line x1="{sx:.1f}" y1="{pad}" x2="{sx:.1f}" y2="{h-pad}" '
                      f'stroke="#4E8EF5" stroke-width="1" stroke-dasharray="2,2"/>')
+    # The two endpoints the break-even dot was always missing its counterparts to. A payoff
+    # diagram with only a break-even marked shows where the trade turns and not what it is
+    # risking to get there — and on a credit spread the loss endpoint is the larger number.
+    endpoints = (f'<circle cx="{px(short):.1f}" cy="{py(maxpl):.1f}" r="2.4" fill="#00C97A"/>'
+                 f'<circle cx="{px(long_):.1f}" cy="{py(minpl):.1f}" r="2.4" fill="#F0455A"/>')
+
+    overlay = ""
+    if mode == "position":
+        un = _f(unrealized)
+        if un is not None:
+            overlay += (f'<text x="{pad}" y="{pad+7}" font-size="9" font-weight="700" '
+                        f'fill="{"#00C97A" if un >= 0 else "#F0455A"}">${un:+,.0f}</text>')
+        mk = _f(current_mark)
+        if mk is not None:
+            overlay += (f'<text x="{w-pad}" y="{pad+7}" font-size="8.5" text-anchor="end" '
+                        f'fill="#7f8794">@${mk:.2f}</text>')
+    else:
+        cush = _f(cushion_pct)
+        if cush is None and sp and sp > 0:
+            cush = (sp - short) / sp          # bull put: room between spot and the short strike
+        if cush is not None:
+            overlay += (f'<text x="{pad}" y="{pad+7}" font-size="9" font-weight="600" '
+                        f'fill="#7f8794">{cush*100:.1f}% cushion</text>')
+
     return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" style="vertical-align:middle">'
             f'<polygon points="{loss_pts}" fill="#F0455A" fill-opacity="0.16"/>'
             f'<polygon points="{prof_pts}" fill="#00C97A" fill-opacity="0.16"/>'
             f'<line x1="{pad}" y1="{zy:.1f}" x2="{w-pad}" y2="{zy:.1f}" stroke="#2a2f3a" stroke-width="1"/>'
             f'<polyline points="{line_pts}" fill="none" stroke="#7f8794" stroke-width="1.4"/>'
+            f'{endpoints}'
             f'<circle cx="{px(be):.1f}" cy="{zy:.1f}" r="2.6" fill="#F0B429"/>'
-            f'{spot_line}</svg>')
+            f'{spot_line}{overlay}</svg>')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2365,8 +2402,11 @@ def open_section(open_):
             un_html = f'<span class="{"pos" if tot >= 0 else "neg"} num">${tot:+.0f}</span><div class="dim num">@${esc(r.get("current_mark"))}</div>'
         else:
             un_html = '<span class="dim">—</span>'
-        diagram = payoff_svg(r.get("short_strike"), r.get("long_strike"), r.get("actual_fill_credit"),
-                             r.get("spread_width"), None)
+        diagram = payoff_svg(r.get("short_strike"), r.get("long_strike"),
+                             r.get("actual_fill_credit"), r.get("spread_width"), None,
+                             mode="position",
+                             unrealized=(un * ct) if isinstance(un, (int, float)) else None,
+                             current_mark=r.get("current_mark"))
         rows += (
             f'<tr><td class="l"><b>{esc(r.get("ticker"))}</b></td><td class="l">{diagram}</td>'
             f'<td class="l num">{esc(r.get("short_strike"))}/{esc(r.get("long_strike"))}</td>'
