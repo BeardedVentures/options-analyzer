@@ -117,11 +117,16 @@ def test_playbook_entries_open_the_matching_row():
 
 # ── System status ─────────────────────────────────────────────────────────────────────────────
 
-def test_system_status_aggregates_all_four_readouts():
+def test_system_status_aggregates_every_readout():
+    """"Data quality" split in two on 2026-08-08. It had always measured how OLD the board was,
+    which is a different question from how much of the chain was actually quotable — a board can
+    be seconds fresh and built on a chain that was 20% there."""
     b = _board([_t()])
     t = _txt(vega_app._mc_system_status(b, b["trades"], "PROVISIONAL"))
-    for lab in ("Hard gates", "Data quality", "Figures reconciled", "Confidence"):
+    for lab in ("Hard gates", "Chain quality", "Board freshness",
+                "Figures reconciled", "Confidence"):
         assert lab in t
+    assert "Data quality" not in t
 
 
 def test_low_confidence_anywhere_pulls_the_board_confidence_down():
