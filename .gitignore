@@ -28,6 +28,9 @@ logs/
 # ── Runtime model state (cached in CI; do not commit) ──
 data/iv_history/*.json
 
+# ── Chain-quality readings (one row per ticker per scan, several scans a day) ──
+data/data_quality_log.json
+
 # ── Sentiment disk cache (NEWS_CACHE_TTL_MIN, regenerated hourly on every scan) ──
 data/cache/
 
