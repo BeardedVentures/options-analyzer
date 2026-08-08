@@ -86,6 +86,16 @@ STOP_LOSS_MULTIPLIER = 1.5        # Stop if spread reaches 1.5x credit received 
 ALLOW_OVERSIZED_TRADES = True     # Account-agnostic output — risk tiers handle sizing
 MAX_QUOTE_SPREAD_PCT = 0.35       # Reject option legs with (ask-bid)/mid above this threshold
 
+# ── Chain data quality (2026-08-08) ──────────────────────────────────────────
+# Every signal VEGA produces is a statement about an options chain, and nothing used to record
+# how much of that chain was actually there. The yfinance fallback discards 30-45% of records
+# as stale or unquoted; an IV rank, a skew read or a delta measured over the remainder is a
+# read of the survivors. It looked identically confident either way.
+CHAIN_QUALITY_LOG_ENABLED = True  # Write a per-ticker per-scan reading to data/data_quality_log.json
+CHAIN_QUALITY_GATE_ENABLED = True # Below the floor, return an empty chain instead of a thin one
+CHAIN_QUALITY_MIN_RATIO = 0.30    # Floor. Under 30% quotable, skip the ticker for this scan.
+CHAIN_QUALITY_GOOD_RATIO = 0.70   # At or above this the chain reads green in the cockpit tile.
+
 # ─────────────────────────────────────────────
 # GATE ENFORCEMENT CONTRACT
 # ─────────────────────────────────────────────

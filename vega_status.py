@@ -87,8 +87,46 @@ def health():
           f"   (hard floor {getattr(config, 'WOLF_STOP_MULTIPLIER', '?')}x credit)")
 
 
+def data_quality():
+    """How much of the chain the last scan actually got to read.
+
+    Sits directly under health because it qualifies everything below it: a record and a
+    calibration built on 40%-quotable chains are measurements of the survivors, and until this
+    number is on the screen there is no way to tell that from a measurement of the market.
+    """
+    _hdr("2 · CHAIN DATA QUALITY")
+    try:
+        from data import data_quality_log as dq
+    except Exception as e:
+        print(f"  data quality log unavailable: {e}")
+        return
+
+    s = dq.latest_scan()
+    if not s["count"]:
+        print(f"  {_c('No readings yet.', D)} Populates on the next scan "
+              f"(fetcher.get_options_chain writes one row per ticker).")
+        return
+
+    floor, worst = s["floor"], s["worst_ratio"]
+    col = {"green": G, "amber": Y, "red": R}.get(dq.band(worst), D)
+    age = _age(s["at"])
+    hrs = age.total_seconds() / 3600 if age else None
+    print(f"  last scan             {s['count']} tickers · "
+          f"{_c(f'{hrs:.1f}h ago', G if hrs < 4 else Y) if hrs is not None else _c('age unknown', D)}")
+    print(f"  worst chain           {_c(f'{worst:.0%}', col)} quotable  ({s['worst_ticker']})")
+    print(f"  below the {floor:.0%} floor    "
+          f"{_c(str(s['below_floor']), R if s['below_floor'] else G)} "
+          f"{'ticker skipped' if s['below_floor'] == 1 else 'tickers skipped'}")
+    if s["sources"]:
+        print(f"  sources               "
+              f"{', '.join(f'{k} {v}' for k, v in sorted(s['sources'].items()))}")
+    if not getattr(config, "SKEW_SCORING_ENABLED", True):
+        print(f"  {_c('skew scoring OFF', Y)} — re-enable once these ratios hold above "
+              f"{getattr(config, 'CHAIN_QUALITY_GOOD_RATIO', 0.70):.0%}.")
+
+
 def record():
-    _hdr("2 · THE RECORD, BY COHORT")
+    _hdr("3 · THE RECORD, BY COHORT")
     rows = ol.load_records()
     closed = [r for r in rows if r.get("status") == "closed"]
     if not closed:
@@ -112,7 +150,7 @@ def record():
 
 
 def learning():
-    _hdr("3 · WHAT IT HAS LEARNED")
+    _hdr("4 · WHAT IT HAS LEARNED")
     try:
         from analysis import predictions as pred
         g = pred.grade()
@@ -177,6 +215,7 @@ def next_steps():
 if __name__ == "__main__":
     print(f"\n{B}VEGA STATUS{X}  ·  {datetime.now():%Y-%m-%d %H:%M}")
     health()
+    data_quality()
     record()
     learning()
     next_steps()

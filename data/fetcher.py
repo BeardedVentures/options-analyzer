@@ -37,6 +37,11 @@ logger = logging.getLogger(__name__)
 _cache: Dict[str, Any] = {}
 _call_timestamps: List[float] = []
 
+# One id per process, stamped onto every chain-quality reading, so the log can be sliced back
+# into scans afterwards. A cycle is one process; without this the readings are an undifferentiated
+# stream and "the worst ticker in the last scan" has no way to know where the last scan began.
+_SCAN_ID = datetime.now().strftime("%Y%m%dT%H%M%S")
+
 RATE_LIMIT_DELAY = 0.25   # seconds between yfinance calls
 MIN_CALL_INTERVAL = 0.1   # minimum seconds between any API call
 
@@ -551,6 +556,39 @@ def _parse_polygon_options(ticker: str, current_price: float,
     return records
 
 
+def _option_record_is_usable(opt: Dict) -> bool:
+    """Is this one option record a real, quotable market?
+
+    Extracted from _quality_filter_options so the SAME predicate can measure a chain without
+    filtering it. The Polygon path does not filter, so a ratio expressed as
+    len(after_filter)/len(before_filter) would read 1.000 there forever — a quality metric that
+    is arithmetically incapable of reporting a problem on the primary data source. Measuring
+    with the predicate directly is what lets the number be wrong.
+    """
+    bid = float(opt.get("bid", 0) or 0)
+    ask = float(opt.get("ask", 0) or 0)
+    mid = float(opt.get("mid", 0) or 0)
+    volume = int(opt.get("volume", 0) or 0)
+    oi = int(opt.get("open_interest", 0) or 0)
+
+    if bid == 0 and ask == 0:                       # no market / stale
+        return False
+    if ask > 0 and bid > 0 and ask < bid:           # crossed market -- data error
+        return False
+    if mid > 0 and (ask - bid) / mid > 0.80:        # impossibly wide -- stale pricing
+        return False
+    if volume == 0 and oi == 0:                     # no activity at all
+        return False
+    return True
+
+
+def measure_chain_quality(records: List[Dict]) -> tuple:
+    """(raw_count, usable_count, usable_ratio) for a chain, without modifying it."""
+    raw = len(records or [])
+    usable = sum(1 for opt in (records or []) if _option_record_is_usable(opt))
+    return raw, usable, (round(usable / raw, 4) if raw else 0.0)
+
+
 def _quality_filter_options(records: List[Dict], ticker: str, source: str) -> List[Dict]:
     """
     Filter out stale or unusable option records from the yfinance fallback.
@@ -566,28 +604,7 @@ def _quality_filter_options(records: List[Dict], ticker: str, source: str) -> Li
     if not records:
         return records
 
-    valid = []
-    for opt in records:
-        bid = float(opt.get("bid", 0) or 0)
-        ask = float(opt.get("ask", 0) or 0)
-        mid = float(opt.get("mid", 0) or 0)
-        volume = int(opt.get("volume", 0) or 0)
-        oi = int(opt.get("open_interest", 0) or 0)
-
-        # Both sides zero -- no market / stale
-        if bid == 0 and ask == 0:
-            continue
-        # Crossed market -- data error
-        if ask > 0 and bid > 0 and ask < bid:
-            continue
-        # Impossibly wide spread -- stale pricing (> 80% of mid)
-        if mid > 0 and (ask - bid) / mid > 0.80:
-            continue
-        # No market activity at all -- liquidity concern
-        if volume == 0 and oi == 0:
-            continue
-
-        valid.append(opt)
+    valid = [opt for opt in records if _option_record_is_usable(opt)]
 
     removed = len(records) - len(valid)
     if removed > 0:
@@ -675,18 +692,59 @@ def get_options_chain(ticker: str,
 
     # Tier 1: Polygon.io (real Greeks, 15-min delayed)
     records: List[Dict] = []
+    chain_source = "none"
     if config.POLYGON_API_KEY:
         records = _parse_polygon_options(ticker, current_price, min_dte, max_dte)
+        if records:
+            chain_source = "polygon"
 
     # Tier 2: yfinance fallback (BS-calculated Greeks)
     if not records:
         logger.debug(f"[fetcher] Polygon returned no data for {ticker} -- falling back to yfinance")
-        records = _parse_yfinance_options(ticker, current_price, min_dte, max_dte)
-        records = _quality_filter_options(records, ticker, "yfinance")
+        raw_yf = _parse_yfinance_options(ticker, current_price, min_dte, max_dte)
+        records = _quality_filter_options(raw_yf, ticker, "yfinance")
+        chain_source = "yfinance"
         _log_api_call("yfinance.options", ticker, len(records) > 0)
+        # Measure BEFORE the filter on this path: what arrived is the honest denominator.
+        raw_count, usable_count, ratio = len(raw_yf), len(records), (
+            round(len(records) / len(raw_yf), 4) if raw_yf else 0.0)
+    else:
+        # Polygon is not filtered, so measure it with the same predicate rather than
+        # comparing a list to itself. See _option_record_is_usable.
+        raw_count, usable_count, ratio = measure_chain_quality(records)
+
+    _record_chain_quality(ticker, chain_source, raw_count, usable_count, ratio)
+
+    # The floor. Below it the chain is too thin to reason over, and every downstream signal —
+    # IV rank, skew, term structure, the delta the strike is chosen on — becomes a statement
+    # about the handful of contracts that happened to quote rather than about the underlying.
+    # Returning [] empties the board for this ticker, which is the correct outcome: no read is
+    # better than a confident read of nothing.
+    floor = float(getattr(config, "CHAIN_QUALITY_MIN_RATIO", 0.30))
+    if raw_count > 0 and ratio < floor and getattr(config, "CHAIN_QUALITY_GATE_ENABLED", True):
+        logger.warning(
+            f"[fetcher] SKIP_DATA_QUALITY {ticker}: only {usable_count}/{raw_count} "
+            f"({ratio:.0%}) of the {chain_source} chain is quotable, floor is {floor:.0%} "
+            f"-- skipping this ticker rather than scoring a chain that is mostly absent."
+        )
+        _cache[cache_key] = []
+        return []
 
     _cache[cache_key] = records
     return records
+
+
+def _record_chain_quality(ticker: str, chain_source: str, raw_count: int,
+                          usable_count: int, ratio: float) -> None:
+    """Persist the reading. Never raises -- instrumentation must not be able to fail a scan."""
+    if not getattr(config, "CHAIN_QUALITY_LOG_ENABLED", True):
+        return
+    try:
+        from data import data_quality_log
+        data_quality_log.record(ticker, chain_source, raw_count, usable_count,
+                                scan_id=_SCAN_ID)
+    except Exception as e:                           # pragma: no cover - defensive
+        logger.debug("[fetcher] chain-quality logging failed for %s: %s", ticker, e)
 
 
 # ─────────────────────────────────────────────
