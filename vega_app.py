@@ -723,6 +723,18 @@ input.n{width:58px}
 .empty{color:var(--ink3);font-style:italic;padding:14px;background:var(--panel);border:1px dashed var(--line);border-radius:10px}
 .flash{background:#10233b;border:1px solid #204063;border-radius:9px;padding:9px 13px;margin:10px 0;font-size:13px}
 .warn{background:var(--ambersoft);border:1px solid #4d3f16;border-radius:9px;padding:9px 13px;margin:10px 0;font-size:13px;color:var(--amber)}
+.ravens{margin:10px 0 14px}
+.rav{border-radius:9px;padding:10px 13px;margin-bottom:7px;font-size:12.5px;line-height:1.5;border:1px solid var(--line);background:var(--panel2);border-left-width:3px;border-left-style:solid}
+.rav .rhd{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:3px}
+.rav .rtag{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border-radius:4px}
+.rav .rtk{font-weight:700;font-size:13px}
+.rav .rwhen{color:var(--ink4);font-size:11px;margin-left:auto}
+.rav .rtxt{color:var(--ink2)}
+.rav .rmeta{color:var(--ink3);font-size:11px;margin-top:4px}
+.rav.tension{border-left-color:var(--amber);background:var(--ambersoft)}
+.rav.tension .rtag{background:rgba(240,180,41,.18);color:var(--amber)}
+.rav.blind{border-left-color:var(--ink3);background:var(--panel2)}
+.rav.blind .rtag{background:rgba(255,255,255,.07);color:var(--ink3)}
 form.inline{display:inline-flex;gap:5px;align-items:center;margin:0}
 .stars{letter-spacing:2px;font-size:15px}
 .foot{color:var(--ink4);font-size:11px;margin:26px 0;line-height:1.6}
@@ -2037,9 +2049,14 @@ def _mc_system_status(board, trades, tier):
     gates_ok = gt and gp == gt
 
     fresh_label, fcls, _stale = _freshness(board)
-    quality = "Good" if board.get("source") == "engine" and not _stale else (
+    # This cell was labelled "Data quality" and measured how OLD the board was. Two different
+    # questions wearing one name: a board can be seconds old and built on a chain that was 20%
+    # quotable. Freshness keeps its cell under its real name; quality gets its own, from the
+    # per-scan readings fetcher now writes.
+    fresh = "Good" if board.get("source") == "engine" and not _stale else (
         "Stale" if _stale else "Provisional")
-    qcol = "var(--green)" if quality == "Good" else "var(--amber)"
+    fcol = "var(--green)" if fresh == "Good" else "var(--amber)"
+    chain_val, chain_col, chain_sub = _chain_quality_cell()
 
     rec_all = all(_reconcile(t)[0] for t in trades) if trades else True
     confs = [(t.get("true_pop_conf") or "").upper() for t in trades if t.get("true_pop_conf")]
@@ -2049,16 +2066,40 @@ def _mc_system_status(board, trades, tier):
     ccol = ("var(--green)" if conf == "HIGH" else
             "var(--red)" if conf == "LOW" else "var(--amber)")
 
-    def cell(lab, val, col):
+    def cell(lab, val, col, sub=""):
         return (f'<div class="cell"><div class="lab">{lab}</div>'
-                f'<div class="val" style="color:{col}">{val}</div></div>')
+                f'<div class="val" style="color:{col}">{val}</div>'
+                + (f'<div class="dim">{esc(sub)}</div>' if sub else '') + '</div>')
     return ('<div class="mcstat">'
             + cell("Hard gates", gates, "var(--green)" if gates_ok else "var(--amber)")
-            + cell("Data quality", quality, qcol)
+            + cell("Chain quality", chain_val, chain_col, chain_sub)
+            + cell("Board freshness", fresh, fcol)
             + cell("Figures reconciled", "Yes" if rec_all else "Check",
                    "var(--green)" if rec_all else "var(--amber)")
             + cell("Confidence", conf.title(), ccol)
             + '</div>')
+
+
+def _chain_quality_cell():
+    """(value, colour, subtitle) for the chain-quality readout.
+
+    Reports the WORST ticker in the last scan, not the mean. An average of 0.82 across 56
+    tickers is compatible with the one name you were about to trade being 20% quotable, and
+    that name is the only one the number needed to warn you about.
+    """
+    try:
+        from data import data_quality_log as dq
+        s = dq.latest_scan()
+    except Exception:
+        return "—", "var(--ink3)", "unavailable"
+    if not s["count"] or s["worst_ratio"] is None:
+        return "—", "var(--ink3)", "no readings yet"
+    col = {"green": "var(--green)", "amber": "var(--amber)",
+           "red": "var(--red)"}.get(dq.band(s["worst_ratio"]), "var(--ink3)")
+    sub = f'worst: {s["worst_ticker"]}'
+    if s["below_floor"]:
+        sub += f' · {s["below_floor"]} below floor'
+    return f'{s["worst_ratio"]*100:.0f}%', col, sub
 
 
 def view_today(board, s, tier):
@@ -2231,6 +2272,86 @@ def portfolio_strip(open_):
             f'<div><span>Unrealized P/L</span>{unreal_html}</div></div>')
 
 
+# ── Ravens alerts ───────────────────────────────────────────────────────────
+# WHY THIS READS raven_alerts AND NOT thesis_status.
+#
+# The build plan specified cards keyed on thesis_status, with a red WOLF card. That card
+# could never render. WOLF and VIOLATED-with-agreement resolve to WOLF_CLOSE and CLOSE in
+# odin.synthesize, and auto_paper_cycle closes the position on both inside the same cycle —
+# so by the time the cockpit lists a position as OPEN, those states are gone. The two
+# recommendations that PERSIST on an open position are exactly the two the plan said did not
+# exist: HOLD_TENSION and MUNINN_BLIND, appended to the trade by _record_raven_alert.
+#
+# Both mean the same thing operationally: the system has deliberately declined to act and is
+# handing the decision to Josh. That is the only class of event that belongs at the top of
+# this page, and until now it was written to the ledger and to a log file and shown nowhere.
+
+_RAVEN_CARDS = {
+    "HOLD_TENSION": ("tension", "Ravens disagree",
+                     "Thought says the structure is broken; memory says situations like this "
+                     "recovered. Hold deliberately or close deliberately — but decide."),
+    "MUNINN_BLIND": ("blind", "Memory is blind",
+                     "The thesis is under strain and there is no comparable history to weigh "
+                     "against it. No base rate exists yet; this one is yours."),
+}
+
+
+def _raven_age(ts):
+    try:
+        d = datetime.now() - datetime.fromisoformat(str(ts))
+    except Exception:
+        return ""
+    h = d.total_seconds() / 3600
+    if h < 1:
+        return f"{int(d.total_seconds() // 60)}m ago"
+    return f"{h:.0f}h ago" if h < 48 else f"{h / 24:.0f}d ago"
+
+
+def raven_alerts(open_):
+    """The unresolved raven divergences across every open position, newest first.
+
+    Only the LATEST alert per position is shown. A position under sustained strain re-alerts
+    on every cycle, and eleven copies of one disagreement would bury the other ten positions —
+    the repeat count carries that information without the volume.
+    """
+    cards = []
+    for r in open_ or []:
+        alerts = [a for a in (r.get("raven_alerts") or [])
+                  if a.get("recommendation") in _RAVEN_CARDS]
+        if not alerts:
+            continue
+        a = alerts[-1]
+        cls, title, gloss = _RAVEN_CARDS[a["recommendation"]]
+
+        bits = []
+        if a.get("huginn_status"):
+            bits.append(f'Huginn: {esc(a["huginn_status"])}')
+        prob = a.get("muninn_probability")
+        bits.append(f"Muninn: {prob*100:.0f}% recovered in comparable situations"
+                    if isinstance(prob, (int, float))
+                    else "Muninn: no comparable history")
+        if a.get("confidence"):
+            bits.append(f'confidence {esc(a["confidence"])}')
+        if len(alerts) > 1:
+            bits.append(f"raised {len(alerts)}x")
+
+        cards.append(
+            f'<div class="rav {cls}"><div class="rhd">'
+            f'<span class="rtag">{esc(title)}</span>'
+            f'<span class="rtk">{esc(r.get("ticker"))} '
+            f'{esc(r.get("short_strike"))}/{esc(r.get("long_strike"))}</span>'
+            f'<span class="rwhen">{esc(_raven_age(a.get("at")))}</span></div>'
+            f'<div class="rtxt">{esc(a.get("plain_english") or gloss)}</div>'
+            f'<div class="rmeta">{" · ".join(bits)}</div></div>'
+        )
+    if not cards:
+        return ""
+    n = len(cards)
+    return (f'<div class="ravens"><h2 style="margin-bottom:6px">Needs your decision '
+            f'<span class="dim">({n} position{"" if n == 1 else "s"})</span></h2>'
+            + "".join(cards) + '</div>')
+
+
 def open_section(open_):
     if not open_:
         return ('<h2>Open positions</h2>' + portfolio_strip([]) +
@@ -2259,7 +2380,10 @@ def open_section(open_):
             f'<input type="text" name="reason" placeholder="reason" style="width:110px">'
             f'<button class="close" type="submit" data-busy="Closing…">Close</button></form></td></tr>'
         )
-    return (f'<h2>Open positions</h2>{portfolio_strip(open_)}'
+    # Alerts sit ABOVE the strip and the table, without scrolling. A decision the system has
+    # refused to make on its own is not a footnote to the position list.
+    return (raven_alerts(open_) +
+            f'<h2>Open positions</h2>{portfolio_strip(open_)}'
             f'<div class="board"><table><thead><tr class="col"><th class="l">Ticker</th><th class="l">Payoff</th>'
             f'<th class="l">Short/Long</th><th class="l">Exp</th><th>Credit/sh</th><th>Ct</th><th>Max loss</th>'
             f'<th>Unreal P/L</th><th class="l">Close (enter exit debit)</th></tr></thead><tbody>{rows}</tbody></table></div>')
