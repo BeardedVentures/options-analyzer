@@ -62,10 +62,72 @@ def vix_bucket(v: Optional[float]) -> Optional[str]:
     return "high" if v > 25 else ("mid" if v > 15 else "low")
 
 
+def dte_bucket(dte: Optional[float]) -> Optional[str]:
+    """Boundaries chosen to match how the position actually behaves, not for round numbers.
+
+    Under 14 days gamma dominates and a small move in the underlying moves the mark more than
+    the thesis moves; 15-25 is the managed middle; 26-45 is the entry window, where theta is
+    still the main force. A recovery rate pooled across all three is an average over three
+    different games. Anything past the entry window is bucketed with it rather than given a
+    fourth cell nothing will ever fill.
+    """
+    if dte is None:
+        return None
+    try:
+        d = float(dte)
+    except (TypeError, ValueError):
+        return None
+    if d < 0:
+        return None
+    if d <= 14:
+        return "0-14"
+    return "15-25" if d <= 25 else "26-45"
+
+
+def delta_bucket(delta: Optional[float]) -> Optional[str]:
+    """Short-leg delta at entry, absolute. Sign is a side convention, not a risk statement."""
+    if delta is None:
+        return None
+    try:
+        d = abs(float(delta))
+    except (TypeError, ValueError):
+        return None
+    if d < 0.10:
+        return "0.00-0.10"
+    if d < 0.20:
+        return "0.10-0.20"
+    return "0.20-0.30" if d < 0.30 else "0.30+"
+
+
+# A recovery rate is only a base rate if the cell it came from has enough observations to be
+# one. Below this, a stratum reports the pooled rate and says it is doing so — the whole reason
+# this raven exists is to be the sober counterweight to Huginn, and a 2-of-3 "67% recover" is a
+# fabricated number wearing the clothes of evidence.
+MIN_STRATUM_SAMPLE = 15
+
+
+def stratum(snapshot: Dict) -> tuple:
+    """The cell a snapshot belongs to. Use with MIN_STRATUM_SAMPLE before trusting any
+    per-stratum rate — see compute_recovery_probability's sufficiency check."""
+    return (snapshot.get("dte_bucket"), snapshot.get("delta_bucket"), snapshot.get("vol_regime"))
+
+
 def record_stress_snapshot(trade: Dict, huginn_out: Dict, data: Dict) -> Dict:
     """The observation Muninn will need later: what this position looked like the first time
     it came under pressure. Appended to the trade's `stress_snapshots`, not overwritten — the
-    first time a position is stressed is a different fact from the fifth."""
+    first time a position is stressed is a different fact from the fifth.
+
+    The three bucket fields exist so a future recovery rate can be conditioned rather than
+    pooled. "38% of stressed positions recovered" is close to useless if it mixes a 10-DTE
+    0.35-delta position in a VIX-30 tape with a 40-DTE 0.15-delta position in a quiet one:
+    those are different questions with different answers, and ODIN_RECOVERY_THRESHOLD is
+    currently a single global number applied to all of them.
+
+    NOT backfilled, deliberately. A stratum inferred after the fact from the close record
+    would be a guess about the moment of stress, and the reason this file exists at all is
+    that no such record was ever kept. Old snapshots carry None and are excluded from
+    stratified reads rather than silently assigned a cell.
+    """
     sup = (huginn_out.get("signal_readings") or {}).get("support", {})
     buf = (huginn_out.get("signal_readings") or {}).get("strike_buffer", {})
     return {
@@ -78,6 +140,15 @@ def record_stress_snapshot(trade: Dict, huginn_out: Dict, data: Dict) -> Dict:
         "atr_buffer": buf.get("atr_buffer"),
         "vix_at_stress": data.get("vix"),
         "mark": data.get("mark"),
+        # ── Stratification (2026-08-08) ──
+        "dte_bucket": dte_bucket(data.get("dte_remaining")),
+        "delta_bucket": delta_bucket(trade.get("delta")),
+        # Reuses vix_bucket rather than defining a second high/mid/low, so the regime label on
+        # a snapshot and the regime term in similarity() can never drift apart. Falls back to
+        # the VIX at entry when the live read is unavailable: the trade's own regime is a
+        # better answer than no answer, and it is at worst stale by the holding period.
+        "vol_regime": vix_bucket(data.get("vix") if data.get("vix") is not None
+                                 else trade.get("vix_at_entry")),
     }
 
 

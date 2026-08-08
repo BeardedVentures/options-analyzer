@@ -349,3 +349,78 @@ def test_realised_pnl_still_books_the_natural_price():
     import auto_paper_cycle as apc
     src = inspect.getsource(apc._ravens_or_legacy_close)
     assert "ol.set_close(r.get(\"id\"), float(mark)" in src
+
+
+# ── Stratification of memory (P1-5, 2026-08-08) ───────────────────────────────────────────────
+
+@pytest.mark.parametrize("dte, expected", [
+    (0, "0-14"), (7, "0-14"), (14, "0-14"),
+    (15, "15-25"), (25, "15-25"),
+    (26, "26-45"), (45, "26-45"), (60, "26-45"),
+    (None, None), (-1, None), ("x", None),
+])
+def test_dte_buckets(dte, expected):
+    assert M.dte_bucket(dte) == expected
+
+
+@pytest.mark.parametrize("delta, expected", [
+    (-0.05, "0.00-0.10"), (-0.15, "0.10-0.20"), (0.15, "0.10-0.20"),
+    (-0.22, "0.20-0.30"), (-0.30, "0.30+"), (-0.45, "0.30+"),
+    (None, None), ("x", None),
+])
+def test_delta_buckets_ignore_sign(delta, expected):
+    """A put's short delta is negative and a call's is positive; the risk is the same size.
+    Bucketing on the signed value would split one stratum into two half-empty ones."""
+    assert M.delta_bucket(delta) == expected
+
+
+def test_snapshot_carries_its_stratum():
+    hug = {"signal_readings": {"support": {"status": "BREACH"},
+                               "strike_buffer": {"atr": 2.0, "atr_buffer": -0.5}},
+           "thesis_status": "UNDER_PRESSURE"}
+    snap = M.record_stress_snapshot(_trade(delta=-0.22), hug,
+                                    _data(dte_remaining=21, current_price=98.0, vix=28.0))
+    assert M.stratum(snap) == ("15-25", "0.20-0.30", "high")
+
+
+def test_vol_regime_reuses_the_existing_vix_bucket():
+    """One definition of high/mid/low. A second one here would let the regime label on a
+    snapshot drift away from the regime term in similarity(), and the drift would be invisible
+    — both would keep returning plausible strings."""
+    hug = {"signal_readings": {}, "thesis_status": "UNDER_PRESSURE"}
+    for vix, expected in [(30.0, "high"), (20.0, "mid"), (12.0, "low")]:
+        snap = M.record_stress_snapshot(_trade(), hug, _data(vix=vix))
+        assert snap["vol_regime"] == expected == M.vix_bucket(vix)
+
+
+def test_vol_regime_falls_back_to_the_regime_the_trade_was_opened_in():
+    """A stale regime beats no regime: it is wrong only by the holding period."""
+    hug = {"signal_readings": {}, "thesis_status": "UNDER_PRESSURE"}
+    snap = M.record_stress_snapshot(_trade(vix_at_entry=30.0), hug, _data(vix=None))
+    assert snap["vol_regime"] == "high"
+
+
+def test_an_unknowable_stratum_is_none_rather_than_a_guess():
+    """Old snapshots are NOT backfilled. A cell inferred after the fact from the close record
+    would be a guess about the moment of stress — and the absence of any record of that moment
+    is the reason this file exists."""
+    hug = {"signal_readings": {}, "thesis_status": "UNDER_PRESSURE"}
+    snap = M.record_stress_snapshot({"short_strike": 100.0}, hug,
+                                    _data(dte_remaining=None, vix=None))
+    assert M.stratum(snap) == (None, None, None)
+
+
+def test_a_minimum_cell_size_is_stated_rather_than_left_to_judgement():
+    """Whoever writes the stratified read next needs a number to check against, not a feeling.
+    Two of three positions recovering is not a 67% base rate."""
+    assert M.MIN_STRATUM_SAMPLE >= 15
+
+
+def test_stratification_does_not_disturb_what_the_snapshot_already_recorded():
+    hug = {"signal_readings": {"support": {"status": "BREACH"},
+                               "strike_buffer": {"atr": 2.0, "atr_buffer": -0.5}},
+           "thesis_status": "UNDER_PRESSURE"}
+    snap = M.record_stress_snapshot(_trade(), hug, _data(dte_remaining=21, current_price=98.0))
+    assert snap["support_status_at_stress"] == "BREACH"
+    assert snap["dte_remaining"] == 21
+    assert snap["price_to_strike_bucket"] is not None

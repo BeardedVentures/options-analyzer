@@ -171,6 +171,16 @@ def _missing_gates(c: Dict) -> List[str]:
     return [k for k in getattr(config, "REQUIRED_GATES", ()) if k not in gates]
 
 
+def _current_vix() -> Optional[float]:
+    """Spot VIX, or None. Never raises — every caller treats it as advisory colour."""
+    try:
+        from data import fetcher
+        v = (fetcher.get_vix() or {}).get("current")
+        return float(v) if isinstance(v, (int, float)) else None
+    except Exception:
+        return None
+
+
 def _entry_state(c: Dict, ctx: Dict) -> Dict:
     """The raw measurements behind the entry, pulled from the candidate and its row context.
 
@@ -505,6 +515,12 @@ def _ravens_close_check(position: Dict, decision_mark, short_leg, long_leg, exp)
             "as_of": _now(),
             "news_sentiment": None,      # close-time news read is not wired yet
             "earnings_check": {},        # nor is a close-time earnings check
+            # record_stress_snapshot has always written a "vix_at_stress" field and this dict
+            # has never carried a vix, so that field is None on every snapshot in the ledger.
+            # Memory's whole job is telling one stressed position from another, and the market
+            # regime it happened in is the coarsest distinction there is. Advisory: a VIX read
+            # failing must not stop the ravens from evaluating.
+            "vix": _current_vix(),
         }
         h = H.evaluate(position, data)
         m = M.compute_recovery_probability(position, h, ol_.load_records(), data)
