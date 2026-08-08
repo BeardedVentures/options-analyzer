@@ -360,9 +360,14 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                 best["gates_passed"] = sum(1 for v in g.values() if v)
                 best["gates_total"] = len(g)
                 # simple ranking score: reward premium efficiency + delta near 0.20 target + liquidity
+                # Rank on the SAME basis the gates enforce and the desk fills: natural, not mid.
+                # Ranking on mid while gating on natural made the scan log lie about its own
+                # rejections — the GDX 82/81 pair scored 31 (mid) then failed min_credit_usd on
+                # $9 of natural credit, so the top of the board advertised a trade the contract
+                # had already refused. Same number in both places or the log cannot be read.
                 target_d = getattr(config, "SHORT_STRIKE_TARGET_DELTA", 0.20)
                 best["score"] = round(
-                    best["credit_to_width"] * 100
+                    best["natural_credit_to_width"] * 100
                     - abs(abs(best["short_delta"]) - target_d) * 100
                     + (5 if g["liquidity"] else 0),
                     2,

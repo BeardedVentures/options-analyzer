@@ -482,7 +482,15 @@ MIN_EDGE_SCORE = 60               # 0-100 composite score required to appear on 
 # require IV to exceed RV by at least 2 vol points, a realistic minimum edge.
 VRP_MIN_THRESHOLD = 0.02          # Implied vol must exceed realized vol by at least 2 vol points
 NEWS_SENTIMENT_BLOCK = True       # Block trades on tickers with strong negative news
-EARNINGS_BLACKOUT_DAYS = 7        # Never sell premium within 7 days of earnings (unless volatility crush mode is enabled)
+EARNINGS_BLACKOUT_DAYS = 7        # Never sell premium within 7 days of earnings
+# This knob is SCORING/ADVISORY only. Two places read it:
+#   analysis/edge_calculator.py  — zeroes the earnings_safety component inside the window
+#   analysis/strike_validator.py — refuses a strike inside the window
+# It does NOT control the hard gate. assessment._earnings_clear() enforces a strictly stronger
+# rule: any earnings on or before EXPIRY blocks the candidate, however many days away it is,
+# because a spread held through a print is an event bet no matter how it looked at entry.
+# So this value can only ever tighten the soft paths — never loosen the contract. Do not delete
+# it as "unused"; zeroing it silently disables the earnings_safety score component.
 
 # ─────────────────────────────────────────────
 # SCORE DISPLAY & ROC QUALITY CONTROLS
@@ -798,7 +806,14 @@ ENABLE_VOL_CRUSH_MODE = True
 ALLOW_SAME_TICKER = False          # If True, don't flag trades whose underlying is already held
 
 # IV skew scoring (spec §3.3) — additive 0–15 component
-SKEW_SCORING_ENABLED = True        # Compute per-ticker put/call skew and add a skew_score
+# DISABLED until chain data quality is instrumented and gated per scan.
+# Skew is measured across the whole put/call surface, so it is the component most exposed to a
+# thin chain: the yfinance quality filter routinely discards ~40% of records, and a skew read
+# taken over what survives is a read of the survivors, not of the market. Feeding that into
+# scored trades poisons the prediction ledger's baseline before it has one.
+# RE-ENABLE when data/data_quality_log.json exists and CHAIN_QUALITY_MIN_RATIO gates the scan
+# (see fetcher.get_options_chain / data/data_quality_log.py).
+SKEW_SCORING_ENABLED = False       # Compute per-ticker put/call skew and add a skew_score
 SKEW_SCORE_MAX_POINTS = 15         # Max points the skew component can contribute
 SKEW_SCORE_CAP_VOL_PTS = 10.0      # Favorable skew (vol points) that maps to the max score
 SKEW_TARGET_DTE = 30               # Expiration (DTE) at which skew is measured

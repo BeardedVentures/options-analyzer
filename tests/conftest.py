@@ -53,10 +53,43 @@ def make_candidate(**overrides):
         "short_delta": -0.22,
         "pop_implied": 0.78,
         "true_pop": 0.81,
+        "side": "put",
+        # evaluate_gates reads liquidity and quote_spread off the LEG, not off the flattened
+        # short_bid/short_ask that vega_candidates._quote_spread_ok uses. Without a leg here the
+        # fixture could only ever be handed to helpers that take the flat form, and any test
+        # driving the real contract end-to-end failed `liquidity` and `quote_spread` on a
+        # candidate that is otherwise perfectly good — a fixture artefact indistinguishable
+        # from a genuine rejection. Keep the leg consistent with the flat quotes above.
+        "short_leg": {"bid": 2.00, "ask": 2.20, "mid": 2.10, "iv": 0.28,
+                      "volume": 1500, "open_interest": 4200},
         "gates": make_gates(),
     }
     c.update(overrides)
     # build_candidates always emits these alongside `gates`; keep the fixture faithful to it.
     c.setdefault("gates_passed", sum(1 for v in c["gates"].values() if v))
     c.setdefault("gates_total", len(c["gates"]))
+    # Derived from whatever natural credit the test asked for, so a test that overrides the
+    # per-share credit cannot leave the usd/ratio forms contradicting it.
+    # build_candidates assigns `pop` from pop_implied before gating; the gate reads `pop`.
+    c.setdefault("pop", c.get("pop_implied"))
+    _nat = float(c.get("natural_credit_per_share") or 0)
+    _w = float(c.get("width") or 0)
+    c.setdefault("natural_credit_usd", round(_nat * 100, 2))
+    c.setdefault("natural_credit_to_width", round(_nat / _w, 3) if _w else 0)
     return c
+
+
+def make_ctx(**overrides):
+    """A context that clears every ctx-dependent gate in assessment.evaluate_gates.
+
+    Pairs with make_candidate() so a test can exercise the REAL contract rather than a
+    pre-built gates dict, and break exactly one thing at a time.
+    """
+    ctx = {
+        "ticker": "TEST",
+        "spot": 110.0,          # 9.1% above the 100 short strike — clears MIN_STRIKE_BUFFER_STOCK
+        "earnings_days": None,  # unknown → the earnings gate defers
+        "levels": {},           # empty → the shelter gate fails open by design
+    }
+    ctx.update(overrides)
+    return ctx

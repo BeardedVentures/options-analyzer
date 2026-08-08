@@ -251,3 +251,74 @@ def test_edge_score_lives_in_the_shared_core():
     src = inspect.getsource(A.assess)
     assert "calculate_edge_score" in src
     assert '"edge_score"' in src
+
+
+# ── Ranking basis (P0-1, 2026-08-08) ──────────────────────────────────────────────────────────
+
+def test_ranking_score_uses_the_same_credit_basis_as_the_gates():
+    """The gates were fixed to read natural credit on 2026-08-07; the ranking score was not.
+
+    A GDX-shaped candidate — $31 mid, $9 natural on a $1-wide spread — scored 31 and sat at the
+    top of the board, then failed min_credit_usd. The board advertised a trade the contract had
+    already refused, which makes the scan log unreadable: you cannot tell a rejection from a
+    recommendation by looking at the ordering.
+    """
+    import inspect
+
+    src = inspect.getsource(vc.build_candidates)
+    assert 'best["natural_credit_to_width"] * 100' in src, \
+        "ranking must score the credit that actually fills"
+    assert 'best["credit_to_width"] * 100' not in src, \
+        "ranking must not score the mid credit"
+
+
+def test_gdx_shaped_candidate_scores_its_natural_credit_not_its_mid():
+    """The arithmetic the fix exists for, stated as a number rather than as source text."""
+    target_d = getattr(config, "SHORT_STRIKE_TARGET_DELTA", 0.20)
+    gdx = {"credit_to_width": 0.31, "natural_credit_to_width": 0.09, "short_delta": -0.20}
+
+    def score(basis):
+        return round(gdx[basis] * 100 - abs(abs(gdx["short_delta"]) - target_d) * 100 + 5, 2)
+
+    assert score("credit_to_width") == 36.0        # what the board used to show
+    assert score("natural_credit_to_width") == 14.0  # what the spread is actually worth
+    # And it is below the credit_to_width floor, so the gate and the rank now agree.
+    assert gdx["natural_credit_to_width"] < config.MIN_CREDIT_TO_WIDTH_PCT
+
+
+# ── Fixture fidelity (P0-4, 2026-08-08) ───────────────────────────────────────────────────────
+
+def test_the_fixture_can_drive_the_real_contract_end_to_end():
+    """make_candidate() carried no short_leg, so evaluate_gates() saw {} and failed `liquidity`
+    and `quote_spread` on an otherwise perfect candidate. Every test therefore had to hand in a
+    pre-built gates dict, which means the contract itself was never exercised by the suite —
+    only assertions ABOUT its source text were. A fixture that cannot pass the real gates
+    cannot prove anything about them.
+    """
+    from analysis import assessment as A
+    from conftest import make_ctx
+
+    gates = A.evaluate_gates(make_candidate(), make_ctx())
+    failed = [k for k, v in gates.items() if not v]
+    assert failed == [], f"clean fixture should clear every gate, failed: {failed}"
+
+
+@pytest.mark.parametrize("break_it, expected_gate", [
+    ({"short_leg": {"bid": 2.00, "ask": 2.20, "mid": 2.10, "volume": 0, "open_interest": 0}}, "liquidity"),
+    ({"short_leg": {"bid": 1.00, "ask": 2.00, "mid": 1.50, "volume": 1500, "open_interest": 4200}}, "quote_spread"),
+    ({"short_delta": -0.55}, "delta_cap"),
+    ({"dte": 3}, "dte_window"),
+    ({"pop": 0.10, "pop_implied": 0.10}, "pop"),
+    ({"natural_credit_per_share": 0.01}, "min_credit_usd"),
+])
+def test_each_gate_fails_alone_on_the_real_contract(break_it, expected_gate):
+    """One broken input must fail exactly the gate that owns it — no collateral failures.
+    This is what a pre-built gates dict can never check."""
+    from analysis import assessment as A
+    from conftest import make_ctx
+
+    c = make_candidate(**break_it)
+    c.setdefault("pop", c.get("pop_implied"))
+    gates = A.evaluate_gates(c, make_ctx())
+    failed = {k for k, v in gates.items() if not v}
+    assert expected_gate in failed, f"{expected_gate} should have failed; failed={failed}"
