@@ -125,6 +125,60 @@ def data_quality():
               f"{getattr(config, 'CHAIN_QUALITY_GOOD_RATIO', 0.70):.0%}.")
 
 
+def iv_readiness():
+    """Can the system tell a rich day from a cheap one, per ticker?
+
+    IV rank is the standard answer to that, and it is only as good as the history behind it.
+    Until 2026-08-09 two functions wrote that history with different definitions of ATM IV, and
+    10% of every stored observation is a bad quote. This section says out loud which tickers can
+    currently support a richness judgement and which cannot.
+    """
+    _hdr("3 · CAN IT TELL RICH FROM CHEAP?  (per-ticker IV readiness)")
+    try:
+        from analysis import ticker_profile as tp
+        from data import fetcher
+        import glob as _glob
+        from pathlib import Path as _P
+    except Exception as e:
+        print(f"  profiles unavailable: {e}")
+        return
+
+    files = sorted(_glob.glob(str(BASE / config.IV_HISTORY_DIR / "*.json")))
+    if not files:
+        print(f"  {_c('No IV history at all.', Y)} Nothing can be ranked yet.")
+        return
+
+    rows, ready = [], 0
+    for f in files:
+        tk = _P(f).stem
+        try:
+            px = fetcher.get_price_data(tk, period="6mo")
+            close = px["Close"] if px is not None and not px.empty else None
+            l = tp.learned(tk, close)
+        except Exception:
+            continue
+        rows.append((tk, l))
+        if l["sufficient"]:
+            ready += 1
+
+    total = len(rows)
+    min_n = int(getattr(config, "PROFILE_MIN_OBSERVATIONS", 20))
+    col = G if ready > total * 0.5 else (Y if ready else R)
+    print(f"  tickers ranked on real history   {_c(f'{ready}/{total}', col)} "
+          f"(need {min_n} clean observations)")
+    dropped = sum(l["iv_observations_dropped"] for _, l in rows)
+    if dropped:
+        print(f"  bad quotes excluded              {_c(str(dropped), Y)} stored observations "
+              f"were implausible vs the ticker's own realised vol")
+    thin = sorted((r for r in rows if not r[1]["sufficient"]), key=lambda r: r[1]["iv_observations"])
+    if thin:
+        names = ", ".join(f"{tk}({l['iv_observations']})" for tk, l in thin[:8])
+        print(f"  thinnest histories               {_c(names, D)}")
+    if ready == 0:
+        print(f"  {_c('No ticker can support an IV-rank judgement yet.', Y)} Richness reads are "
+              f"approximations until histories accrue — roughly {min_n} more trading days.")
+
+
 def btc():
     """The BTC layer: what it reads now, and how its claims are grading.
 
@@ -134,7 +188,7 @@ def btc():
     """
     if not getattr(config, "BTC_SIGNAL_ENABLED", True):
         return
-    _hdr("3 · BITCOIN LAYER  (free data · advisory only)")
+    _hdr("4 · BITCOIN LAYER  (free data · advisory only)")
     try:
         from data import crypto
         s = crypto.snapshot()
@@ -192,7 +246,7 @@ def btc():
 
 
 def record():
-    _hdr("4 · THE RECORD, BY COHORT")
+    _hdr("5 · THE RECORD, BY COHORT")
     rows = ol.load_records()
     closed = [r for r in rows if r.get("status") == "closed"]
     if not closed:
@@ -216,7 +270,7 @@ def record():
 
 
 def learning():
-    _hdr("5 · WHAT IT HAS LEARNED")
+    _hdr("6 · WHAT IT HAS LEARNED")
     try:
         from analysis import predictions as pred
         g = pred.grade()
@@ -282,6 +336,7 @@ if __name__ == "__main__":
     print(f"\n{B}VEGA STATUS{X}  ·  {datetime.now():%Y-%m-%d %H:%M}")
     health()
     data_quality()
+    iv_readiness()
     btc()
     record()
     learning()

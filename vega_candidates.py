@@ -79,9 +79,14 @@ def vol_context(ticker: str, puts: list, current_price: float) -> dict:
     ctx = {"atm_iv": None, "iv_rank": None, "iv_rank_method": None, "rv": None, "vrp_pp": None}
     if not puts:
         return ctx
-    # ATM IV = IV of the put whose strike is closest to spot
-    atm = min(puts, key=lambda o: abs(o["strike"] - current_price))
-    atm_iv = float(atm.get("iv") or 0)
+    # ONE definition of ATM IV, shared with the engine path via technicals.estimate_atm_iv.
+    # This used to read the IV of the single put nearest spot. A single live quote decided the
+    # number, and this is the path that runs during market hours — which is why SPY's stored IV
+    # history reads 34-68% on weekdays and 12-14% on weekends. Those observations feed
+    # calculate_iv_rank, so the system's only "is premium rich" signal was being computed from
+    # a distribution built two different ways. A median over a near-ATM band survives one bad
+    # quote; a single contract does not.
+    atm_iv = float(_tech.estimate_atm_iv(puts, current_price)) if _tech else 0.0
     ctx["atm_iv"] = round(atm_iv, 4) if atm_iv else None
     if _tech is None or not atm_iv:
         return ctx

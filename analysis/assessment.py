@@ -174,6 +174,19 @@ def _otm_buffer_ok(ticker: str, spot: float, short_strike: float, side: str) -> 
     return pct >= float(_cfg("MIN_STRIKE_BUFFER_STOCK", 0.05))
 
 
+def _ticker_profile(ctx: Dict) -> Dict:
+    """Per-underlying character. Never raises — a missing profile narrows the narrative, it
+    does not stop an assessment."""
+    try:
+        from analysis import ticker_profile
+        pd_ = ctx.get("price_data")
+        close = pd_["Close"] if pd_ is not None and not getattr(pd_, "empty", True) else None
+        return ticker_profile.profile(ctx.get("ticker") or "", close)
+    except Exception as e:
+        logger.debug("[assessment] ticker profile failed: %s", e)
+        return {}
+
+
 def _btc_cross_venue(ctx: Dict) -> Dict:
     """DVOL-versus-ETF-IV for a BTC tracker. Costs one cached HTTP read, and only for the
     handful of tickers in BTC_PROXY_TICKERS — the other fifty-odd names never touch it.
@@ -323,6 +336,11 @@ def assess(spread: Dict, ctx: Dict, strategy: str = BULL_PUT) -> Dict:
     # rather than by remembering to set a flag.
     a["btc_cross_venue"] = _btc_cross_venue(ctx)
 
+    # What this system knows about THIS underlying, as opposed to underlyings. The gates above
+    # are textbook rules applied identically to 56 names; this is the place that says where a
+    # textbook read of this particular ticker would be wrong. Advisory — see ticker_profile.
+    a["profile"] = _ticker_profile(ctx)
+
     side = spread.get("side", "put")
     try:
         from analysis.horizon import calibrate
@@ -423,6 +441,11 @@ def _narrate(out: Dict, spread: Dict, ctx: Dict) -> str:
     bx = a.get("btc_cross_venue") or {}
     if bx.get("available"):
         bits.append(bx["note"])
+
+    # The cautions are the part of the profile that changes a decision: each one names a place
+    # where the generic rule and this specific asset disagree.
+    for c in ((a.get("profile") or {}).get("cautions") or [])[:2]:
+        bits.append(c)
 
     et = a.get("entry_timing") or {}
     if et.get("readiness"):

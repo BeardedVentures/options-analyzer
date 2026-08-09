@@ -129,6 +129,26 @@ STOP_LOSS_MULTIPLIER = 1.5        # Stop if spread reaches 1.5x credit received 
 ALLOW_OVERSIZED_TRADES = True     # Account-agnostic output — risk tiers handle sizing
 MAX_QUOTE_SPREAD_PCT = 0.35       # Reject option legs with (ask-bid)/mid above this threshold
 
+# ── ATM IV integrity (2026-08-09) ────────────────────────────────────────────
+# iv_history feeds IV RANK, which is the system's only answer to "is premium rich right now".
+# Two functions used to write to it — a median over a near-ATM band, and the IV of the single
+# contract nearest spot — and the single-contract one ran during market hours, where one bad
+# live quote decides the number. SPY's stored history reads 34-68% on weekdays and 12-14% on
+# weekends as a result, and 10% of every observation on the watchlist is more than 3x that
+# ticker's realised vol. Errors are always HIGH, which biases the percentile DOWN and makes
+# MIN_IV_RANK reject setups that deserved to pass.
+ATM_IV_MIN_CONTRACTS = 3          # Near-ATM contracts needed before a median is trustworthy.
+                                  # The window widens (3%→5%→8%→12% of spot) until it has this
+                                  # many, instead of falling back to the whole-chain median —
+                                  # a smile-weighted number that is not ATM IV at all.
+PROFILE_MIN_OBSERVATIONS = 20     # Usable IV observations before a ticker's own IV range is
+                                  # described as known. Below it, analysis/ticker_profile.py
+                                  # says so rather than reporting a percentile — IBIT has 3.
+IV_PLAUSIBLE_MAX_MULT = 3.0       # Stored IV above this multiple of the ticker's OWN realised
+                                  # vol is a bad quote, not a regime. Filtered at READ time;
+                                  # the history files are never rewritten, so the audit trail
+                                  # survives and nothing can be silently lost.
+
 # ── BTC cross-venue signal (2026-08-09) ──────────────────────────────────────
 # IBIT options and BTC options price the same underlying risk in two venues. Deribit publishes
 # DVOL (BTC 30-day implied vol) for free; IBIT's ATM IV comes off a chain already being fetched.

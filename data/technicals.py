@@ -146,25 +146,69 @@ def _iv_rank_hv_approx(close: pd.Series, current_iv: float) -> float:
 
 
 def estimate_atm_iv(options: List[Dict], current_price: float) -> float:
-    """Median IV of the near-ATM (within 3%) contracts, falling back to the whole chain.
+    """Median IV of the near-ATM contracts. THE one definition of a ticker's ATM IV.
 
-    Shared by every strategy path so they all rank IV off the same number: calculate_all()
-    defaults current_iv to 0.0, which silently yields iv_rank 0 and fails any iv_rank_min
-    gate, so a caller that skips this cannot surface a trade at all.
+    Two bugs lived here, and both corrupted iv_history — the store IV RANK is computed from,
+    which is the system's only answer to "is premium rich right now".
+
+    1. A SECOND definition existed in vega_candidates.vol_context: the IV of the single
+       contract nearest spot. One bad live quote on one strike poisoned the reading, and that
+       path is the one that runs during market hours. SPY's stored history reads 34-68% on
+       weekdays and 12-14% on weekends for exactly this reason — a ~5x error on the days that
+       matter. Both callers now share this function.
+
+    2. The near-ATM window was a flat 3% of spot. That is a textbook constant pretending to be
+       universal: at SPY $773 it spans ±$23 and catches ~138 contracts; at IBIT $36.80 it spans
+       ±$1.10 and catches ~10. When it caught NOTHING the old code fell back to the median of
+       the WHOLE CHAIN — a smile-weighted number that is not ATM IV at all and runs 7+ vol
+       points high. The window now widens in steps until it has a usable sample, and if it
+       never does the function returns 0.0 rather than a confidently wrong number.
+
+    Returns 0.0 when no honest estimate exists. Callers already treat 0.0 as "unknown" —
+    calculate_all() skips iv_rank entirely on 0.0 — so absence stays absence.
     """
-    ivs = []
-    for opt in options or []:
-        iv = opt.get("iv")
-        strike = opt.get("strike", 0)
-        if iv and current_price > 0:
-            if abs(strike - current_price) / current_price <= 0.03:
-                ivs.append(float(iv))
-    if not ivs:
-        ivs = [float(opt.get("iv")) for opt in (options or []) if opt.get("iv")]
-    if not ivs:
+    if not options or not current_price or current_price <= 0:
         return 0.0
-    ivs.sort()
-    return ivs[len(ivs) // 2]
+
+    min_sample = int(_cfg("ATM_IV_MIN_CONTRACTS", 3))
+    # Widen only as far as needed. Each step is still a genuinely "near the money" band; the
+    # last is generous for a thin chain but nowhere near the smile wings the old fallback used.
+    for width in (0.03, 0.05, 0.08, 0.12):
+        ivs = sorted(
+            float(o["iv"]) for o in options
+            if o.get("iv") and o.get("strike")
+            and abs(float(o["strike"]) - current_price) / current_price <= width
+        )
+        if len(ivs) >= min_sample:
+            return ivs[len(ivs) // 2]
+
+    return 0.0
+
+
+def _cfg(name, default):
+    return getattr(config, name, default)
+
+
+def _plausible_iv_samples(iv_values: List[float], close: pd.Series) -> Tuple[List[float], int]:
+    """Split stored IV observations into (plausible, dropped_count).
+
+    Judged against the ticker's OWN realised vol rather than an absolute ceiling, because 90%
+    IV is normal for a meme name and impossible for TLT. An implied vol more than
+    IV_PLAUSIBLE_MAX_MULT times realised is not a volatility regime, it is a bad quote.
+
+    Fails OPEN: if realised vol cannot be computed there is nothing to judge against, so every
+    sample is kept. A filter that cannot see must not censor.
+    """
+    mult = float(_cfg("IV_PLAUSIBLE_MAX_MULT", 3.0))
+    try:
+        rv = float(_historical_vol(close, 30) or 0)
+    except Exception:
+        rv = 0.0
+    if rv <= 0:
+        return list(iv_values), 0
+    ceiling = rv * mult
+    clean = [v for v in iv_values if v <= ceiling]
+    return clean, len(iv_values) - len(clean)
 
 
 def calculate_iv_rank(ticker: str, current_iv: float, close: pd.Series) -> dict:
@@ -235,6 +279,39 @@ def calculate_iv_rank(ticker: str, current_iv: float, close: pd.Series) -> dict:
     iv_values = [s["iv"] for s in samples if isinstance(s, dict) and "iv" in s]
     if not iv_values:
         return {"iv_rank": 50.0, "iv_rank_method": "APPROX", "iv_history_count": 0}
+
+    # Drop implausible observations before taking the percentile.
+    #
+    # Until 2026-08-09 two different functions wrote to this file — a median over a near-ATM
+    # band, and the IV of the single contract nearest spot — and the single-contract one ran
+    # during market hours, where one bad live quote decided the number. 10% of every stored
+    # observation across the watchlist is more than 3x that ticker's realised vol: AMD at 507%
+    # against 83% realised, AAPL at 255% against 36%, IWM at 188% against 14%.
+    #
+    # The errors are always HIGH, which biases the percentile DOWN: today's honest IV looks
+    # cheap against an inflated history, so IV rank under-reads and MIN_IV_RANK rejects setups
+    # that deserved to pass. That is the opposite of a safe failure.
+    #
+    # Filtered at READ time, deliberately. The files are left intact as the audit trail — a
+    # dedup script that rewrote a ledger in place once reverted a day of closes here while the
+    # line count still looked right. Nothing is deleted; bad points simply do not vote.
+    clean, dropped = _plausible_iv_samples(iv_values, close)
+    if len(clean) < min_samples:
+        approx = _iv_rank_hv_approx(close, current_iv)
+        logger.warning(
+            f"[iv_rank] {ticker}: only {len(clean)}/{len(iv_values)} stored observations are "
+            f"plausible ({dropped} dropped as bad quotes) — below the {min_samples} needed. "
+            f"Falling back to the HV approximation rather than ranking against bad data."
+        )
+        return {
+            "iv_rank": approx,
+            "iv_rank_method": "APPROX",
+            "iv_history_count": len(clean),
+            "iv_history_dropped": dropped,
+        }
+    if dropped:
+        logger.info(f"[iv_rank] {ticker}: excluded {dropped} implausible stored observations")
+    iv_values = clean
 
     arr = np.array(iv_values)
     iv_rank = round(float(np.mean(arr <= current_iv) * 100), 1)
