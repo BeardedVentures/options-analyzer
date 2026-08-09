@@ -10,6 +10,28 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 
+@pytest.fixture(autouse=True)
+def _reset_process_caches():
+    """Clear per-process caches between tests.
+
+    ticker_profile memoises by ticker for the life of a process, which is correct in production
+    (one process = one scan) and wrong in a test session, where a test that patches
+    IV_HISTORY_DIR would otherwise inherit whatever an earlier test cached for the same ticker.
+    That failure would be order-dependent and intermittent — the worst kind to chase.
+    """
+    try:
+        from analysis import ticker_profile
+        ticker_profile.clear_cache()
+    except Exception:
+        pass
+    try:
+        from data import crypto
+        crypto._cache.clear()
+    except Exception:
+        pass
+    yield
+
+
 @pytest.fixture
 def temp_ledger(tmp_path, monkeypatch):
     """Point outcome_logger at a throwaway ledger so tests can never touch logs/vega_outcomes.jsonl."""

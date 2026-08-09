@@ -181,13 +181,30 @@ def learned(ticker: str, close=None) -> Dict:
     return out
 
 
+# A profile is a property of the TICKER, not of a candidate, but assess() runs once per
+# surviving candidate — five times for SPY on a normal scan. Each call re-read the ticker's IV
+# history and scanned the whole data-quality log for the same answer. Cached for the process,
+# which is one scan: auto_paper_cycle is a fresh process per cycle, so the cache cannot go
+# stale across runs and there is nothing to invalidate.
+_profile_cache: Dict[str, Dict] = {}
+
+
+def clear_cache() -> None:
+    """For tests and for any caller that wants a genuinely fresh read."""
+    _profile_cache.clear()
+
+
 def profile(ticker: str, close=None) -> Dict:
     """The full picture for one underlying: what we were told, what we have seen, and how far
     either can be trusted."""
+    key = (ticker or "").upper()
+    if key in _profile_cache:
+        return _profile_cache[key]
     d, l = declared(ticker), learned(ticker, close)
     p = {"ticker": (ticker or "").upper(), "declared": d, "learned": l}
     p["headline"] = _headline(p)
     p["cautions"] = _cautions(p)
+    _profile_cache[key] = p
     return p
 
 

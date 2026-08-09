@@ -337,8 +337,18 @@ def _pick_new_trades(cand_data: Dict, open_rows: List[Dict], max_open_total: int
         # the cockpit scan (main.py) but was NOT wired into the auto-open path,
         # so cheap premium could be selected here — e.g. TSLA @ IV-rank 9.8, the
         # only realized loss in the ledger. Never sell premium below the floor.
+        # FAILS CLOSED. This used to read `isinstance(_ivr, (int, float)) and _ivr < floor`,
+        # so a ticker whose IV rank could not be computed at all skipped the floor entirely and
+        # was allowed to trade — the richness gate failing OPEN on exactly the tickers we know
+        # least about. It became reachable on 2026-08-09 when estimate_atm_iv started returning
+        # 0.0 instead of a wrong whole-chain median: "no number" now flows where "wrong number"
+        # used to. Unknown richness is a reason not to sell, the same way the earnings gate
+        # fails closed by design.
         _ivr = (row.get("ctx") or {}).get("iv_rank")
-        if isinstance(_ivr, (int, float)) and _ivr < float(getattr(config, "MIN_IV_RANK", 45)):
+        if not isinstance(_ivr, (int, float)):
+            _rej("iv_rank_unknown")
+            continue
+        if _ivr < float(getattr(config, "MIN_IV_RANK", 45)):
             _rej("iv_rank_below_floor")
             continue
         for c in row.get("candidates", []):

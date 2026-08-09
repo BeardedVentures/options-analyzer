@@ -237,3 +237,93 @@ def test_a_broken_profile_cannot_fail_an_assessment(monkeypatch):
     from analysis import assessment as A
     monkeypatch.setattr(tp, "profile", lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
     assert A._ticker_profile({"ticker": "SPY"}) == {}
+
+
+# ── Cost ──────────────────────────────────────────────────────────────────────────────────────
+
+def test_the_profile_is_computed_once_per_ticker_not_once_per_candidate(tmp_path, monkeypatch):
+    """assess() runs per surviving candidate — five times for SPY on a normal scan — and each
+    call re-read the IV history and scanned the whole data-quality log for the same answer.
+    A profile is a property of the ticker, so it is computed once per process (one scan)."""
+    monkeypatch.setattr(config, "IV_HISTORY_DIR", str(tmp_path))
+    tp.clear_cache()
+    calls = []
+    real = tp.learned
+    monkeypatch.setattr(tp, "learned", lambda t, c=None: calls.append(t) or real(t, c))
+    close = _steady()
+    for _ in range(5):
+        tp.profile("SPY", close)
+    assert calls == ["SPY"], f"learned() should run once, ran {len(calls)}x"
+
+
+def test_different_tickers_are_cached_independently(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "IV_HISTORY_DIR", str(tmp_path))
+    tp.clear_cache()
+    close = _steady()
+    assert tp.profile("SPY", close)["ticker"] == "SPY"
+    assert tp.profile("IBIT", close)["ticker"] == "IBIT"
+    assert set(tp._profile_cache) == {"SPY", "IBIT"}
+
+
+# ── The richness gate must fail CLOSED (2026-08-09 audit) ─────────────────────────────────────
+
+def test_an_unknown_iv_rank_blocks_the_trade_rather_than_bypassing_the_floor():
+    """The auto-open floor read `isinstance(ivr, (int,float)) and ivr < floor`, so a ticker whose
+    IV rank could not be computed skipped the check entirely — the richness gate failing OPEN on
+    exactly the names we know least about. It became reachable when estimate_atm_iv started
+    returning 0.0 instead of a wrong whole-chain median: "no number" now flows where "wrong
+    number" used to."""
+    import inspect
+    import auto_paper_cycle as apc
+    src = inspect.getsource(apc._pick_new_trades)
+    assert "iv_rank_unknown" in src
+    assert "not isinstance(_ivr, (int, float))" in src
+
+
+def test_unknown_richness_is_a_reason_not_to_sell():
+    """Same posture as the earnings gate, which fails closed by design."""
+    import inspect
+    import auto_paper_cycle as apc
+    src = inspect.getsource(apc._pick_new_trades)
+    i_unknown = src.index("iv_rank_unknown")
+    i_below = src.index("iv_rank_below_floor")
+    assert i_unknown < i_below, "the unknown case must be handled before the comparison"
+
+
+# ── The IV/HV yardstick is per-ticker (the lever, not yet pulled) ──────────────────────────────
+
+def test_the_inflator_defaults_to_the_global_for_every_ticker():
+    """No behaviour change on its own. IBIT is structurally blocked today and the fix for that
+    is a strategy decision, so the mechanism ships and the value does not."""
+    from data import technicals as t
+    for tk in ("IBIT", "SPY", "COIN", "ZZZZ", None):
+        assert t.iv_hv_inflator(tk) == config.IV_HV_INFLATOR
+
+
+def test_a_declared_inflator_overrides_the_global(monkeypatch):
+    """IBIT's measured IV/HV is ~1.12 against an assumed 1.2, which is why its ATM IV of 32.72%
+    ranks 0.0 while sitting ABOVE its own 29.2% realised vol. The name is not cheap; the ruler
+    is wrong."""
+    from data import technicals as t
+    monkeypatch.setitem(tp.DECLARED, "IBIT", {**tp.DECLARED["IBIT"], "iv_hv_inflator": 1.12})
+    tp.clear_cache()
+    assert t.iv_hv_inflator("IBIT") == 1.12
+    assert t.iv_hv_inflator("SPY") == config.IV_HV_INFLATOR
+
+
+def test_a_lower_inflator_raises_the_rank_for_the_same_iv(monkeypatch):
+    """Proves the lever actually moves the number it is supposed to move."""
+    from data import technicals as t
+    close = _steady()
+    iv = float(t._historical_vol(close, 30)) * 1.15
+    high = t._iv_rank_hv_approx(close, iv, "SPY")
+    monkeypatch.setitem(tp.DECLARED, "SPY", {**tp.DECLARED["SPY"], "iv_hv_inflator": 1.05})
+    tp.clear_cache()
+    low = t._iv_rank_hv_approx(close, iv, "SPY")
+    assert low > high, "a smaller inflator must make the same IV rank richer"
+
+
+def test_a_broken_profile_lookup_falls_back_to_the_global(monkeypatch):
+    from data import technicals as t
+    monkeypatch.setattr(tp, "declared", lambda x: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert t.iv_hv_inflator("IBIT") == config.IV_HV_INFLATOR

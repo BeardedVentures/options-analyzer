@@ -11,6 +11,13 @@ $ErrorActionPreference = "Stop"
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
+# Python now EMITS utf-8, but PowerShell still DECODES the child's stdout using the console
+# codepage before piping it to the log — so under Task Scheduler an em-dash arrived as "ÔÇö"
+# and the ± in the BTC forecast line arrived as garbage. Exit codes were fine, which is what
+# makes it insidious: the run succeeds and the only record of what it did is unreadable.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $projectRoot
 

@@ -117,7 +117,8 @@ def _historical_vol(close: pd.Series, period: int) -> float:
 # IV RANK — real percentile from stored IV history
 # ─────────────────────────────────────────────
 
-def _iv_rank_hv_approx(close: pd.Series, current_iv: float) -> float:
+def _iv_rank_hv_approx(close: pd.Series, current_iv: float,
+                       ticker: Optional[str] = None) -> float:
     """
     Bootstrapping fallback: approximate IV rank using the rolling HV distribution.
     Used only until IV_HISTORY_MIN_SAMPLES real IV points are stored per ticker.
@@ -140,9 +141,37 @@ def _iv_rank_hv_approx(close: pd.Series, current_iv: float) -> float:
         rolling_hv.append(hv)
     if not rolling_hv:
         return 50.0
-    inflator = getattr(config, "IV_HV_INFLATOR", 1.2)
+    inflator = iv_hv_inflator(ticker)
     arr = np.array(rolling_hv) * inflator
     return round(float(np.mean(arr <= current_iv) * 100), 1)
+
+
+def iv_hv_inflator(ticker: Optional[str] = None) -> float:
+    """The assumed typical IV/HV ratio for one underlying.
+
+    This was a single global constant (1.2) applied to all 56 names, and it is the reason IBIT
+    can never trade. Measured 2026-08-09: IBIT ATM IV 32.72% against 29.2% realised — a
+    genuinely positive variance premium — yet the inflated HV distribution's MINIMUM is 33.8%,
+    so IBIT ranks 0.0 and is rejected by MIN_IV_RANK every single day. Its structural IV/HV is
+    about 1.12; the yardstick assumes 1.2. The name is not cheap, the ruler is wrong.
+
+    That is the third defect of this exact shape in this repo, after the $25 credit floor
+    (blind to share price) and the 3%-of-spot ATM window (blind to strike density).
+
+    Per-ticker overrides live in analysis.ticker_profile.DECLARED as `iv_hv_inflator`. Every
+    ticker currently resolves to the global default, so this changes no behaviour on its own —
+    it is the lever, deliberately not pulled. Setting one is a strategy decision and should be
+    made from a measured IV/HV ratio for that name, not from a plausible story.
+    """
+    default = float(_cfg("IV_HV_INFLATOR", 1.2))
+    if not ticker:
+        return default
+    try:
+        from analysis.ticker_profile import declared
+        v = declared(ticker).get("iv_hv_inflator")
+        return float(v) if v else default
+    except Exception:
+        return default
 
 
 def estimate_atm_iv(options: List[Dict], current_price: float) -> float:
@@ -264,7 +293,7 @@ def calculate_iv_rank(ticker: str, current_iv: float, close: pd.Series) -> dict:
 
     min_samples = getattr(config, "IV_HISTORY_MIN_SAMPLES", 30)
     if len(samples) < min_samples:
-        approx = _iv_rank_hv_approx(close, current_iv)
+        approx = _iv_rank_hv_approx(close, current_iv, ticker)
         logger.debug(
             f"[iv_rank] {ticker}: bootstrapping ({len(samples)}/{min_samples} samples) "
             f"— using HV approx {approx:.1f}"
@@ -297,7 +326,7 @@ def calculate_iv_rank(ticker: str, current_iv: float, close: pd.Series) -> dict:
     # line count still looked right. Nothing is deleted; bad points simply do not vote.
     clean, dropped = _plausible_iv_samples(iv_values, close)
     if len(clean) < min_samples:
-        approx = _iv_rank_hv_approx(close, current_iv)
+        approx = _iv_rank_hv_approx(close, current_iv, ticker)
         logger.warning(
             f"[iv_rank] {ticker}: only {len(clean)}/{len(iv_values)} stored observations are "
             f"plausible ({dropped} dropped as bad quotes) — below the {min_samples} needed. "
