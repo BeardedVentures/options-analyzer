@@ -171,6 +171,19 @@ def _missing_gates(c: Dict) -> List[str]:
     return [k for k in getattr(config, "REQUIRED_GATES", ()) if k not in gates]
 
 
+def _min_credit_floor(c: Dict) -> float:
+    """The credit floor for this candidate, from the single definition in config.
+
+    Reads `spot` off the candidate (stamped by build_candidates). A snapshot written before
+    that field existed returns None and gets the flat floor — stricter, never looser, so an
+    old file can never open a trade the current contract would refuse.
+    """
+    fn = getattr(config, "min_credit_usd_for", None)
+    if callable(fn):
+        return float(fn(c.get("spot")))
+    return float(getattr(config, "MIN_CREDIT_USD", 25))
+
+
 def _current_vix() -> Optional[float]:
     """Spot VIX, or None. Never raises — every caller treats it as advisory colour."""
     try:
@@ -241,11 +254,16 @@ def _candidate_passes_minimum(c: Dict, verbose: bool = False) -> bool:
         if verbose:
             _log(f"[GATE] {c.get('ticker')} REJECT failed={failed}")
         return False
+    # Price-scaled credit floor — ONE definition, in config.min_credit_usd_for. This site used
+    # to hard-code its own MIN_CREDIT_USD read, which is how a floor could be relaxed in the
+    # contract and stay enforced here: the same shape as the IV-rank, POP and quote-spread
+    # leaks. `spot` comes off the candidate when the scan recorded it; without it the flat
+    # floor applies, which is the conservative direction.
     credit_usd = c.get("credit_usd")
-    if not isinstance(credit_usd, (int, float)) or credit_usd < float(getattr(config, "MIN_CREDIT_USD", 25)):
+    floor = _min_credit_floor(c)
+    if not isinstance(credit_usd, (int, float)) or credit_usd < floor:
         if verbose:
-            _log(f"[GATE] {c.get('ticker')} REJECT credit_usd={credit_usd} "
-                 f"< MIN_CREDIT_USD={getattr(config, 'MIN_CREDIT_USD', 25)}")
+            _log(f"[GATE] {c.get('ticker')} REJECT credit_usd={credit_usd} < floor={floor}")
         return False
     # POP floor. main.py:491 gates on the calibrated probability of profit, but the auto-open
     # path enforced NO pop floor at all — `pop` was computed as a gate annotation and then left

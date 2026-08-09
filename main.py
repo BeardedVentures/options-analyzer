@@ -311,7 +311,10 @@ def select_bull_put_pair(
             if metrics.get("credit_per_share", 0) <= 0:
                 _bump("credit_non_positive")
                 continue
-            if metrics.get("credit_usd", 0) < config.MIN_CREDIT_USD:
+            # Price-scaled floor, one definition (config.min_credit_usd_for). See the comment
+            # on MIN_CREDIT_USD: a flat dollar floor is 20x stricter on a $37 underlying than
+            # on a $773 one, which kept IBIT out of the book entirely.
+            if metrics.get("credit_usd", 0) < config.min_credit_usd_for(current_price):
                 _bump("credit_below_min_usd")
                 continue
 

@@ -174,6 +174,15 @@ def _otm_buffer_ok(ticker: str, spot: float, short_strike: float, side: str) -> 
     return pct >= float(_cfg("MIN_STRIKE_BUFFER_STOCK", 0.05))
 
 
+def _min_credit_floor(spot) -> float:
+    """The price-scaled credit floor. Delegates to config so the rule has one definition —
+    see config.min_credit_usd_for. Falls back to the flat floor if config predates it."""
+    fn = getattr(config, "min_credit_usd_for", None)
+    if callable(fn):
+        return fn(spot)
+    return float(_cfg("MIN_CREDIT_USD", 25))
+
+
 def _liquidity_ok(leg: Dict) -> bool:
     return ((leg.get("volume") or 0) >= _cfg("MIN_OPTION_VOLUME", 100)
             or (leg.get("open_interest") or 0) >= _cfg("MIN_OPTION_OPEN_INTEREST", 500))
@@ -221,7 +230,7 @@ def evaluate_gates(spread: Dict, ctx: Dict) -> Dict:
         "delta_cap": abs(float(spread.get("short_delta") or 0)) <= _cfg("SHORT_STRIKE_MAX_DELTA", 0.30),
         "otm_buffer": _otm_buffer_ok(ctx.get("ticker", ""), spot, spread.get("short_strike"), side),
         "credit_to_width": (spread.get("natural_credit_to_width") or 0) >= _cfg("MIN_CREDIT_TO_WIDTH_PCT", 0.15),
-        "min_credit_usd": (spread.get("natural_credit_usd") or 0) >= _cfg("MIN_CREDIT_USD", 25),
+        "min_credit_usd": (spread.get("natural_credit_usd") or 0) >= _min_credit_floor(spot),
         "liquidity": _liquidity_ok(short_leg),
         "pop": (spread.get("pop") or 0) >= _cfg("MIN_PROBABILITY_OF_PROFIT", 0.72),
         "dte_window": _cfg("MIN_DTE", 25) <= (spread.get("dte") or 0) <= _cfg("MAX_DTE", 45),

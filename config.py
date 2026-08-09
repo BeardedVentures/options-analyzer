@@ -72,6 +72,49 @@ ENABLED_STRATEGIES = [
 MIN_PROBABILITY_OF_PROFIT = 0.72  # 72% minimum — true probability not just delta
 MIN_IV_RANK = 45                  # Only trade when IV rank >= 45
 MIN_CREDIT_USD = 25               # Minimum premium worth collecting (per contract)
+
+# ── The credit floor scales with the underlying's price ──────────────────────
+# A flat dollar floor is not price-neutral. $25 against SPY at $773 is 0.03% of spot; against
+# IBIT at $36.80 it is 0.68% — the same rule, twenty times stricter, purely because the share
+# price is lower. That is not a risk judgement, it is an artifact.
+#
+# It is what has kept IBIT out of the book entirely: on 2026-08-09 every one of the 17 IBIT
+# candidates was blocked by min_credit_usd, and the best spread on the board carried $23 of
+# natural credit against the $25 floor while PASSING credit_to_width at 0.230. Excluded by two
+# dollars, on an underlying the watchlist deliberately added for its uncorrelated VRP.
+#
+# So the floor scales down for cheap underlyings and is CAPPED at MIN_CREDIT_USD — it can never
+# loosen the rule for anything at or above the reference price. Nothing that qualifies today
+# stops qualifying, and nothing above $100 changes at all.
+#
+# MIN_CREDIT_USD_FLOOR is the hard bottom: the credit must still be worth collecting after fees.
+# Round-trip commission on a vertical is ~$2.16 (4 legs x $0.54), so $15 is roughly 7x fees —
+# genuinely a fee-viability test, which the $25 never was at 11.6x.
+CREDIT_FLOOR_SCALES_WITH_PRICE = True
+CREDIT_FLOOR_REFERENCE_PRICE = 100.0   # At or above this, the floor is exactly MIN_CREDIT_USD
+MIN_CREDIT_USD_FLOOR = 15              # Hard bottom; never scale below this
+
+
+def min_credit_usd_for(spot=None) -> float:
+    """The credit floor for one underlying, in dollars per contract.
+
+    ONE definition. Four places enforce this floor — assessment.evaluate_gates,
+    strike_validator, auto_paper_cycle._candidate_passes_minimum and main.py — and every prior
+    enforcement leak in this system came from the same rule being re-implemented rather than
+    shared. Callers pass the spot; callers that do not know it get the flat floor unchanged,
+    which is the conservative direction.
+    """
+    base = float(MIN_CREDIT_USD)
+    if not CREDIT_FLOOR_SCALES_WITH_PRICE or not spot:
+        return base
+    try:
+        s = float(spot)
+    except (TypeError, ValueError):
+        return base
+    if s <= 0:
+        return base
+    scaled = base * (s / float(CREDIT_FLOOR_REFERENCE_PRICE))
+    return round(max(float(MIN_CREDIT_USD_FLOOR), min(base, scaled)), 2)
 MIN_DTE = 25                      # Minimum days to expiration (targets the 25–45 DTE window)
 MAX_DTE = 45                      # Maximum days to expiration
 PREFERRED_DTE_TARGET = 35         # Prefer contracts near this DTE when multiple are valid

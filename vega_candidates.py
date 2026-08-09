@@ -335,6 +335,13 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                 pop_implied = round(1 - d, 3)
                 roi = round(credit_usd / max_loss, 3) if max_loss > 0 else None
                 cand = {
+                    # The candidate carries the price it was built against. The credit floor
+                    # now scales with the underlying (config.min_credit_usd_for), and the
+                    # auto-open path re-checks that floor from a JSON snapshot where only the
+                    # enclosing ROW knew the price — so without this the two enforcement sites
+                    # would compute different floors from the same candidate. Snapshots written
+                    # before this field exists fall back to the flat floor, which is stricter.
+                    "spot": round(float(current_price), 4) if current_price else None,
                     "ticker": ticker, "expiration": exp, "dte": dte,
                     "short_strike": short["strike"], "long_strike": long_strike, "width": width,
                     "short_bid": short.get("bid"), "short_ask": short.get("ask"), "short_mid": short.get("mid"),

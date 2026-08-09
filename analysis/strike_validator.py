@@ -146,10 +146,13 @@ def validate_strike(
 
     # ── RULE 5: Minimum credit check ──
     credit_usd = option_data.get("credit_usd", 0)
-    if credit_usd > 0 and credit_usd < config.MIN_CREDIT_USD:
+    # Price-scaled floor, one definition (config.min_credit_usd_for) shared with
+    # assessment.evaluate_gates, auto_paper_cycle and main.
+    _min_credit = config.min_credit_usd_for(current_price)
+    if credit_usd > 0 and credit_usd < _min_credit:
         reason = (
-            f"Credit ${credit_usd:.2f} per contract below minimum ${config.MIN_CREDIT_USD:.2f}. "
-            f"Not worth the trade cost and execution risk."
+            f"Credit ${credit_usd:.2f} per contract below minimum ${_min_credit:.2f} "
+            f"(underlying ${current_price:.2f}). Not worth the trade cost and execution risk."
         )
         logger.debug(f"[validator] REJECT {ticker} {short_strike}: {reason}")
         return _reject(reason, "INSUFFICIENT_CREDIT", warnings)
