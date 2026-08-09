@@ -125,8 +125,74 @@ def data_quality():
               f"{getattr(config, 'CHAIN_QUALITY_GOOD_RATIO', 0.70):.0%}.")
 
 
+def btc():
+    """The BTC layer: what it reads now, and how its claims are grading.
+
+    Deliberately shown next to the equity record rather than in its own tool. The whole point of
+    routing BTC claims into VEGA's prediction ledger instead of a private forecast table is that
+    the two become comparable — a separate screen would undo that on the display side.
+    """
+    if not getattr(config, "BTC_SIGNAL_ENABLED", True):
+        return
+    _hdr("3 · BITCOIN LAYER  (free data · advisory only)")
+    try:
+        from data import crypto
+        s = crypto.snapshot()
+    except Exception as e:
+        print(f"  crypto layer unavailable: {e}")
+        return
+
+    if not s.get("ok"):
+        print(f"  {_c('No BTC read this cycle.', Y)} Deribit or Coinbase did not answer; "
+              f"treat as absence of information, not a neutral reading.")
+    else:
+        vrp = s.get("btc_vrp_pp")
+        print(f"  BTC spot              ${s['btc_spot']:,.0f}")
+        print(f"  implied (DVOL)        {s['dvol']:.2f}%   realised 30d {s['btc_rv_30d']:.2f}%")
+        print(f"  BTC variance premium  {_c(f'{vrp:+.2f}pp', G if (vrp or 0) > 0 else Y)}"
+              f"   (implied over realised)")
+
+    try:
+        from analysis import btc_signal
+        from data import fetcher, technicals
+        for tk in sorted(getattr(config, "BTC_PROXY_TICKERS", {"IBIT"})):
+            ch = fetcher.get_options_chain(tk, config.MIN_DTE, config.MAX_DTE)
+            px = fetcher.get_price_data(tk, period="5d")
+            if not ch or px is None or px.empty:
+                continue
+            iv = technicals.estimate_atm_iv(ch, float(px["Close"].iloc[-1]))
+            x = btc_signal.evaluate(tk, iv, s)
+            if x.get("available"):
+                gap = x["iv_gap_pp"]
+                col = Y if abs(gap) >= getattr(config, "BTC_IV_GAP_WIDE_PP", 3.0) else D
+                print(f"  {tk} IV vs BTC         {x['proxy_iv_pp']:.2f}% vs {x['dvol']:.2f}%"
+                      f"   gap {_c(f'{gap:+.2f}pp', col)}  [{x['reading']}]")
+    except Exception as e:
+        print(f"  cross-venue read unavailable: {e}")
+
+    try:
+        from analysis import btc_forecast as bf
+        from analysis import predictions as pred
+        g = pred.grade(cohort=bf.COHORT)
+        n = g["total_claims"]
+        if not n:
+            print(f"  forecast claims       {_c('none yet', D)} — the first records on the next cycle")
+        else:
+            d = (g["by_type"] or {}).get("direction")
+            print(f"  forecast claims       {n} made · {g['resolved']} resolved · "
+                  f"{g['open']} awaiting their 14-day horizon")
+            if d:
+                col = G if d["gradeable"] and (d["brier"] or 1) < 0.25 else (Y if d["gradeable"] else D)
+                print(f"    direction           n={d['n']} hit {d['hit_rate']:.0f}%  "
+                      f"brier {d['brier']}  {_c(d['verdict'][:70], col)}")
+            else:
+                print(f"    {_c('Nothing resolved yet — first grades in ~14 days.', D)}")
+    except Exception as e:
+        print(f"  forecast ledger unavailable: {e}")
+
+
 def record():
-    _hdr("3 · THE RECORD, BY COHORT")
+    _hdr("4 · THE RECORD, BY COHORT")
     rows = ol.load_records()
     closed = [r for r in rows if r.get("status") == "closed"]
     if not closed:
@@ -150,7 +216,7 @@ def record():
 
 
 def learning():
-    _hdr("4 · WHAT IT HAS LEARNED")
+    _hdr("5 · WHAT IT HAS LEARNED")
     try:
         from analysis import predictions as pred
         g = pred.grade()
@@ -216,6 +282,7 @@ if __name__ == "__main__":
     print(f"\n{B}VEGA STATUS{X}  ·  {datetime.now():%Y-%m-%d %H:%M}")
     health()
     data_quality()
+    btc()
     record()
     learning()
     next_steps()

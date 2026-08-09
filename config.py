@@ -147,6 +147,34 @@ BTC_IV_GAP_WIDE_PP = 3.0          # Vol points before the venues are called mean
                                   # yet; the raw gap is what gets persisted for calibration.
 BTC_RV_WINDOW = 30                # Days of BTC realised vol, annualised on 365 (BTC never closes)
 
+# ── BTC directional forecast (2026-08-09) ────────────────────────────────────
+# One dated, probability-carrying claim per day, written to the SAME prediction ledger as
+# VEGA's own claims. predictions.DIRECTION was already built, scored and tested — and had never
+# been recorded once. This starts the validation clock now rather than after a fusion engine
+# exists, and grades ATLAS on the same scale as everything else instead of in a private table.
+#
+# The model is deliberately small and the confidence deliberately timid: a 20/50 crossover has
+# no business claiming 80%, and the Brier score punishes overconfidence twice. Expect the first
+# verdict to read "underconfident — this deserves more weight". That is the correct place to
+# start, and it is the baseline any later on-chain layer has to beat.
+BTC_FORECAST_ENABLED = True
+BTC_FORECAST_HORIZON_DAYS = 14    # Claims resolve in 14 days; a daily cadence still yields 60
+                                  # samples in 60 days rather than 60 x 14.
+BTC_FLAT_BAND_SIGMAS = 0.5        # "Flat" = within half a 14-day sigma of BTC's OWN vol. At 34
+                                  # vol that is ~±3.4%; the ledger's equity default of ±1% would
+                                  # be 0.15 sigma and make flat unreachable.
+BTC_TREND_FLAT_PCT = 0.5          # 20d/50d SMA gap under this calls flat rather than a side
+BTC_FORECAST_BASE_PROB = 0.52     # Confidence floor for a directional call
+BTC_FORECAST_PROB_STEP = 0.03     # Added per extra unit of agreement between the drivers
+BTC_FORECAST_MAX_PROB = 0.62      # Hard ceiling — this model cannot earn more than this
+BTC_HIGH_VRP_PP = 8.0             # Implied-over-realised above this trims conviction (crowded
+                                  # protection is a confidence signal, never a direction)
+
+# How long a claim may stay unreadable before it is written off. A failed price lookup used to
+# mark a claim `unresolvable` FOREVER — one network blip on the day it came due deleted it from
+# the record, and because the sample only ever shrinks the loss is invisible. Retry instead.
+PREDICTION_RESOLVE_GRACE_DAYS = 5
+
 # ── Chain data quality (2026-08-08) ──────────────────────────────────────────
 # Every signal VEGA produces is a statement about an options chain, and nothing used to record
 # how much of that chain was actually there. The yfinance fallback discards 30-45% of records

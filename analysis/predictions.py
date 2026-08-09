@@ -121,6 +121,25 @@ def _mark(row: Dict, correct: Optional[bool], note: str) -> None:
     row["resolution_note"] = note
 
 
+def _defer(row: Dict, due: date, today: date, note: str, stats: Dict) -> None:
+    """A claim that could not be read today stays OPEN and is retried on the next cycle.
+
+    It is written off only once it has been unreadable for PREDICTION_RESOLVE_GRACE_DAYS past
+    its resolution date, which distinguishes "the data source was down" from "this claim can
+    genuinely never be scored". The attempt count is kept so a claim that quietly fails every
+    day is visible rather than merely absent.
+    """
+    grace = int(_cfg("PREDICTION_RESOLVE_GRACE_DAYS", 5))
+    row["resolve_attempts"] = int(row.get("resolve_attempts") or 0) + 1
+    row["last_resolve_error"] = note
+    if (today - due).days > grace:
+        _mark(row, None, f"{note} (gave up after {grace}d and "
+                         f"{row['resolve_attempts']} attempts)")
+        stats["unresolvable"] += 1
+    else:
+        stats["deferred"] = stats.get("deferred", 0) + 1
+
+
 def resolve(price_lookup, today: Optional[date] = None) -> Dict:
     """Score every claim whose resolution date has passed.
 
@@ -129,7 +148,7 @@ def resolve(price_lookup, today: Optional[date] = None) -> Dict:
     """
     today = today or date.today()
     rows = _read()
-    stats = {"checked": 0, "resolved": 0, "unresolvable": 0}
+    stats = {"checked": 0, "resolved": 0, "unresolvable": 0, "deferred": 0}
     changed = False
 
     for r in rows:
@@ -144,17 +163,21 @@ def resolve(price_lookup, today: Optional[date] = None) -> Dict:
         if due > today:
             continue
         stats["checked"] += 1
+        # A failed price lookup used to mark the claim `unresolvable` FOREVER. One network blip
+        # on the day a claim came due permanently deleted it from the record — and because the
+        # sample only ever shrinks, the loss is invisible: the hit rate still computes, over
+        # fewer claims than were made. On a daily 24/7 asset that quietly eats the validation
+        # sample. A lookup failure is now a RETRY, and only a claim that has stayed unreadable
+        # past the grace window is written off.
         try:
             made = datetime.fromisoformat(r["made_at"]).date()
             bars = price_lookup(r["ticker"], made, due)
         except Exception as e:
-            _mark(r, None, f"price history unavailable: {e}")
-            stats["unresolvable"] += 1
+            _defer(r, due, today, f"price history unavailable: {e}", stats)
             changed = True
             continue
         if not bars:
-            _mark(r, None, "no price history in the claim window")
-            stats["unresolvable"] += 1
+            _defer(r, due, today, "no price history in the claim window", stats)
             changed = True
             continue
 
@@ -233,9 +256,20 @@ def _score(r: Dict, bars: Sequence) -> tuple:
         expect = (ctx.get("expected") or "").lower()
         if entry_px is None or expect not in ("up", "down", "flat"):
             return None, "missing direction context"
+        # The "flat" band was hard-coded at 1%, which is calibrated for an equity over a couple
+        # of weeks. Bitcoin at 34 vol moves ±6.7% over 14 days, so a 1% band is 0.15 sigma —
+        # "flat" becomes unreachable and the claim degrades into a coin flip on noise while
+        # still reporting a hit rate that looks like skill. The band travels WITH the claim,
+        # set by whoever makes it from that asset's own volatility.
+        band = ctx.get("flat_band_pct")
+        try:
+            band = float(band) if band is not None else 1.0
+        except (TypeError, ValueError):
+            band = 1.0
         chg = (final / float(entry_px) - 1) * 100
-        got = "up" if chg > 1 else ("down" if chg < -1 else "flat")
-        return got == expect, f"expected {expect}, price went {got} ({chg:+.1f}%)"
+        got = "up" if chg > band else ("down" if chg < -band else "flat")
+        return got == expect, (f"expected {expect}, price went {got} "
+                               f"({chg:+.1f}% vs ±{band:.1f}% flat band)")
 
     return None, f"no scorer for claim type {ct}"
 

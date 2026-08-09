@@ -764,6 +764,32 @@ def _reprice_and_close_open() -> Tuple[int, int]:
     return marked, closed
 
 
+def _record_btc_forecast() -> Optional[str]:
+    """Write today's BTC directional claim into the shared prediction ledger.
+
+    Runs on BOTH cycle paths, including mark-only, because the forecast is about the asset and
+    not about the book — a day with no new positions is still a day the claim should be on
+    record. Advisory in the strongest sense: it opens nothing, closes nothing, and touches no
+    equity position. A crypto endpoint being down costs one sample, never a cycle.
+    """
+    if not getattr(config, "BTC_FORECAST_ENABLED", True):
+        return None
+    try:
+        from analysis import btc_forecast as bf
+        fc = bf.forecast()
+        pid = bf.record_daily(fc)
+        if pid:
+            _log(f"BTC FORECAST {pid} | {fc['expected'].upper()} "
+                 f"p={fc['probability']:.2f} over {fc['horizon_days']}d "
+                 f"(flat band ±{fc['flat_band_pct']:.1f}%)")
+        else:
+            _log(f"BTC FORECAST abstained: {fc.get('reason', 'no reason given')}")
+        return pid
+    except Exception as e:
+        _log(f"BTC forecast failed: {e}")
+        return None
+
+
 def _resolve_predictions() -> Dict:
     """Mark every claim whose horizon has passed. This is the half of the learning loop that
     turns a recorded assertion into a graded one; without it the ledger only accumulates."""
@@ -785,6 +811,7 @@ def _resolve_predictions() -> Dict:
         stats = pred.resolve(lookup)
         if stats.get("checked"):
             _log(f"PREDICTIONS resolved={stats['resolved']} "
+                 f"deferred={stats.get('deferred', 0)} "
                  f"unresolvable={stats['unresolvable']} of {stats['checked']} due")
         return stats
     except Exception as e:
@@ -855,6 +882,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.mark_only:
             _log("=== AUTO PAPER CYCLE (MARK-ONLY) START ===")
             marked, closed = _reprice_and_close_open()
+            _record_btc_forecast()
             _resolve_predictions()
             _run([sys.executable, "paper_desk.py", "report"])
             _run([sys.executable, "paper_desk.py", "dashboard", "--no-open"])
@@ -881,6 +909,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         opened = _auto_open_from_candidates(cand_data, cand_path.name)
         marked, closed = _reprice_and_close_open()
+        _record_btc_forecast()
         _resolve_predictions()
 
         _run([sys.executable, "paper_desk.py", "report"])
