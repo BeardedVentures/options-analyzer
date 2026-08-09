@@ -92,7 +92,8 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
                      edge_score=None, vrp=None, technical_score=None,
                      term_slope=None, skew_steepness=None, vix_at_entry=None,
                      atm_iv_at_entry=None, rv_at_entry=None,
-                     expected_move_at_entry=None, pop_gap_at_entry=None) -> str:
+                     expected_move_at_entry=None, pop_gap_at_entry=None,
+                     btc_iv_gap_pp=None, btc_vrp_pp=None) -> str:
     """
     Open a PAPER position from a real candidate (or manual entry). Records the entry credit you
     would realistically collect; net P/L on close subtracts Robinhood round-trip commissions.
@@ -236,6 +237,13 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
         # it, so the one number VEGA most needs graded was the one number never written down.
         # Negative means the engine is LESS confident than the market — worth knowing too.
         "pop_gap_at_entry": pop_gap_at_entry,
+        # ── Cross-venue volatility (BTC trackers only; None everywhere else) ──
+        # DVOL minus this ETF's ATM IV, in vol points. The RAW measurement is what is stored,
+        # never the label: BTC_IV_GAP_WIDE_PP is a reasoned guess and has graded nothing yet, so
+        # persisting the band would freeze a guess into the record. Store the number, let the
+        # calibration engine set the band once enough IBIT trades carrying it have closed.
+        "btc_iv_gap_pp": btc_iv_gap_pp,
+        "btc_vrp_pp": btc_vrp_pp,
         "max_loss_per_contract": (round((width - credit) * 100, 2) if (width and credit < width) else None),
         # Live mark (updated on each rescan while open) → unrealized P/L
         "current_mark": None,

@@ -230,11 +230,18 @@ def _entry_state(c: Dict, ctx: Dict) -> Dict:
     if gap is None and true_pop is not None:
         gap = round(true_pop - (_f(c.get("pop_implied")) or 0.0), 4)
 
+    # Cross-venue vol, present only on BTC trackers. Read off the analysis block the assessment
+    # already produced rather than re-fetching — the scan measured it at candidate time, and a
+    # second read at open time would record a different number from the one that was judged.
+    bx = (c.get("analysis") or {}).get("btc_cross_venue") or {}
+
     return {
         "atm_iv_at_entry": round(atm_iv, 4) if atm_iv else None,
         "rv_at_entry": (lambda r: round(r, 4) if r else None)(_f(ctx.get("rv"))),
         "expected_move_at_entry": em,
         "pop_gap_at_entry": gap,
+        "btc_iv_gap_pp": bx.get("iv_gap_pp") if bx.get("available") else None,
+        "btc_vrp_pp": bx.get("btc_vrp_pp") if bx.get("available") else None,
     }
 
 
@@ -485,6 +492,8 @@ def _auto_open_from_candidates(cand_data: Dict, source_file: str) -> int:
                 rv_at_entry=_entry["rv_at_entry"],
                 expected_move_at_entry=_entry["expected_move_at_entry"],
                 pop_gap_at_entry=_entry["pop_gap_at_entry"],
+                btc_iv_gap_pp=_entry["btc_iv_gap_pp"],
+                btc_vrp_pp=_entry["btc_vrp_pp"],
             )
             # Write down every falsifiable claim this trade carries. The engine has always
             # made these assertions and always discarded them, which is why nothing it

@@ -129,6 +129,24 @@ STOP_LOSS_MULTIPLIER = 1.5        # Stop if spread reaches 1.5x credit received 
 ALLOW_OVERSIZED_TRADES = True     # Account-agnostic output — risk tiers handle sizing
 MAX_QUOTE_SPREAD_PCT = 0.35       # Reject option legs with (ask-bid)/mid above this threshold
 
+# ── BTC cross-venue signal (2026-08-09) ──────────────────────────────────────
+# IBIT options and BTC options price the same underlying risk in two venues. Deribit publishes
+# DVOL (BTC 30-day implied vol) for free; IBIT's ATM IV comes off a chain already being fetched.
+# The gap between them costs nothing to measure and needs no forecast to be informative.
+#
+# ADVISORY BY CONSTRUCTION: this never enters the gates dict, so it cannot block a trade
+# regardless of what it reads. See analysis/btc_signal.py.
+BTC_SIGNAL_ENABLED = True
+# Only underlyings that track BTC ~1:1. Measured 2026-08-09: DVOL 34.24 vs IBIT 32.72 (a 1.5pt
+# gap between two prices for the same risk) but vs COIN 65.23 (a 31pt gap). COIN is an operating
+# company with its own equity risk, so comparing its IV to BTC's measures the difference between
+# the assets, not a mispricing of one. Do not add it.
+BTC_PROXY_TICKERS = {"IBIT"}
+BTC_IV_GAP_WIDE_PP = 3.0          # Vol points before the venues are called meaningfully apart.
+                                  # PROVISIONAL — reasoned, not fitted. Nothing has graded it
+                                  # yet; the raw gap is what gets persisted for calibration.
+BTC_RV_WINDOW = 30                # Days of BTC realised vol, annualised on 365 (BTC never closes)
+
 # ── Chain data quality (2026-08-08) ──────────────────────────────────────────
 # Every signal VEGA produces is a statement about an options chain, and nothing used to record
 # how much of that chain was actually there. The yfinance fallback discards 30-45% of records

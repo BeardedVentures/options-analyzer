@@ -89,7 +89,8 @@ def test_every_field_degrades_independently(ctx):
     """A missing IV must not cost the trade its pop_gap. Partial data is the normal case."""
     c = make_candidate(true_pop=0.81, pop_implied=0.78)
     s = apc._entry_state(c, ctx)
-    assert set(s) == {"atm_iv_at_entry", "rv_at_entry", "expected_move_at_entry", "pop_gap_at_entry"}
+    assert set(s) == {"atm_iv_at_entry", "rv_at_entry", "expected_move_at_entry",
+                      "pop_gap_at_entry", "btc_iv_gap_pp", "btc_vrp_pp"}
     assert s["pop_gap_at_entry"] == 0.03          # computable regardless of the vol context
 
 

@@ -174,6 +174,32 @@ def _otm_buffer_ok(ticker: str, spot: float, short_strike: float, side: str) -> 
     return pct >= float(_cfg("MIN_STRIKE_BUFFER_STOCK", 0.05))
 
 
+def _btc_cross_venue(ctx: Dict) -> Dict:
+    """DVOL-versus-ETF-IV for a BTC tracker. Costs one cached HTTP read, and only for the
+    handful of tickers in BTC_PROXY_TICKERS — the other fifty-odd names never touch it.
+
+    Fails to an `available: False` dict rather than raising: a crypto endpoint being down must
+    narrow what can be said about IBIT, never stop the equity scan that shares this function.
+    """
+    ticker = ctx.get("ticker") or ""
+    try:
+        from analysis import btc_signal
+        if not btc_signal.applies_to(ticker):
+            return {"available": False, "reading": "not_applicable"}
+
+        iv = ctx.get("atm_iv")
+        if iv is None and ctx.get("puts") and ctx.get("spot"):
+            from data import technicals
+            iv = technicals.estimate_atm_iv(ctx["puts"], ctx["spot"])
+            ctx["atm_iv"] = iv
+
+        from data import crypto
+        return btc_signal.evaluate(ticker, iv, crypto.snapshot())
+    except Exception as e:
+        logger.debug("[assessment] btc cross-venue failed for %s: %s", ticker, e)
+        return {"available": False, "reading": "unavailable", "note": str(e)[:120]}
+
+
 def _min_credit_floor(spot) -> float:
     """The price-scaled credit floor. Delegates to config so the rule has one definition —
     see config.min_credit_usd_for. Falls back to the flat floor if config predates it."""
@@ -287,6 +313,16 @@ def assess(spread: Dict, ctx: Dict, strategy: str = BULL_PUT) -> Dict:
     a["term_structure"] = ctx.get("term_structure") or {}
     a["skew"] = ctx.get("skew") or {}
 
+    # Cross-venue volatility, for BTC-tracking underlyings only. Lives HERE — in the shared
+    # assessment — rather than in strategies.evaluate(), which only main.py calls: putting it
+    # there would have left the fast scan and the auto-trader blind to it and re-opened the
+    # two-engine divergence this module exists to close.
+    #
+    # It is deliberately not a gate. `qualified = all(gates.values())`, so a signal that never
+    # enters the gates dict cannot block a trade whatever it reads — advisory by construction
+    # rather than by remembering to set a flag.
+    a["btc_cross_venue"] = _btc_cross_venue(ctx)
+
     side = spread.get("side", "put")
     try:
         from analysis.horizon import calibrate
@@ -383,6 +419,10 @@ def _narrate(out: Dict, spread: Dict, ctx: Dict) -> str:
         reach = hz.get("strike_reach", "unknown").replace("_", " ")
         bits.append(f"Over {hz.get('dte')} days the market prices ±${hz['expected_move']:,.2f}; "
                     f"the strike is {reach}.")
+
+    bx = a.get("btc_cross_venue") or {}
+    if bx.get("available"):
+        bits.append(bx["note"])
 
     et = a.get("entry_timing") or {}
     if et.get("readiness"):
