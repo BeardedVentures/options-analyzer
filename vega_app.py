@@ -69,7 +69,7 @@ _scan_status = {"running": False, "msg": "", "at": None}
 _COPILOT_PEERS: list = []
 _COPILOT_CTX: dict = {}
 
-VIEWS = ("today", "brief", "track", "open", "history", "lottery")
+VIEWS = ("today", "brief", "track", "open", "bitcoin", "history", "lottery")
 IVR_MIN = getattr(config, "MIN_IV_RANK", 45)
 
 # Component max points for the score composition panel (mirrors edge_calculator).
@@ -2911,9 +2911,143 @@ def view_track():
     return f'<h2>Track Record — the learning loop</h2>{intro}{stale_banner}{tilerow}{cal}{postbl}{newsblk}{costfoot}'
 
 
+def view_bitcoin():
+    """The BTC layer: what the free feeds read now, and how its claims are grading.
+
+    Everything on this page is advisory. Nothing here gates a trade, opens one or closes one —
+    the cross-venue gap never enters the gates dict, and the daily forecast writes a claim to the
+    prediction ledger and nothing else. It earns its place on the nav by being FALSIFIABLE: every
+    number is dated, and the claims resolve on a schedule whether or not anyone looks.
+    """
+    try:
+        from data import crypto
+        from analysis import btc_signal, btc_forecast as bf
+        from analysis import predictions as pred
+    except Exception as e:
+        return f'<h2>Bitcoin</h2><div class="empty">Crypto layer unavailable: {esc(str(e))}</div>'
+
+    intro = ('<p class="q">Is Bitcoin\'s own options market pricing risk differently from IBIT\'s '
+             '— and is the daily directional call any good?</p>')
+
+    s = crypto.snapshot()
+    if not s.get("ok"):
+        head = ('<div class="warn">No BTC read this cycle — Deribit or Coinbase did not answer. '
+                'Treat this as absence of information, not a neutral reading.</div>')
+        tiles = ""
+    else:
+        head = ""
+        vrp = s.get("btc_vrp_pp")
+        tiles = ('<div class="cards">'
+                 + _btc_card("BTC spot", f'${s["btc_spot"]:,.0f}', "Deribit index")
+                 + _btc_card("Implied (DVOL)", f'{s["dvol"]:.1f}%', "BTC 30-day implied vol")
+                 + _btc_card("Realised 30d", f'{s["btc_rv_30d"]:.1f}%', "annualised on 365 — BTC never closes")
+                 + _btc_card("Variance premium", f'{vrp:+.1f}pp',
+                             "implied over realised",
+                             "var(--green)" if (vrp or 0) > 0 else "var(--amber)")
+                 + '</div>')
+
+    # ── Cross-venue ──
+    rows = ""
+    for tk in sorted(getattr(config, "BTC_PROXY_TICKERS", {"IBIT"})):
+        try:
+            from data import fetcher, technicals
+            ch = fetcher.get_options_chain(tk, config.MIN_DTE, config.MAX_DTE)
+            px = fetcher.get_price_data(tk, period="5d")
+            if not ch or px is None or px.empty:
+                continue
+            iv = technicals.estimate_atm_iv(ch, float(px["Close"].iloc[-1]))
+            x = btc_signal.evaluate(tk, iv, s)
+        except Exception:
+            continue
+        if not x.get("available"):
+            continue
+        gap = x["iv_gap_pp"]
+        wide = float(getattr(config, "BTC_IV_GAP_WIDE_PP", 3.0))
+        cls = "pos" if gap <= -wide else ("neg" if gap >= wide else "dim")
+        rows += (f'<tr><td class="l"><b>{esc(tk)}</b></td>'
+                 f'<td class="num">{x["proxy_iv_pp"]:.2f}%</td>'
+                 f'<td class="num">{x["dvol"]:.2f}%</td>'
+                 f'<td class="num"><span class="{cls}">{gap:+.2f}pp</span></td>'
+                 f'<td class="l">{esc(x["reading"].replace("_", " "))}</td>'
+                 f'<td class="l dim">{esc(x["note"])}</td></tr>')
+    xv = (f'<h2>Cross-venue volatility</h2>'
+          f'<div class="board"><table><thead><tr class="col"><th class="l">Ticker</th>'
+          f'<th>ETF IV</th><th>BTC DVOL</th><th>Gap</th><th class="l">Reading</th>'
+          f'<th class="l">What it means</th></tr></thead><tbody>{rows}</tbody></table></div>'
+          if rows else
+          '<h2>Cross-venue volatility</h2><div class="empty">No comparable read this cycle.</div>')
+
+    # ── The forecast ledger ──
+    try:
+        g = pred.grade(cohort=bf.COHORT)
+        claims = [r for r in pred.load()
+                  if (r.get("context") or {}).get("cohort") == bf.COHORT]
+    except Exception as e:
+        return f'{intro}{head}{tiles}{xv}<div class="empty">Ledger unavailable: {esc(str(e))}</div>'
+
+    d = (g.get("by_type") or {}).get("direction")
+    if not claims:
+        fc_block = ('<h2>Daily directional claim</h2>'
+                    '<div class="empty">No claims yet — the first records on the next cycle.</div>')
+    else:
+        min_n = int(getattr(config, "PREDICTION_MIN_FOR_GRADE", 10))
+        n_res = g["resolved"]
+        bar = int(min(n_res / max(min_n, 1), 1.0) * 100)
+        verdict = (d["verdict"] if d else
+                   f"Nothing resolved yet — the first claims mature on their 14-day horizon.")
+        grade_line = (f'<div class="kv"><span class="k">Grading progress</span>'
+                      f'<b>{n_res}/{min_n} resolved</b></div>'
+                      f'<div class="sc"><div class="row"><div class="bar">'
+                      f'<i class="{"low" if bar < 50 else ""}" style="width:{bar}%"></i></div></div></div>'
+                      f'<div class="dim" style="margin-top:6px">{esc(verdict)}</div>')
+
+        crows = ""
+        for r in sorted(claims, key=lambda x: x.get("made_at") or "", reverse=True)[:20]:
+            ctx = r.get("context") or {}
+            st = r.get("status")
+            if st == "resolved":
+                mark = ('<span class="pos">correct</span>' if r.get("correct")
+                        else '<span class="neg">wrong</span>')
+            elif st == "unresolvable":
+                mark = '<span class="dim">unresolvable</span>'
+            else:
+                mark = '<span class="dim">awaiting</span>'
+            exp = (ctx.get("expected") or "").upper()
+            ecls = "pos" if exp == "UP" else ("neg" if exp == "DOWN" else "dim")
+            crows += (f'<tr><td class="l num">{esc(str(r.get("made_at"))[:10])}</td>'
+                      f'<td class="l"><span class="{ecls}">{esc(exp)}</span></td>'
+                      f'<td class="num">{(r.get("probability") or 0)*100:.0f}%</td>'
+                      f'<td class="num">±{ctx.get("flat_band_pct", "—")}%</td>'
+                      f'<td class="num">${(ctx.get("price_at_claim") or 0):,.0f}</td>'
+                      f'<td class="l num">{esc(r.get("resolves_on"))}</td>'
+                      f'<td class="l">{mark}</td>'
+                      f'<td class="l dim">{esc((r.get("resolution_note") or "")[:70])}</td></tr>')
+        fc_block = (f'<h2>Daily directional claim</h2>{grade_line}'
+                    f'<div class="board" style="margin-top:10px"><table><thead><tr class="col">'
+                    f'<th class="l">Made</th><th class="l">Call</th><th>Conf</th><th>Flat band</th>'
+                    f'<th>BTC at claim</th><th class="l">Resolves</th><th class="l">Result</th>'
+                    f'<th class="l">Note</th></tr></thead><tbody>{crows}</tbody></table></div>')
+
+    foot = ('<div class="foot">All data here is free and unauthenticated: Deribit publishes DVOL '
+            '(BTC 30-day implied vol) and its spot index; Coinbase serves daily candles. No broker '
+            'is connected and no crypto order can be placed from this system. The cross-venue gap '
+            'never enters the gates dict, so it cannot block or force a trade whatever it reads. '
+            'Band thresholds are provisional and ungraded — the raw gap is what gets stored, so '
+            'calibration can set the bands from outcomes rather than from a guess.</div>')
+    return f'<h1>Bitcoin</h1>{intro}{head}{tiles}{xv}{fc_block}{foot}'
+
+
+def _btc_card(label, value, sub, color=None):
+    style = f' style="color:{color}"' if color else ""
+    return (f'<div class="card"><div class="lab">{esc(label)}</div>'
+            f'<div class="val"{style}>{esc(value)}</div>'
+            f'<div class="s">{esc(sub)}</div></div>')
+
+
 def nav(view):
     links = ""
-    labels = {"today": "Today", "brief": "Brief", "track": "Track Record", "open": "Open", "history": "History", "lottery": "Lottery"}
+    labels = {"today": "Today", "brief": "Brief", "track": "Track Record", "open": "Open",
+              "bitcoin": "Bitcoin", "history": "History", "lottery": "Lottery"}
     for v in VIEWS:
         links += f'<a class="{"on" if v == view else ""}" href="/?view={v}">{labels[v]}</a>'
     is_open, _ = market_status()
@@ -2943,6 +3077,8 @@ def render(view="today", flash=""):
         content = view_track()
     elif view == "open":
         content = view_open(open_)
+    elif view == "bitcoin":
+        content = view_bitcoin()
     elif view == "history":
         content = view_history(s, closed)
     elif view == "lottery":

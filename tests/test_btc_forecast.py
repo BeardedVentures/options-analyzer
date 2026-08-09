@@ -266,3 +266,42 @@ def test_a_dead_crypto_endpoint_costs_one_sample_not_the_cycle(monkeypatch):
     import auto_paper_cycle as apc
     monkeypatch.setattr(bf, "forecast", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
     assert apc._record_btc_forecast() is None      # logged, swallowed, cycle continues
+
+
+# ── The cockpit page (2026-08-09) ─────────────────────────────────────────────────────────────
+
+def test_bitcoin_is_a_real_nav_view():
+    """The BTC layer went into the terminal status board first. A dashboard the operator opens
+    is a different surface, and work that only exists in a CLI tool is invisible to them."""
+    import vega_app as app
+    assert "bitcoin" in app.VIEWS
+    assert 'href="/?view=bitcoin"' in app.nav("today")
+    assert 'class="on"' in app.nav("bitcoin")
+
+
+def test_the_bitcoin_view_dispatches(monkeypatch):
+    import inspect
+    import vega_app as app
+    assert 'view == "bitcoin"' in inspect.getsource(app.render)
+
+
+def test_the_page_survives_a_dead_crypto_feed(monkeypatch):
+    """A crypto outage must degrade this page, never 500 the cockpit that eleven open equity
+    positions are managed from."""
+    import vega_app as app
+    from data import crypto
+    monkeypatch.setattr(crypto, "snapshot", lambda: {"ok": False})
+    html = app.view_bitcoin()
+    assert "No BTC read this cycle" in html
+    assert "absence of information" in html
+
+
+def test_the_page_states_that_no_broker_is_connected():
+    """While the 'no orders are placed' guarantee is still STRUCTURAL — true because no broker
+    integration exists — the page should say so plainly. It stops being structural the day a
+    Robinhood key with order permissions is added."""
+    import vega_app as app
+    from data import crypto
+    html = app.view_bitcoin()
+    assert "No broker is connected" in html
+    assert "cannot block or force a trade" in html
