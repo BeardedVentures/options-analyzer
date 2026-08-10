@@ -31,6 +31,7 @@ Design constraints, in priority order:
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Dict, List, Optional, Sequence
 
 import sys
@@ -263,6 +264,85 @@ def natural_credit(short_leg: Dict, long_leg: Dict, width: float) -> Dict:
         "natural_credit_usd": round(per_share * 100, 2),
         "natural_credit_to_width": round(per_share / w, 4) if w > 0 else 0.0,
     }
+
+
+def quotes_are_live(now=None) -> bool:
+    """Are option quotes currently being made, or are we reading yesterday's last prints?
+
+    US equity options trade 09:30-16:00 ET. Outside that the book is not being maintained and
+    the bid-ask blows out: measured on GOOG 335/330 on 2026-08-10, the short leg's spread went
+    from $0.25 at 14:47 to $0.90 at 18:03 and the long's from $0.20 to $0.60. The fillable
+    credit on that one spread fell from $100 to $30 with no change in the underlying.
+
+    That matters because the gates are now enforced on the fillable credit. A scan run after
+    the close would reject every candidate on the watchlist and report an empty board as
+    though the market were paying nothing.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        now = now or datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        try:
+            import pytz
+            now = now or datetime.now(pytz.timezone("America/New_York"))
+        except Exception:
+            return False        # cannot tell the time zone: assume stale, never assume fresh
+    if now.weekday() >= 5:
+        return False
+    hm = now.hour * 60 + now.minute
+    return (9 * 60 + 30) <= hm < (16 * 60)
+
+
+def fill_basis(short_leg: Dict, long_leg: Dict, width: float,
+               live: Optional[bool] = None) -> Dict:
+    """The credit to gate and rank on, and an honest label for where it came from.
+
+    LIVE quotes -> the natural credit, which is what a fill actually pays.
+
+    STALE quotes -> a MODELLED credit, because the natural computed from an unmaintained book
+    is not a conservative estimate, it is a meaningless one. The model is the mid haircut by
+    MODELLED_FILL_RATIO, and that ratio is measured rather than assumed: across the 158
+    positively-priced candidates in the 2026-08-10 14:47 intraday scan, the natural credit ran
+    a median 78% of the mid.
+
+    The modelled number is never presented as fillable. Callers carry `fill_basis` through to
+    the board so an after-hours read is marked provisional instead of quietly passing for a
+    live one — the whole failure this exists to prevent is a price that looks executable and
+    is not.
+
+    Re-measure the ratio as the ledger grows; a single global haircut is a textbook constant of
+    exactly the kind this codebase keeps finding, and it is only defensible while it is
+    explicitly provisional and explicitly derived from data.
+    """
+    if live is None:
+        live = quotes_are_live()
+    nat = natural_credit(short_leg, long_leg, width)
+
+    def _f(x):
+        try:
+            return float(x or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    mid_ps = round(_f(short_leg.get("mid")) - _f(long_leg.get("mid")), 4)
+    w = _f(width)
+    if live:
+        out = dict(nat)
+        out.update({"fill_basis": "natural", "quotes_live": True})
+    else:
+        ratio = float(_cfg("MODELLED_FILL_RATIO", 0.78))
+        ps = round(mid_ps * ratio, 4)
+        out = {
+            "natural_credit_per_share": ps,
+            "natural_credit_usd": round(ps * 100, 2),
+            "natural_credit_to_width": round(ps / w, 4) if w > 0 else 0.0,
+            "fill_basis": "modelled", "quotes_live": False,
+        }
+    # Both raw measurements travel with the decision either way, so a later audit can ask
+    # whether a call was wrong because the model was wrong or because the inputs were.
+    out["observed_natural_per_share"] = nat["natural_credit_per_share"]
+    out["mid_credit_per_share"] = mid_ps
+    return out
 
 
 def _min_credit_floor(spot) -> float:

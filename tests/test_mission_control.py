@@ -340,3 +340,32 @@ def test_the_btc_board_reads_the_same_snapshot_the_robot_trades_from():
 def test_the_btc_board_degrades_without_a_snapshot(monkeypatch):
     monkeypatch.setattr(vega_app, "_latest_candidates", lambda: (None, None))
     assert "No candidate snapshot" in _txt(vega_app._btc_candidates_block())
+
+
+def test_a_modelled_after_hours_price_is_never_shown_as_fillable():
+    """The whole point of pricing on the natural basis is that the board never quotes a price
+    its reader cannot get — and after the close nobody can get any of them.
+
+    Asserted against the real render rather than a hand-built board: a synthetic trade dict
+    that drifts from what main.py emits would pass while the live page said nothing.
+    """
+    import inspect
+    src = inspect.getsource(vega_app.view_today)
+    assert 'fill_basis") == "modelled"' in src, "the board must detect a modelled credit"
+    assert "Markets closed" in src and "indicative" in src
+
+    from analysis.assessment import quotes_are_live
+    html = vega_app.render("today")
+    shown = "Markets closed" in html
+    trades = vega_app.load_board().get("trades") or []
+    modelled = any(t.get("fill_basis") == "modelled" for t in trades)
+    assert shown == modelled, (
+        "the banner must appear exactly when a modelled credit is on the board "
+        f"(shown={shown}, modelled={modelled}, live={quotes_are_live()})")
+
+
+def test_the_adapter_carries_the_fill_basis_through():
+    """Dropping it here would let a modelled price reach the board looking exactly like a
+    fillable one."""
+    import inspect
+    assert '"fill_basis"' in inspect.getsource(vega_app._adapt_engine)

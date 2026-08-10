@@ -262,11 +262,22 @@ def select_bull_put_pair(
                 _bump("short_buffer_too_tight")
                 continue
 
+        # A DELTA FLOOR. Without one the sweep happily reaches 0.02-delta strikes that carry
+        # almost no premium; they cannot clear the credit floors anyway, so they only cost
+        # enumeration and clutter the diagnostics. Matches the fast scan's band.
+        if abs_delta < float(getattr(config, "SHORT_STRIKE_MIN_DELTA", 0.12)):
+            _bump("short_delta_too_low")
+            continue
+
         dte = int(opt.get("dte", 0) or 0)
         dte_distance = abs(dte - target_dte)
         dte_outside_target = 0 if dte_distance <= dte_tolerance else 1
         short_candidates.append(((dte_outside_target, dte_distance, abs(abs_delta - target_delta)), opt))
 
+    # The DTE/delta ordering is retained only so the diagnostics read sensibly; it no longer
+    # decides anything. EVERY surviving short is paired and the winner is chosen on the
+    # fillable credit — a preference expressed at search time would silently pre-empt the
+    # gates and the edge score, which are the things that are supposed to do the filtering.
     short_candidates.sort(key=lambda x: x[0])
 
     # Multi-strike comparison: instead of returning the FIRST valid pair (closest DTE/delta),
@@ -319,8 +330,8 @@ def select_bull_put_pair(
             # and $7 against a $19 floor. vega_candidates was fixed on 2026-08-07; this path
             # never was, so the board has been showing "passes all 11 gates" computed against
             # a price that does not exist.
-            from analysis.assessment import natural_credit as _natural
-            nat = _natural(short_put, long_put, spread_width)
+            from analysis.assessment import fill_basis as _fill
+            nat = _fill(short_put, long_put, spread_width)
             nat_ps = nat["natural_credit_per_share"]
             if nat_ps <= 0:
                 # ~25% of pairs price this way: at natural prices they are DEBIT spreads.
@@ -835,6 +846,12 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "short_mid": short_put.get("mid"),
         "long_bid": long_put.get("bid"), "long_ask": long_put.get("ask"),
         "width": metrics.get("spread_width"),
+        # Where the credit came from: a live book, or a model of one. The board
+        # marks the difference rather than letting an after-hours read pass for
+        # an executable price.
+        "fill_basis": metrics.get("fill_basis"),
+        "quotes_live": metrics.get("quotes_live"),
+        "observed_natural_per_share": metrics.get("observed_natural_per_share"),
     }
 
     # ── Shared assessment (analysis/assessment.py) ──

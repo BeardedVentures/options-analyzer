@@ -46,6 +46,19 @@ MIN_CONTRACTS = 1                 # Always show at least 1-contract setup, even 
 # ─────────────────────────────────────────────
 SHORT_STRIKE_MIN_OTM_PCT = 0.03   # Short strike must be minimum 3% OTM from current price
 SHORT_STRIKE_TARGET_DELTA = 0.20  # Target delta for short leg (range 0.15-0.25)
+# Search floor. The engine sweeps every short strike in [MIN, MAX] delta and picks the
+# winner on fillable credit rather than on nearness to TARGET -- the gates and the edge
+# score are what should filter, not the search. Below this a strike carries so little
+# premium it cannot clear the credit floors anyway, so it is only enumeration cost.
+SHORT_STRIKE_MIN_DELTA = 0.12
+
+# When quotes are STALE (outside 09:30-16:00 ET) the bid-ask blows out and the natural credit
+# stops meaning anything -- GOOG 335/330 read $100 fillable at 14:47 and $30 at 18:03 with no
+# move in the underlying. Off-hours the engine models the fill as the mid haircut by this
+# ratio and marks the board PROVISIONAL. Measured, not assumed: across the 158 positively
+# priced candidates in the 2026-08-10 14:47 intraday scan the natural ran a median 78% of mid.
+# Re-measure as the ledger grows.
+MODELLED_FILL_RATIO = 0.78
 SHORT_STRIKE_MAX_DELTA = 0.30     # Absolute maximum delta — reject anything above this
 MIN_STRIKE_BUFFER_SPY = 10.00     # SPY/QQQ: short strike must be $10+ below current price
 MIN_STRIKE_BUFFER_STOCK = 0.05    # Individual stocks: 5% minimum buffer

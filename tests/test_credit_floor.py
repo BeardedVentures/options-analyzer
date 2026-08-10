@@ -190,3 +190,49 @@ def test_no_strategy_path_still_gates_on_the_mid(mod, fn):
         pytest.skip(f"{mod}.{fn} not present")
     assert "natural_credit" in inspect.getsource(f), (
         f"{mod}.{fn} does not use analysis.assessment.natural_credit — it is pricing on mids")
+
+
+# ── Quote freshness (2026-08-10) ──────────────────────────────────────────────────────────────
+
+def test_stale_quotes_do_not_produce_a_fillable_price():
+    """After the close the book is unmaintained and the bid-ask blows out. Measured on GOOG
+    335/330: the short leg's spread went $0.25 -> $0.90 and the long's $0.20 -> $0.60 between
+    14:47 and 18:03, and the fillable credit fell from $100 to $30 with no move in the
+    underlying. Gating on that number reports an empty board as though the market were paying
+    nothing."""
+    from analysis.assessment import fill_basis
+    wide = fill_basis({"bid": 4.90, "ask": 5.80, "mid": 5.35},
+                      {"bid": 4.00, "ask": 4.60, "mid": 4.30}, 5.0, live=False)
+    assert wide["fill_basis"] == "modelled" and wide["quotes_live"] is False
+    # The observed (meaningless) natural is still recorded, never used as the decision.
+    assert wide["observed_natural_per_share"] == pytest.approx(0.30)
+    assert wide["natural_credit_per_share"] > wide["observed_natural_per_share"]
+
+
+def test_live_quotes_use_the_real_fill():
+    from analysis.assessment import fill_basis
+    live = fill_basis({"bid": 5.55, "ask": 5.80, "mid": 5.675},
+                      {"bid": 4.35, "ask": 4.55, "mid": 4.45}, 5.0, live=True)
+    assert live["fill_basis"] == "natural" and live["quotes_live"] is True
+    assert live["natural_credit_per_share"] == pytest.approx(1.00)   # 5.55 - 4.55
+
+
+def test_the_modelled_ratio_is_config_driven_and_documented():
+    """A single global haircut is a textbook constant of exactly the kind this codebase keeps
+    finding. It is only defensible while it stays explicitly provisional and measured."""
+    import config
+    assert 0 < config.MODELLED_FILL_RATIO <= 1.0
+
+
+def test_market_hours_decide_the_basis():
+    import datetime as dt
+    from analysis.assessment import quotes_are_live
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        pytest.skip("no tz database")
+    et = ZoneInfo("America/New_York")
+    assert quotes_are_live(dt.datetime(2026, 8, 10, 11, 0, tzinfo=et)) is True    # Monday 11:00
+    assert quotes_are_live(dt.datetime(2026, 8, 10, 18, 3, tzinfo=et)) is False   # after close
+    assert quotes_are_live(dt.datetime(2026, 8, 10, 9, 0, tzinfo=et)) is False    # pre-open
+    assert quotes_are_live(dt.datetime(2026, 8, 8, 11, 0, tzinfo=et)) is False    # Saturday

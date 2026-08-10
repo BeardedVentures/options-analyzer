@@ -434,6 +434,10 @@ def _adapt_engine(t: dict) -> dict:
     ctw = _f(t.get("credit_to_width_pct"))
     be = g["breakevens"][0] if g["breakevens"] else None
     return {
+        # Where the credit came from. Dropping this in the adapter would let an after-hours
+        # modelled price reach the board looking exactly like a fillable one, which is the
+        # single thing the natural-basis work exists to prevent.
+        "fill_basis": t.get("fill_basis"), "quotes_live": t.get("quotes_live"),
         "source": "engine", "ticker": t.get("ticker"), "strategy": t.get("strategy") or "Bull Put Spread",
         "price": _f(t.get("current_price")), "short": short, "long": long_, "width": width,
         "credit_ps": credit_ps, "credit_usd": credit_usd, "dte": t.get("dte"),
@@ -2156,6 +2160,15 @@ def view_today(board, s, tier):
         prov = ('<div class="provbar">⚡ <b>Fast scan (provisional)</b> — ranked by model POP + ROC. '
                 'Edge, EV $ and True POP are blank here because they need the full engine. '
                 'Run the engine (<code>python main.py</code>) for the graded board.</div>')
+    # Quotes stale → the credits shown are MODELLED, not fillable. Said out loud, because the
+    # whole point of pricing on the natural basis is that the board never quotes a price its
+    # reader cannot get, and after the close nobody can get any of them. Measured 2026-08-10:
+    # GOOG 335/330 was worth $100 fillable at 14:47 and $30 at 18:03 on the same underlying.
+    if trades and any(t.get("fill_basis") == "modelled" for t in trades):
+        prov += ('<div class="provbar">🌙 <b>Markets closed — prices are indicative.</b> '
+                 'Option quotes are not being maintained, so the bid-ask widens and the '
+                 'fillable credit cannot be measured. Credits below are modelled from the mid '
+                 'and are for review, not execution. Re-check at the open before trading.</div>')
     reg_note = (board.get("regime") or {}).get("regime_note")
     reg_html = (f'<div class="lwhy" style="margin:11px 0 0">{esc(reg_note)}</div>'
                 if reg_note else "")

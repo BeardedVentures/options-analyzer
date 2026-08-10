@@ -229,10 +229,13 @@ def build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings
     # path was corrected on 2026-08-07 after GDX opened twice for $9 and $7 of real credit
     # against a $19 floor; bear calls and condors were never touched, so they carried the same
     # defect and then became the whole board once the put side started pricing honestly.
-    # One definition, in analysis.assessment.natural_credit.
-    from analysis.assessment import natural_credit as _natural
+    # One definition, in analysis.assessment.fill_basis, which also falls back to a modelled
+    # fill when quotes are stale — after the close the book is unmaintained and the natural
+    # credit stops meaning anything.
+    from analysis.assessment import fill_basis as _fill
+    _fb = _fill(short, long_, width)
     mid_ps = round((short.get("mid", 0) or 0) - (long_.get("mid", 0) or 0), 2)
-    credit_ps = _natural(short, long_, width)["natural_credit_per_share"]
+    credit_ps = _fb["natural_credit_per_share"]
     if credit_ps <= 0 or width <= 0:
         return None
     credit_usd = round(credit_ps * 100, 0); max_loss = round(width * 100 - credit_usd, 0)
@@ -269,6 +272,7 @@ def build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings
         "natural_credit_per_share": credit_ps, "natural_credit_usd": credit_usd,
         "natural_credit_to_width": round(credit_ps / width, 4) if width else 0,
         "mid_credit_per_share": mid_ps, "mid_credit_usd": round(mid_ps * 100, 0),
+        "fill_basis": _fb["fill_basis"], "quotes_live": _fb["quotes_live"],
         "short_bid": short.get("bid"), "short_ask": short.get("ask"),
         "long_bid": long_.get("bid"), "long_ask": long_.get("ask"), "width": width,
         "credit_to_width_pct": round(credit_ps / width * 100, 1), "true_pop": true_pop,
@@ -302,10 +306,12 @@ def build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, 
     # vertical's execution cost, and the structure where pricing on mids flatters the credit
     # most. Each wing is priced the way it fills: sell the short at its bid, buy the long at
     # its ask.
-    from analysis.assessment import natural_credit as _natural
+    from analysis.assessment import fill_basis as _fill
+    _fbc, _fbp = _fill(cs, cl, wcall), _fill(ps, pl, wput)
+    _fb = _fbc
     mid_ps = round((cs["mid"] - cl["mid"]) + (ps["mid"] - pl["mid"]), 2)
-    credit_ps = round(_natural(cs, cl, wcall)["natural_credit_per_share"]
-                      + _natural(ps, pl, wput)["natural_credit_per_share"], 2)
+    credit_ps = round(_fbc["natural_credit_per_share"]
+                      + _fbp["natural_credit_per_share"], 2)
     if credit_ps <= 0 or width <= 0:
         return None
     credit_usd = round(credit_ps * 100, 0); max_loss = round(width * 100 - credit_usd, 0)
@@ -338,6 +344,7 @@ def build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, 
         "natural_credit_per_share": credit_ps, "natural_credit_usd": credit_usd,
         "natural_credit_to_width": round(credit_ps / width, 4) if width else 0,
         "mid_credit_per_share": mid_ps, "mid_credit_usd": round(mid_ps * 100, 0),
+        "fill_basis": _fb["fill_basis"], "quotes_live": _fb["quotes_live"],
         "call_short_bid": cs.get("bid"), "call_long_ask": cl.get("ask"),
         "put_short_bid": ps.get("bid"), "put_long_ask": pl.get("ask"), "width": width,
         "delta": round((abs(cs.get("delta") or 0) - abs(ps.get("delta") or 0)), 3),
