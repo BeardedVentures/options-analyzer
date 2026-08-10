@@ -196,16 +196,21 @@ def compute_recovery_probability(open_pos: Dict, huginn_out: Dict,
                                  all_closed: Sequence[Dict], data: Dict) -> Dict:
     """How often did comparable stressed positions end up winning?
 
-    Only natural-fill trades are compared. Mid-fill trades were entered at a price that could
-    not be achieved and are a different population; pooling them would import a systematic
-    bias into the base rate.
+    Only analysis-eligible trades are compared — see outcome_logger.analysis_eligible. That
+    test used to be `fill_model == "natural"`, which caught mid-fill trades (entered at a price
+    that could not be achieved) but not the second, subtler population: trades SELECTED on the
+    mid credit while the desk filled at natural, which opened for $9 against a $19 floor and
+    were dead at inception. Both are different populations from the one being managed now, and
+    pooling either imports a systematic bias into the base rate this raven exists to protect.
     """
+    from analysis import outcome_logger as _ol
+
     min_n = int(_cfg("MUNINN_MIN_COMPARABLE", 5))
     min_sim = float(_cfg("MUNINN_MIN_SIMILARITY", 0.45))
 
     pool = [t for t in (all_closed or [])
             if (t.get("status") == "closed" or t.get("closed_at"))
-            and (t.get("fill_model") or "mid") == "natural"
+            and _ol.analysis_eligible(t)
             and t.get("stress_snapshots")
             and (t.get("outcome") or "").lower() in ("win", "loss")]
 

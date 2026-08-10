@@ -215,8 +215,11 @@ def _closed(outcome="win", **snap):
     s = {"dte_remaining": 30, "price_to_strike_bucket": "below",
          "support_status_at_stress": "BREACH", "vix_at_stress": 15.0}
     s.update(snap)
+    # opened_at is what outcome_logger.gate_basis reads to tell a trade selected on the natural
+    # credit from one selected on the mid — a record without it has an unknowable basis and is
+    # excluded from the pool, so a comparable fixture has to carry a date like a real trade.
     return {"status": "closed", "outcome": outcome, "fill_model": "natural",
-            "stress_snapshots": [s]}
+            "opened_at": "2026-08-09T10:00:00", "stress_snapshots": [s]}
 
 
 def test_memory_is_blind_with_no_stress_snapshots():
@@ -239,6 +242,27 @@ def test_mid_fill_history_never_contaminates_the_base_rate():
     """Mid-fill trades were entered at a price that could not be achieved; pooling them
     imports a systematic bias."""
     hist = [dict(_closed(), fill_model="mid") for _ in range(20)]
+    assert M.compute_recovery_probability(_trade(), {"signal_readings": {}}, hist,
+                                          _data())["sufficient"] is False
+
+
+def test_mid_gate_basis_history_never_contaminates_the_base_rate():
+    """The subtler contamination: filled at natural, but SELECTED on the mid credit.
+
+    Those trades cleared a scaled credit floor on a price the desk could not get and opened
+    for a fraction of it — the 5 ravens_v1 wolf-stops in the real ledger are exactly this.
+    Their outcomes measure the gating leak, not the thesis, and Muninn must not learn from
+    them any more than it learns from mid fills.
+    """
+    hist = [dict(_closed(), opened_at="2026-08-06T10:00:00") for _ in range(20)]
+    assert M.compute_recovery_probability(_trade(), {"signal_readings": {}}, hist,
+                                          _data())["sufficient"] is False
+
+
+def test_history_with_no_open_date_is_excluded():
+    """An unknowable gate basis is not a passing one — the same fail-closed logic the earnings
+    gate uses. A record that cannot say how it was selected cannot be pooled with ones that can."""
+    hist = [{k: v for k, v in _closed().items() if k != "opened_at"} for _ in range(20)]
     assert M.compute_recovery_probability(_trade(), {"signal_readings": {}}, hist,
                                           _data())["sufficient"] is False
 
@@ -424,3 +448,50 @@ def test_stratification_does_not_disturb_what_the_snapshot_already_recorded():
     assert snap["support_status_at_stress"] == "BREACH"
     assert snap["dte_remaining"] == 21
     assert snap["price_to_strike_bucket"] is not None
+
+
+# ── Signals that were silently dead (2026-08-10) ──────────────────────────────────────────────
+
+def test_support_level_at_entry_is_actually_written_at_open():
+    """huginn.read_support calls itself the PRIMARY signal and opens by reading this field.
+
+    Nothing ever wrote it, so it returned UNKNOWN — "blind to structure" — on every position
+    the system has ever managed, while the value sat in the candidate's own analysis block,
+    computed and discarded on the same cycle. A quarter of muninn.similarity's weight
+    (support_status_at_stress) was unfillable for the same reason.
+    """
+    import inspect
+    import auto_paper_cycle as apc
+    from analysis import outcome_logger as ol
+
+    assert "support_level_at_entry" in inspect.signature(ol.open_paper_trade).parameters
+    src = inspect.getsource(apc._auto_open_from_candidates)
+    assert "support_level_at_entry=" in src, "the open path must pass the level it just computed"
+    assert '"shelter"' in src, "and it must come from the assessment's shelter block"
+
+
+def test_huginn_reads_structure_once_the_level_is_recorded():
+    trade = dict(_trade(), support_level_at_entry=99.0)
+    out = H.read_support(trade, _data(current_price=101.0))
+    assert out["status"] != "UNKNOWN"
+
+
+def test_earnings_wolf_can_actually_fire():
+    """check_wolves tests earnings_check['in_window'], and _ravens_close_check passed a
+    hardcoded {} — so this wolf was unreachable and earnings risk was unmanaged at BOTH ends
+    (the entry gate was simultaneously passing unknown dates open)."""
+    import inspect
+    import auto_paper_cycle as apc
+
+    w = H.check_wolves(_trade(), dict(_data(), earnings_check={"in_window": True}))
+    assert w["earnings_in_window"] is True and w["any_wolf"] is True
+
+    src = inspect.getsource(apc._ravens_close_check)
+    assert '"earnings_check": _earnings_check(' in src, "the wolf must get a real read"
+
+
+def test_earnings_check_degrades_to_silence_not_to_a_close():
+    """A calendar outage must not close open positions. Unknown at ENTRY fails closed; unknown
+    while ALREADY OPEN must not realise a loss on no evidence."""
+    import auto_paper_cycle as apc
+    assert apc._earnings_check({"ticker": "___NOT_A_TICKER___"}, "2026-09-18") == {}

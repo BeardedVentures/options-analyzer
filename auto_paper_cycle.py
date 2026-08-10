@@ -261,17 +261,14 @@ def _candidate_passes_minimum(c: Dict, verbose: bool = False) -> bool:
         if verbose:
             _log(f"[GATE] {c.get('ticker')} REJECT failed={failed}")
         return False
-    # Price-scaled credit floor — ONE definition, in config.min_credit_usd_for. This site used
-    # to hard-code its own MIN_CREDIT_USD read, which is how a floor could be relaxed in the
-    # contract and stay enforced here: the same shape as the IV-rank, POP and quote-spread
-    # leaks. `spot` comes off the candidate when the scan recorded it; without it the flat
-    # floor applies, which is the conservative direction.
-    credit_usd = c.get("credit_usd")
-    floor = _min_credit_floor(c)
-    if not isinstance(credit_usd, (int, float)) or credit_usd < floor:
-        if verbose:
-            _log(f"[GATE] {c.get('ticker')} REJECT credit_usd={credit_usd} < floor={floor}")
-        return False
+    # The credit floor is enforced by the contract's `min_credit_usd` gate against
+    # natural_credit_usd (assessment.evaluate_gates), which is the basis the desk actually
+    # fills at. A second check used to sit here reading c["credit_usd"] — the MID value — as a
+    # belt-and-braces floor. It could not leak past the stronger contract check, but it is the
+    # exact shape of the bug that opened GDX 82/81 twice for $9 and $7 against a $19 floor
+    # because the gate read mid and the fill was natural. Removed rather than left as a second,
+    # weaker definition of a rule that already has one.
+    #
     # POP floor. main.py:491 gates on the calibrated probability of profit, but the auto-open
     # path enforced NO pop floor at all — `pop` was computed as a gate annotation and then left
     # out of `required`. Same enforcement leak the IV-rank gate closed on 2026-07-25. Prefer
@@ -290,14 +287,40 @@ def _candidate_passes_minimum(c: Dict, verbose: bool = False) -> bool:
 
 
 def _candidate_score(c: Dict) -> float:
+    """Rank the candidates that already cleared the contract. Gates decide IF; this decides WHICH.
+
+    Led by edge_score, which is the whole reason a spread was worth selecting: VRP, IV rank,
+    technical quality and the drift-corrected POP, weighted in analysis.edge_calculator. This
+    function used to ignore it entirely and lead on gate completeness — so when five candidates
+    all passed, the one opened was the structurally tidiest rather than the richest. That was
+    not a weighting choice; edge_score was None on all 79 real trades in the ledger because of
+    two stacked bugs (true_pop attached after the assessment that needed it, and the result
+    never copied onto the candidate). Both are fixed, so this term now carries a number.
+
+    true_pop, not pop_implied. pop_implied is 1-|delta| — a restatement of the delta the
+    delta_penalty term already prices. Ranking on it double-counted the same fact and discarded
+    the drift-removed probability the engine exists to compute.
+
+    Weights are a starting point and are NOT validated. They should move once the prediction
+    ledger has graded claims and the calibration engine can say which components carried
+    information — see the value-of-information work. Until then this is an ordering, not a score.
+    """
     gates_passed = float(c.get("gates_passed") or 0)
-    gates_total = float(c.get("gates_total") or 8)
+    # len(REQUIRED_GATES), not 8. The literal predated three gates, so a candidate missing the
+    # key scored gates_passed/8 — which exceeds 1.0 at 11 passing gates and let the completeness
+    # term dominate everything else.
+    default_total = float(len(getattr(config, "REQUIRED_GATES", ())) or 1)
+    gates_total = float(c.get("gates_total") or default_total)
     q = (gates_passed / gates_total) if gates_total else 0.0
-    pop = float(c.get("pop_implied") or 0.0)
+
+    edge = float(c.get("edge_score") or 0.0) / 100.0          # 0-100 → 0-1, same scale as the rest
+    true_pop = float(c.get("true_pop") or c.get("pop_implied") or 0.0)
     roi = float(c.get("roi") or 0.0)
     delta = abs(float(c.get("short_delta") or 0.0))
     delta_penalty = abs(delta - float(getattr(config, "SHORT_STRIKE_TARGET_DELTA", 0.20)))
-    return (q * 100.0) + (pop * 35.0) + (roi * 25.0) - (delta_penalty * 40.0)
+
+    return ((edge * 50.0) + (q * 30.0) + (true_pop * 20.0) + (roi * 10.0)
+            - (delta_penalty * 40.0))
 
 
 def _pick_new_trades(cand_data: Dict, open_rows: List[Dict], max_open_total: int, max_new_per_run: int) -> List[Tuple[str, Dict, Dict]]:
@@ -415,6 +438,13 @@ def _auto_open_from_candidates(cand_data: Dict, source_file: str) -> int:
     max_open_total = int(os.getenv("VEGA_MAX_OPEN_TOTAL", "15"))
     max_new_per_run = int(os.getenv("VEGA_MAX_NEW_PER_RUN", "5"))
 
+    # One VIX read per scan, recorded in the snapshot's meta block. Parsed once here: the
+    # scanner writes "—" when the fetch failed, so this is not always a number.
+    try:
+        _meta_vix = float((cand_data.get("meta") or {}).get("vix"))
+    except (TypeError, ValueError):
+        _meta_vix = None
+
     picks = _pick_new_trades(cand_data, open_rows, max_open_total=max_open_total, max_new_per_run=max_new_per_run)
     if not picks:
         _log("No new auto-open candidates this cycle.")
@@ -493,17 +523,33 @@ def _auto_open_from_candidates(cand_data: Dict, source_file: str) -> int:
                 # feedback loop. Absent from the vega_candidates fast-scan schema, so they
                 # stay None on that path rather than being faked.
                 edge_score=c.get("edge_score"),
-                vrp=c.get("vrp") or (row.get("ctx") or {}).get("vrp"),
+                # vega_candidates.vol_context emits `vrp_pp`, not `vrp`. This read the key that
+                # does not exist, so vrp was null on all 79 real trades from TWO independent
+                # causes — this mismatch and the true_pop ordering bug. Same shape as the
+                # earnings_date/earnings_days error: a field name that was never checked
+                # against the producer.
+                vrp=c.get("vrp") or _ctx.get("vrp_pp") or _ctx.get("vrp"),
                 technical_score=c.get("composite_score") or c.get("technical_score"),
                 term_slope=c.get("term_slope"),
                 skew_steepness=c.get("skew_steepness"),
-                vix_at_entry=_ctx.get("vix"),
+                # VIX is fetched once per scan and lives in the snapshot's META, not in the
+                # per-ticker ctx this used to read — so it was null on every trade, which also
+                # silently defeated muninn.record_stress_snapshot's documented fallback to
+                # "the VIX at entry when the live read is unavailable". A fallback that never
+                # had a value to fall back to.
+                vix_at_entry=_ctx.get("vix") or _meta_vix,
                 atm_iv_at_entry=_entry["atm_iv_at_entry"],
                 rv_at_entry=_entry["rv_at_entry"],
                 expected_move_at_entry=_entry["expected_move_at_entry"],
                 pop_gap_at_entry=_entry["pop_gap_at_entry"],
                 btc_iv_gap_pp=_entry["btc_iv_gap_pp"],
                 btc_vrp_pp=_entry["btc_vrp_pp"],
+                # The level the assessment found sheltering this short strike. huginn.read_support
+                # reads it as its PRIMARY signal and has returned UNKNOWN on every trade ever
+                # opened because nothing wrote it — while the number sat in the candidate's own
+                # analysis block, computed and discarded on the same cycle.
+                support_level_at_entry=(
+                    ((c.get("analysis") or {}).get("shelter") or {}).get("level")),
             )
             # Write down every falsifiable claim this trade carries. The engine has always
             # made these assertions and always discarded them, which is why nothing it
@@ -525,6 +571,35 @@ def _auto_open_from_candidates(cand_data: Dict, source_file: str) -> int:
         except Exception as exc:
             _log(f"Failed to auto-open candidate {ticker}: {exc}")
     return opened
+
+
+def _earnings_check(position: Dict, exp) -> Dict:
+    """Does an earnings print now fall inside this position's remaining life?
+
+    Returns {} — "nothing known", which check_wolves reads as no wolf — rather than raising or
+    guessing. A calendar lookup failing must not close a position, and must not stop the other
+    ravens from evaluating; an absent answer here is strictly less dangerous than an absent
+    answer at ENTRY, because the position is already on and being watched.
+
+    Deliberately does NOT fail closed the way the entry gate does. Refusing to open on unknown
+    earnings costs one cycle of opportunity; closing an open position on unknown earnings
+    realises a loss on no evidence.
+    """
+    try:
+        from data import fetcher, fundamentals
+        # Keep None as None: days_until_earnings maps an unknown date to the 999 sentinel, and
+        # "999 days away" and "no idea" must not read the same to a risk check.
+        edt = fetcher.get_earnings_date(position.get("ticker"))
+        d = fundamentals.days_until_earnings(edt) if edt is not None else None
+        if d is None:
+            return {}
+        dte = _current_dte(exp)
+        if dte is None:
+            return {}
+        return {"in_window": 0 <= int(d) <= int(dte), "days_until_earnings": int(d)}
+    except Exception as e:
+        _log(f"Earnings check unavailable for {position.get('id')}: {e}")
+        return {}
 
 
 def _ravens_close_check(position: Dict, decision_mark, short_leg, long_leg, exp) -> Optional[Dict]:
@@ -550,8 +625,16 @@ def _ravens_close_check(position: Dict, decision_mark, short_leg, long_leg, exp)
             "mark": decision_mark,
             "dte_remaining": _current_dte(exp),
             "as_of": _now(),
-            "news_sentiment": None,      # close-time news read is not wired yet
-            "earnings_check": {},        # nor is a close-time earnings check
+            # BLOCKING news at close time is not wired. Left explicitly off rather than as a
+            # silently-empty read: check_wolves tests for it, so an unfireable wolf that looks
+            # wired is worse than one that is visibly disabled.
+            "news_sentiment": None,
+            # An earnings date that has moved INTO the remaining window is a structural change
+            # to the risk being held, and it is the wolf the entry gate cannot cover — a print
+            # can be scheduled after the position is open. This read used to be a hardcoded {},
+            # so the condition could never fire: earnings risk was unmanaged at BOTH ends,
+            # since the entry gate was simultaneously passing unknown dates open.
+            "earnings_check": _earnings_check(position, exp),
             # record_stress_snapshot has always written a "vix_at_stress" field and this dict
             # has never carried a vix, so that field is None on every snapshot in the ledger.
             # Memory's whole job is telling one stressed position from another, and the market

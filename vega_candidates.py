@@ -125,71 +125,19 @@ def liquidity_ok(opt: dict) -> bool:
     return vol >= getattr(config, "MIN_OPTION_VOLUME", 100) or oi >= getattr(config, "MIN_OPTION_OPEN_INTEREST", 500)
 
 
-def _earnings_clear(earnings_date, expiration: str, is_etf: bool) -> bool:
-    """True when no earnings print falls inside the position's lifetime.
-
-    Selling a 25-45 DTE credit spread through an earnings report converts a probabilistic edge
-    into a binary event bet — the single largest uncontrolled risk in premium selling, and the
-    reason config.EARNINGS_BLACKOUT_DAYS exists. That knob was defined but enforced nowhere on
-    the auto-open path (the fourth leak of this shape).
-
-    Any earnings on or before expiry disqualifies, which is stricter than the 7-day blackout and
-    the correct test for a position held to expiration.
-
-    Fails CLOSED for a non-ETF with no known earnings date: a missing date is a data gap, and
-    skipping a tradeable name for one cycle costs far less than selling premium into a print.
-    ETFs have no earnings and always pass.
-    """
-    if is_etf:
-        return True
-    if earnings_date is None:
-        return False
-    try:
-        exp = datetime.strptime(str(expiration)[:10], "%Y-%m-%d").date()
-    except (TypeError, ValueError):
-        return False
-    e = earnings_date.date() if hasattr(earnings_date, "date") else earnings_date
-    try:
-        return e > exp
-    except TypeError:
-        return False
+# The earnings gate lived here as `_earnings_clear` + `attach_earnings_gate`: ETF-aware,
+# fail-closed, thirteen tests. When the gate contract consolidated into
+# analysis.assessment.evaluate_gates, both functions lost their last production caller and
+# stayed in the file — tested, green, and unreachable — while the surviving implementation in
+# assessment.py passed unknown earnings OPEN. Deleted rather than left as a second definition:
+# two implementations of one rule is the exact shape behind the four enforcement leaks this
+# module's docstring describes. assessment._earnings_clear now owns it, tests moved with it.
 
 
-def attach_earnings_gate(cands: list, ticker: str, earnings_date, is_etf: bool) -> int:
-    """Annotate the earnings gate and refresh gate counts. Returns candidates blocked."""
-    blocked = 0
-    for c in cands:
-        clear = _earnings_clear(earnings_date, c.get("expiration"), is_etf)
-        c["earnings_date"] = (
-            (earnings_date.date() if hasattr(earnings_date, "date") else earnings_date).isoformat()
-            if earnings_date else None
-        )
-        c["gates"]["earnings_clear"] = clear
-        # build_candidates computed these before this gate existed; keep them truthful.
-        c["gates_passed"] = sum(1 for v in c["gates"].values() if v)
-        c["gates_total"] = len(c["gates"])
-        if not clear:
-            blocked += 1
-    return blocked
-
-
-def _leg_spread_pct(bid, ask) -> float:
-    """Relative bid-ask spread of one leg. Returns inf when unquotable, so it fails the gate."""
-    try:
-        b, a = float(bid or 0), float(ask or 0)
-    except (TypeError, ValueError):
-        return float("inf")
-    mid = (a + b) / 2
-    if mid <= 0 or a <= 0:
-        return float("inf")
-    return (a - b) / mid
-
-
-def _quote_spread_ok(c: dict) -> bool:
-    """Both legs must quote inside MAX_QUOTE_SPREAD_PCT. Checked per leg, not on the spread."""
-    cap = float(getattr(config, "MAX_QUOTE_SPREAD_PCT", 0.35))
-    return (_leg_spread_pct(c.get("short_bid"), c.get("short_ask")) <= cap
-            and _leg_spread_pct(c.get("long_bid"), c.get("long_ask")) <= cap)
+# _quote_spread_ok and its _leg_spread_pct helper lived here too, checking BOTH legs, while the
+# shared contract checked only the short one — two implementations of one rule, disagreeing,
+# with the weaker one enforcing. The both-legs semantics moved into
+# assessment._spread_quote_ok and this copy is gone.
 
 
 def set_pop_gap(c: dict) -> Optional[float]:
@@ -211,6 +159,22 @@ def set_pop_gap(c: dict) -> Optional[float]:
     return c["pop_gap"]
 
 
+def _prices_hist(assess_ctx: Optional[dict]):
+    """The close series attach_true_pop needs, read off the context that already fetched it.
+
+    load_context stores the one-per-ticker price history as `price_data`; pulling the series
+    from there rather than re-fetching keeps the "ONE history fetch per ticker" property that
+    the scan's runtime depends on.
+    """
+    pd_ = (assess_ctx or {}).get("price_data")
+    if pd_ is None or getattr(pd_, "empty", True):
+        return None
+    try:
+        return pd_["Close"]
+    except Exception:
+        return None
+
+
 def attach_true_pop(cands: list, current_price: float, prices_hist) -> int:
     """Attach the engine's drift-removed POP to fast-scan candidates.
 
@@ -221,11 +185,18 @@ def attach_true_pop(cands: list, current_price: float, prices_hist) -> int:
 
     Returns how many candidates were successfully annotated. Never raises: a history gap must
     degrade the scan to implied-only, not kill it.
+
+    Idempotent: a candidate that already carries true_pop is skipped. build_candidates attaches
+    it per-candidate before the assessment (so edge_score can be computed at all); the sweep in
+    main() then fills in only the ones that path missed, without paying for the distribution
+    replay twice on the same spread.
     """
     if prices_hist is None or len(prices_hist) < 2 or not current_price:
         return 0
     n = 0
     for c in cands:
+        if c.get("true_pop") is not None:
+            continue
         try:
             be_distance_pct = (current_price - c["breakeven"]) / current_price
             otm_distance_pct = (current_price - c["short_strike"]) / current_price
@@ -374,6 +345,15 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                 best["side"] = "put"
                 best["short_leg"] = short
                 best["pop"] = best["pop_implied"]
+                # Calibrated POP must exist BEFORE the assessment runs. assessment.assess()
+                # computes edge_score only inside `if true_pop is not None and implied is not
+                # None`, and attach_true_pop used to run in main() — fifteen lines AFTER the
+                # only code that would have used it. Every fast-scan candidate was therefore
+                # assessed with true_pop=None, the guard never opened, and edge_score came out
+                # None on all 79 real paper trades in the ledger. The auto-trader then ranked
+                # on gate completeness because the number it was supposed to rank on had never
+                # been computed. Attach it here, on the one candidate about to be judged.
+                attach_true_pop([best], current_price, _prices_hist(assess_ctx))
                 # Gate first — cheap. Only a candidate that survives earns the expensive
                 # surface read and the full narrative. Analysis follows selection.
                 from analysis import assessment as _A2
@@ -384,11 +364,28 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                     g = _asmt["gates"]
                     best["analysis"] = _asmt["analysis"]
                     best["narrative"] = _asmt["narrative"]
+                    # The assessment's CONCLUSIONS, not just its analysis block. assess()
+                    # computes edge_score and hands it back on the result dict; this loop
+                    # copied `analysis` and `narrative` and dropped it, so the key was absent
+                    # from all 160 candidates in the 2026-08-10 snapshot and null on all 79
+                    # real trades in the ledger. That is the second of two independent causes —
+                    # the first was true_pop arriving after the assessment that needed it — and
+                    # fixing either one alone still yields None, which is why the auto-trader
+                    # has always ranked on gate completeness instead of on edge.
+                    best["edge_score"] = _asmt.get("edge_score")
+                    best["edge_components"] = _asmt.get("edge_components") or {}
+                    best["edge_points"] = _asmt.get("edge_points")
                 else:
                     best["analysis"] = {}
                     best["narrative"] = ("Blocked by "
                                          + ", ".join(k for k, v in g.items() if not v) + ".")
                 best.pop("short_leg", None)   # not JSON-serialisable and already summarised
+                # How the earnings gate reached its answer, so a passing result is auditable.
+                # A bare `earnings_clear: True` cannot distinguish "confirmed clear" from
+                # "never found out", which is what made the earnings-gap audit impossible to
+                # run against existing snapshots.
+                best["earnings_source"] = assess_ctx.get("earnings_source")
+                best["earnings_days_at_scan"] = assess_ctx.get("earnings_days")
                 best["gates"] = g
                 best["gates_passed"] = sum(1 for v in g.values() if v)
                 best["gates_total"] = len(g)
@@ -580,11 +577,22 @@ def main():
             if getattr(config, "EARNINGS_GATE_ENABLED", True) and not _is_etf:
                 try:
                     from data import fundamentals as _fund
-                    _earn_days = _fund.days_until_earnings(fetcher.get_earnings_date(tk))
+                    # Resolve the DATE first and keep None as None. days_until_earnings maps an
+                    # unknown date to 999 — documented as "safe — won't block trade" — which is
+                    # the right sentinel for the edge score's earnings-safety component and
+                    # exactly wrong for a gate whose job is to tell "far away" from "we never
+                    # found out". Collapsing them here would leave the fail-closed gate
+                    # unreachable: it would receive 999 and clear every time.
+                    _edt = fetcher.get_earnings_date(tk)
+                    _earn_days = _fund.days_until_earnings(_edt) if _edt is not None else None
                 except Exception:
                     logger.debug("earnings lookup failed for %s", tk, exc_info=True)
+            # has_earnings=False for the ETFs, so the fail-closed earnings gate does not
+            # block names that have no print to look up. Anything not in this set falls
+            # through to ticker_profile.DECLARED, and then to None = unknown = fail closed.
             assess_ctx = _A.load_context(tk, price_data=px, puts=puts, tech=ctx,
-                                         earnings_days=_earn_days)
+                                         earnings_days=_earn_days,
+                                         has_earnings=(False if _is_etf else None))
             _sup = (assess_ctx.get("levels") or {}).get("support_levels")
             cands = build_candidates(tk, puts, price, args.delta_min, args.delta_max,
                                      args.max_width, support_levels=_sup,

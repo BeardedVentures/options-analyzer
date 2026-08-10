@@ -93,7 +93,8 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
                      term_slope=None, skew_steepness=None, vix_at_entry=None,
                      atm_iv_at_entry=None, rv_at_entry=None,
                      expected_move_at_entry=None, pop_gap_at_entry=None,
-                     btc_iv_gap_pp=None, btc_vrp_pp=None) -> str:
+                     btc_iv_gap_pp=None, btc_vrp_pp=None,
+                     support_level_at_entry=None) -> str:
     """
     Open a PAPER position from a real candidate (or manual entry). Records the entry credit you
     would realistically collect; net P/L on close subtracts Robinhood round-trip commissions.
@@ -244,12 +245,25 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
         # calibration engine set the band once enough IBIT trades carrying it have closed.
         "btc_iv_gap_pp": btc_iv_gap_pp,
         "btc_vrp_pp": btc_vrp_pp,
+        # The defended level that sheltered the short strike at entry. huginn.read_support
+        # calls itself "the primary signal" and opens by reading this field; it was never
+        # written, so Huginn returned UNKNOWN — "blind to structure" — on every position the
+        # system has ever managed, and a quarter of muninn.similarity's weight
+        # (support_status_at_stress) was permanently unfillable for the same reason. The value
+        # was already computed at scan time and sitting in analysis.shelter.level, discarded.
+        "support_level_at_entry": support_level_at_entry,
         "max_loss_per_contract": (round((width - credit) * 100, 2) if (width and credit < width) else None),
         # Live mark (updated on each rescan while open) → unrealized P/L
         "current_mark": None,
         "unrealized_gross": None,
         "unrealized_net": None,
         "marked_at": None,
+        # The PATH, not just the endpoints. set_mark used to overwrite current_mark in place,
+        # so a closed trade recorded its entry credit and its exit price and nothing between.
+        # That makes every "would a 2.5x stop have done better?" question unanswerable, which
+        # is the one question the ledger most needs to answer: the exit rule, not the entry
+        # model, has been the dominant driver of realized P&L.
+        "mark_history": [],
         # Ground truth (filled on close)
         "exit_price": None,
         "realized_gross_pl_per_contract": None,
@@ -277,6 +291,59 @@ def close_cohort(record: Dict) -> str:
     exactly as it was written.
     """
     return record.get("close_logic") or LEGACY_CLOSE_LOGIC
+
+
+# The date the credit floor and the ranking score stopped reading the MID credit while the desk
+# filled at NATURAL. Before it, a candidate could clear a $19 scaled floor on $31 of mid credit
+# and open for $9 — see the comment block in vega_candidates.build_candidates. Trades opened
+# before this were selected on a price basis the system could not execute.
+GATE_BASIS_FIX_DATE = "2026-08-08"
+
+
+def gate_basis(record: Dict) -> str:
+    """Which price basis the GATES read when this trade was selected: 'natural' or 'mid'.
+
+    Derived from the open date rather than stored, because the defect was in the selection
+    code, not in the record — there was no field to write at the time and back-filling one
+    would be inventing a measurement.
+    """
+    opened = str(record.get("opened_at") or record.get("logged_at") or "")[:10]
+    if not opened:
+        return "unknown"
+    return "natural" if opened >= GATE_BASIS_FIX_DATE else "mid"
+
+
+def cohort(record: Dict) -> str:
+    """The comparability key: trades sharing it were selected and closed under the same rules.
+
+    `fill_model | gate_basis | close_logic`. All three matter and the ledger proves it — split
+    by fill_model alone, mid-fill trades won 13 of 18 and natural-fill trades won 0 of 46,
+    because mid overstated the achievable credit by ~75% and a target set at 65% of an inflated
+    credit is a different trade from one set at 65% of a real one. Pooling across any of the
+    three produces a number that describes no population that ever existed.
+
+    Derived, never written to history. The ledger is append-only and closed records are left
+    exactly as they were written — see close_cohort.
+    """
+    return f"{record.get('fill_model') or 'mid'}|{gate_basis(record)}|{close_cohort(record)}"
+
+
+def analysis_eligible(record: Dict) -> bool:
+    """May this record inform a base rate, a Brier score, or a Muninn stratum?
+
+    False for anything selected on a price basis the desk could not execute (gate_basis 'mid')
+    or filled at a price that could not be achieved (fill_model 'mid'). Both defects are fixed
+    forward, and both are fatal backward: an outcome produced by a trade that should never have
+    opened measures the leak, not the strategy. The 5 ravens_v1 wolf-stops are exactly this —
+    GDX and AMGN opened at $0.07-$0.25 of credit, closed as evidence about a framework they
+    never actually tested.
+
+    Excluding them is not throwing data away. It is declining to average a thermometer's
+    readings with the readings it took while broken.
+    """
+    if record.get("status") == "modeled":
+        return False                      # cockpit projection, never an executed trade
+    return (record.get("fill_model") == "natural") and gate_basis(record) == "natural"
 
 
 def _append_to_list_field(trade_id: str, field: str, entry: Dict) -> bool:
@@ -308,7 +375,19 @@ def append_raven_alert(trade_id: str, alert: Dict) -> bool:
 
 def set_mark(trade_id: str, current_mark_per_share: float) -> bool:
     """Update the live spread mark for an OPEN paper trade → unrealized P/L (per contract).
-    unrealized gross = (entry_credit - current_mark) * 100; net subtracts round-trip fees."""
+    unrealized gross = (entry_credit - current_mark) * 100; net subtracts round-trip fees.
+
+    Also APPENDS to mark_history. The current_mark field is a single overwritten slot, so the
+    ledger recorded where a trade started and where it ended and nothing in between — and the
+    highest-value experiment available to this system is replaying alternative exit rules
+    (1.5x / 2x / 3x credit, % of max loss, delta-based) against trades that already closed.
+    That replay needs the path. One float and a timestamp per mark buys it; without them the
+    question waits on buying historical option chains.
+
+    Deliberately stores only (at, mark) rather than the derived P&L: gross and net are pure
+    functions of the mark, the entry credit and the fee constant, so persisting them would be
+    three fields that can disagree instead of one that cannot.
+    """
     rows = _read_all()
     for r in rows:
         if r.get("id") == trade_id and r.get("status") == "open":
@@ -318,10 +397,13 @@ def set_mark(trade_id: str, current_mark_per_share: float) -> bool:
             mark = round(float(current_mark_per_share), 2)
             gross = round((float(entry) - mark) * 100, 2)
             net = round(gross - float(r.get("estimated_round_trip_cost_per_contract") or 0.0), 2)
+            now = datetime.now().isoformat()
             r["current_mark"] = mark
             r["unrealized_gross"] = gross
             r["unrealized_net"] = net
-            r["marked_at"] = datetime.now().isoformat()
+            r["marked_at"] = now
+            # setdefault, not assume: trades opened before this field existed are still open.
+            r.setdefault("mark_history", []).append({"at": now, "mark": mark})
             _write_all(rows)
             return True
     return False

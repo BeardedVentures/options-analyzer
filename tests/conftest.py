@@ -87,6 +87,22 @@ def make_candidate(**overrides):
         "gates": make_gates(),
     }
     c.update(overrides)
+    # Keep the two leg shapes in lockstep. A real candidate carries the quotes flattened
+    # (short_bid/short_ask — the only form that survives to the JSON snapshot, since
+    # build_candidates pops the leg object before serialising) AND, during the build itself, the
+    # leg dict the gates read. They are written from the same source and never disagree in
+    # production, so a fixture where they DO disagree tests a state that cannot happen — and
+    # whichever form the contract happened to read would silently decide the result.
+    # Explicit override wins and is mirrored onto the other form.
+    if "short_leg" in overrides:
+        _sl = c.get("short_leg") or {}
+        c["short_bid"], c["short_ask"] = _sl.get("bid"), _sl.get("ask")
+        c["short_mid"] = _sl.get("mid")
+    else:
+        _b, _a = c.get("short_bid"), c.get("short_ask")
+        c["short_mid"] = ((float(_b) + float(_a)) / 2
+                          if _b is not None and _a is not None else None)
+        c["short_leg"] = {**c["short_leg"], "bid": _b, "ask": _a, "mid": c["short_mid"]}
     # build_candidates always emits these alongside `gates`; keep the fixture faithful to it.
     c.setdefault("gates_passed", sum(1 for v in c["gates"].values() if v))
     c.setdefault("gates_total", len(c["gates"]))
@@ -110,7 +126,12 @@ def make_ctx(**overrides):
     ctx = {
         "ticker": "TEST",
         "spot": 110.0,          # 9.1% above the 100 short strike — clears MIN_STRIKE_BUFFER_STOCK
-        "earnings_days": None,  # unknown → the earnings gate defers
+        # The earnings gate FAILS CLOSED on an unknown date, so a "clean" context has to state
+        # an earnings position the way a real scan does. `earnings_days: None` used to clear the
+        # gate by deferring to a caller that no longer existed; a fixture that passes on unknown
+        # data cannot exercise a gate whose whole purpose is to refuse it.
+        "earnings_days": 90,    # well past any 25-45 DTE expiry
+        "has_earnings": True,   # a normal equity, and the date IS known
         "levels": {},           # empty → the shelter gate fails open by design
     }
     ctx.update(overrides)

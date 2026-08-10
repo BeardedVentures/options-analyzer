@@ -9,7 +9,8 @@ import pytest
 import config
 import auto_paper_cycle as apc
 import vega_candidates as vc
-from conftest import make_candidate, make_gates
+from analysis import assessment as A
+from conftest import make_candidate, make_ctx, make_gates
 
 
 # ── REQUIRED_GATES contract ───────────────────────────────────────────────────────────────────
@@ -76,28 +77,42 @@ def test_pop_exactly_at_floor_passes():
 
 
 # ── Quote spread (leak #3) ────────────────────────────────────────────────────────────────────
+#
+# These targeted vega_candidates._quote_spread_ok, which checked BOTH legs, while the shared
+# contract that actually gates the trade checked only the short one. The stricter definition
+# now lives in assessment._spread_quote_ok and the duplicate is deleted, so the tests exercise
+# the implementation the scan reaches.
 
 def test_tight_quotes_pass_spread_gate():
-    assert vc._quote_spread_ok(make_candidate()) is True
+    assert A._spread_quote_ok(make_candidate()) is True
 
 
 def test_wide_short_leg_fails_spread_gate():
     # 1.00/2.00 -> spread 1.00 on mid 1.50 = 67%, well past the 35% cap
-    assert vc._quote_spread_ok(make_candidate(short_bid=1.00, short_ask=2.00)) is False
+    assert A._spread_quote_ok(make_candidate(short_bid=1.00, short_ask=2.00)) is False
 
 
 def test_wide_long_leg_fails_spread_gate():
-    assert vc._quote_spread_ok(make_candidate(long_bid=0.10, long_ask=1.00)) is False
+    """The long leg is the one being BOUGHT — a wide market on it comes straight out of the
+    credit received and out of the exit."""
+    assert A._spread_quote_ok(make_candidate(long_bid=0.10, long_ask=1.00)) is False
 
 
 def test_unquotable_leg_fails_closed():
     """A missing/zero ask must fail the gate, never pass by accident."""
-    assert vc._quote_spread_ok(make_candidate(short_ask=0)) is False
-    assert vc._quote_spread_ok(make_candidate(short_ask=None)) is False
+    assert A._spread_quote_ok(make_candidate(short_ask=0)) is False
+    assert A._spread_quote_ok(make_candidate(short_ask=None)) is False
 
 
-def test_leg_spread_pct_math():
-    assert vc._leg_spread_pct(1.90, 2.10) == pytest.approx(0.20 / 2.00)
+def test_long_leg_check_reaches_the_real_contract():
+    """The gate itself must reject a wide long leg, not just the helper.
+
+    The short leg is untouched here, so a contract that only inspected the short leg would
+    report quote_spread=True — which is exactly what it did before the two implementations
+    were collapsed.
+    """
+    gates = A.evaluate_gates(make_candidate(long_bid=0.10, long_ask=1.00), make_ctx())
+    assert gates["quote_spread"] is False
 
 
 # ── Fill model (Finding 1) ────────────────────────────────────────────────────────────────────
@@ -114,10 +129,23 @@ def test_zero_natural_credit_fails_its_gate():
     assert apc._candidate_passes_minimum(c) is False
 
 
-def test_min_credit_usd_enforced_independently_of_gates_dict():
-    """credit_usd below MIN_CREDIT_USD is rejected even if the gates dict claims otherwise."""
-    c = make_candidate(credit_usd=1.0)
-    assert apc._candidate_passes_minimum(c) is False
+def test_min_credit_floor_gates_the_natural_credit_not_the_mid():
+    """The floor applies to the credit the desk can actually collect.
+
+    _candidate_passes_minimum used to re-check the floor against c["credit_usd"] — the MID —
+    as a second, weaker definition of a rule the contract already enforced on
+    natural_credit_usd. It could not leak past the stronger check, but it is the exact shape of
+    the bug that opened GDX 82/81 twice for $9 and $7 against a $19 floor. A rich mid must not
+    rescue a worthless natural, and a poor mid must not reject a good natural.
+    """
+    rich_mid_worthless_natural = make_candidate(natural_credit_per_share=0.01)
+    gates = A.evaluate_gates(rich_mid_worthless_natural, make_ctx())
+    assert gates["min_credit_usd"] is False
+
+    # The mid being low is not itself a rejection — only the natural basis governs.
+    good_natural_low_mid = make_candidate(credit_usd=1.0)
+    assert A.evaluate_gates(good_natural_low_mid, make_ctx())["min_credit_usd"] is True
+    assert apc._candidate_passes_minimum(good_natural_low_mid) is True
 
 
 # ── Gate/execution basis (bug found live 2026-08-07) ──────────────────────────────────────────
@@ -322,3 +350,38 @@ def test_each_gate_fails_alone_on_the_real_contract(break_it, expected_gate):
     gates = A.evaluate_gates(c, make_ctx())
     failed = {k for k, v in gates.items() if not v}
     assert expected_gate in failed, f"{expected_gate} should have failed; failed={failed}"
+
+
+# ── Reachability (2026-08-10) ─────────────────────────────────────────────────────────────────
+
+def test_every_gate_implementation_is_reachable_from_the_live_scan():
+    """No gate may be enforced by a function the scan never calls.
+
+    The failure this guards against is not a missing gate — evaluate_gates already raises on
+    those — but an ORPHANED one. vega_candidates carried a correct, ETF-aware, fail-closed
+    earnings gate with thirteen passing tests and, after the contract consolidated into
+    assessment.py, no production caller at all. The suite stayed green for weeks while the live
+    path did the opposite of what the tests asserted: it passed unknown earnings straight
+    through. A duplicate quote-spread rule had drifted the same way.
+
+    So: the module that owns the contract must be the only one defining gate predicates, and
+    every gate key must come back from the one implementation the scan actually reaches.
+    """
+    import inspect
+    from analysis import assessment as A
+
+    gates = A.evaluate_gates(make_candidate(), make_ctx())
+    assert set(gates) == set(config.REQUIRED_GATES)
+
+    # Every helper the contract calls must live in the contract's own module. A gate predicate
+    # imported from elsewhere is a second definition waiting to diverge.
+    src = inspect.getsource(A.evaluate_gates)
+    assert "vega_candidates" not in src and "import" not in src
+
+    # And the scanner must not have grown its own copies back.
+    vc_src = inspect.getsource(vc)
+    for orphan in ("def _earnings_clear", "def attach_earnings_gate", "def _quote_spread_ok"):
+        assert orphan not in vc_src, (
+            f"{orphan} is back in vega_candidates — the gate contract is defined in "
+            f"analysis/assessment.py and a second implementation will silently take over "
+            f"or silently stop being called, which is how the earnings gate inverted.")

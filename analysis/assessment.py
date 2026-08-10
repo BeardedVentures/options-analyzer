@@ -55,7 +55,8 @@ def _cfg(name, default):
 def load_context(ticker: str, price_data=None, puts=None, calls=None,
                  tech: Optional[Dict] = None, sentiment: Optional[str] = None,
                  earnings_days: Optional[int] = None,
-                 with_surface: bool = False) -> Dict:
+                 with_surface: bool = False,
+                 has_earnings: Optional[bool] = None) -> Dict:
     """Everything an assessment needs for one underlying, resolved once.
 
     TWO PHASES, deliberately. This loads only what the GATES need — price history for levels,
@@ -101,6 +102,25 @@ def load_context(ticker: str, price_data=None, puts=None, calls=None,
     ctx["tech"] = tech or {}
     ctx["sentiment"] = sentiment
     ctx["earnings_days"] = earnings_days
+    # Does this underlying report at all? DECLARED knowledge, not observation — an ETF's
+    # absence of earnings is a fact about the world, and ticker_profile.declared already
+    # returns None (not False) when it does not know, so "unknown" survives the trip.
+    # The earnings gate fails closed on an unknown DATE; without this it would also fail
+    # closed on every index ETF, which have no date to know.
+    if has_earnings is None:
+        try:
+            from analysis.ticker_profile import declared
+            has_earnings = declared(ticker).get("has_earnings")
+        except Exception as e:                       # pragma: no cover - defensive
+            logger.debug("[assessment] declared() failed for %s: %s", ticker, e)
+    ctx["has_earnings"] = has_earnings
+    # Instrumentation for the earnings-gap audit: a passing gate must be distinguishable
+    # between "confirmed clear" and "we never found out". Without this the audit cannot be
+    # run even retroactively — the 2026-08-10 snapshot carries no such record for any of its
+    # 160 candidates, so a True result there is uninterpretable.
+    ctx["earnings_source"] = ("declared_none" if has_earnings is False
+                              else "lookup" if earnings_days is not None
+                              else "unknown")
 
     if ctx.get("closes"):
         ctx["levels"] = _try("levels", lambda: __import__(
@@ -234,6 +254,51 @@ def _quote_spread_ok(leg: Dict) -> bool:
     return ((ask - bid) / mid) <= float(_cfg("MAX_QUOTE_SPREAD_PCT", 0.35))
 
 
+def leg_quote(spread: Dict, side: str) -> Dict:
+    """One leg's quote, however the caller happens to carry it. `side` is "short" or "long".
+
+    Two shapes are both real. build_candidates FLATTENS the quotes onto the candidate
+    (short_bid/short_ask/long_bid/…) and pops `short_leg` before serialising, because a leg
+    object is not JSON-safe — so a candidate read back from a snapshot has only the flat form.
+    The engine path passes nested leg dicts. Normalising here means the rule is enforced
+    identically regardless of which shape reached it, instead of quietly passing on the shape
+    it does not recognise.
+
+    The flat keys win when present, because they are what build_candidates writes last and what
+    survives to disk; the nested dict is the fallback for callers that only have it.
+    """
+    bid, ask = spread.get(f"{side}_bid"), spread.get(f"{side}_ask")
+    if bid is not None or ask is not None:
+        mid = spread.get(f"{side}_mid")
+        if mid is None and bid is not None and ask is not None:
+            mid = (float(bid) + float(ask)) / 2
+        return {"bid": bid, "ask": ask, "mid": mid}
+    leg = spread.get(f"{side}_leg")
+    return leg if isinstance(leg, dict) else {}
+
+
+def _spread_quote_ok(spread: Dict) -> bool:
+    """BOTH legs must quote inside MAX_QUOTE_SPREAD_PCT — checked per leg, not on the net.
+
+    This rule existed twice, disagreeing: vega_candidates checked both legs, the shared
+    contract checked only the short one, and the shared one is what gates the trade. The long
+    leg is the one being BOUGHT, so a wide market on it comes straight out of the credit
+    actually received and out of the exit. Two answers to one question is the shape behind the
+    four enforcement leaks this module exists to close, so the stricter definition wins and the
+    duplicate is deleted.
+
+    An absent long leg is "not applicable" and passes; a long leg that is PRESENT but
+    unquotable fails. Those are different facts and collapsing them is how a gate starts
+    reporting safe because it cannot say unsafe.
+    """
+    if not _quote_spread_ok(leg_quote(spread, "short") or spread.get("short_leg") or {}):
+        return False
+    long_leg = leg_quote(spread, "long")
+    if not long_leg:
+        return True
+    return _quote_spread_ok(long_leg)
+
+
 def _shelter_ok(short_strike, levels: Dict, side: str) -> bool:
     """Is a level the market has defended standing between spot and the short strike?
 
@@ -273,7 +338,7 @@ def evaluate_gates(spread: Dict, ctx: Dict) -> Dict:
         "liquidity": _liquidity_ok(short_leg),
         "pop": (spread.get("pop") or 0) >= _cfg("MIN_PROBABILITY_OF_PROFIT", 0.72),
         "dte_window": _cfg("MIN_DTE", 25) <= (spread.get("dte") or 0) <= _cfg("MAX_DTE", 45),
-        "quote_spread": _quote_spread_ok(short_leg),
+        "quote_spread": _spread_quote_ok(spread),
         "natural_credit_positive": (spread.get("natural_credit_per_share") or 0) > 0,
         "earnings_clear": _earnings_clear(spread, ctx),
         "support_shelter": _shelter_ok(spread.get("short_strike"), ctx.get("levels") or {}, side),
@@ -288,12 +353,31 @@ def evaluate_gates(spread: Dict, ctx: Dict) -> Dict:
 
 def _earnings_clear(spread: Dict, ctx: Dict) -> bool:
     """No earnings on or before expiry. Stricter than a blackout window: a spread held
-    THROUGH a print is an event bet regardless of how far away the print was at entry."""
+    THROUGH a print is an event bet regardless of how far away the print was at entry.
+
+    FAILS CLOSED on unknown, and the distinction that makes that affordable is
+    `has_earnings`: a name DECLARED to have no earnings (SPY, QQQ, TLT, GLD, IBIT) passes
+    without a lookup, so failing closed costs only the names that genuinely report.
+
+    This used to `return True` when the date was unknown, with the note "the caller's own
+    gate decides" — referring to vega_candidates.attach_earnings_gate, which was correct,
+    ETF-aware, fail-closed, and covered by thirteen tests. When the gates consolidated here
+    that function lost its last production caller and the live path silently inverted: the
+    only surviving implementation passed a name it knew nothing about straight into a print.
+    A green test suite over an unwired function is the same failure as a metric that cannot
+    come out non-zero, which is why the reachability test in test_candidate_gates.py now
+    asserts that every gate's implementation is one the live scan actually reaches.
+    """
     if not _cfg("EARNINGS_GATE_ENABLED", True):
+        return True
+    # Declared to have no earnings at all — nothing to look up, nothing to fear.
+    if ctx.get("has_earnings") is False:
         return True
     d = ctx.get("earnings_days")
     if d is None:
-        return True                      # unknown — the caller's own gate decides
+        # Unknown is not the same as clear. A missing date is a data gap, and skipping a
+        # tradeable name for one cycle costs far less than selling premium into a print.
+        return False
     dte = spread.get("dte")
     return not (dte is not None and 0 <= d <= dte)
 
@@ -392,10 +476,17 @@ def assess(spread: Dict, ctx: Dict, strategy: str = BULL_PUT) -> Dict:
             from analysis import edge_calculator as ec
             ep = ec.calculate_edge_points(true_pop, implied).get("edge_points", 0)
             ts = ctx.get("term_structure") or {}
+            _tech = ctx.get("tech") or {}
+            # VRP is the single largest component of the edge score (30 of 100). The fast scan's
+            # vol_context emits it as `vrp_pp` and main.py's technicals emit `vrp`; this read
+            # only knew the second name, so on the auto-open path the biggest term in the score
+            # was silently zero. Both spellings carry the SAME unit — volatility points, which
+            # is what calculate_edge_score's thresholds (>=9, >=7, >=5) are written against —
+            # so accepting either is a rename, not a conversion.
             es = ec.calculate_edge_score(
                 ticker=ctx.get("ticker"), strategy=strategy,
-                technical_score=(ctx.get("tech") or {}).get("composite_score", 50) or 50,
-                vrp_pct=(ctx.get("tech") or {}).get("vrp", 0) or 0,
+                technical_score=_tech.get("composite_score", 50) or 50,
+                vrp_pct=_tech.get("vrp_pp") or _tech.get("vrp") or 0,
                 edge_points=ep,
                 news_sentiment=(ctx.get("sentiment") or "NEUTRAL"),
                 earnings_days_away=(ctx.get("earnings_days")
