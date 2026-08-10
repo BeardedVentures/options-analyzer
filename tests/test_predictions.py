@@ -261,3 +261,178 @@ def test_the_cycle_records_and_resolves():
     import auto_paper_cycle as apc
     assert "record_trade_predictions" in inspect.getsource(apc._auto_open_from_candidates)
     assert "_resolve_predictions()" in inspect.getsource(apc.main)
+
+
+# ── Brier decomposition (2026-08-10) ──────────────────────────────────────────────────────────
+
+def _pairs(spec):
+    """spec: list of (probability, outcome) — outcome True = the claim was correct."""
+    return [(p, o) for p, o in spec]
+
+
+def test_the_decomposition_identity_holds():
+    """BS = reliability - resolution + uncertainty.
+
+    This is the test that makes the metric able to be WRONG. Three numbers that merely look
+    plausible would pass any assertion about their ranges; only the identity proves they were
+    computed from the same data by the formula they claim to be.
+    """
+    import random as _r
+    rng = _r.Random(7)
+    for trial in range(25):
+        pairs = [(round(rng.uniform(0.05, 0.95), 3), rng.random() < 0.6) for _ in range(60)]
+        d = P.decompose(pairs, bootstrap=0)
+        lhs = d["brier"]
+        rhs = d["reliability"] - d["resolution"] + d["uncertainty"] + d["residual"]
+        assert lhs == pytest.approx(rhs, abs=1e-9), f"trial {trial}: {lhs} != {rhs}"
+
+
+def test_a_forecaster_who_says_the_base_rate_about_everything_has_zero_resolution():
+    """The failure raw Brier cannot see.
+
+    Every claim gets the same 70%, and 70% of them come true. Perfectly calibrated, respectable
+    Brier, and it knows NOTHING about which individual trade will work. This is the case the
+    verdict has to catch, because 'well calibrated' is exactly what raw Brier calls it.
+    """
+    pairs = [(0.70, True)] * 70 + [(0.70, False)] * 30
+    d = P.decompose(pairs, bootstrap=0)
+    assert d["resolution"] == pytest.approx(0.0, abs=1e-9)
+    assert d["reliability"] == pytest.approx(0.0, abs=1e-9)
+    assert d["skill"] == pytest.approx(0.0, abs=1e-9)
+    assert d["brier"] == pytest.approx(d["uncertainty"], abs=1e-9)
+
+
+def test_a_forecaster_who_separates_winners_from_losers_has_resolution():
+    pairs = [(0.95, True)] * 50 + [(0.05, False)] * 50
+    d = P.decompose(pairs, bootstrap=0)
+    assert d["resolution"] >= 0.19
+    assert d["skill"] > 0.7
+    assert d["brier"] < 0.01
+
+
+def test_confident_and_wrong_is_punished_through_reliability_not_resolution():
+    """Backwards forecasts still DISCRIMINATE — they are just pointed the wrong way. The
+    decomposition should show high resolution and terrible reliability, which is a different
+    problem from having no signal, and needs a different fix."""
+    pairs = [(0.95, False)] * 50 + [(0.05, True)] * 50
+    d = P.decompose(pairs, bootstrap=0)
+    assert d["resolution"] >= 0.19         # it separates the groups
+    assert d["reliability"] > 0.7         # ...and is wrong about which is which
+    assert d["skill"] < 0
+
+
+def test_uncertainty_is_fixed_by_the_base_rate_alone():
+    """It is the same for every model on the same data — nothing a forecaster does moves it."""
+    a = P.decompose([(0.9, True)] * 60 + [(0.1, False)] * 40, bootstrap=0)
+    b = P.decompose([(0.5, True)] * 60 + [(0.5, False)] * 40, bootstrap=0)
+    assert a["uncertainty"] == pytest.approx(b["uncertainty"], abs=1e-9)
+    assert a["uncertainty"] == pytest.approx(0.6 * 0.4, abs=1e-9)
+
+
+def test_clustered_forecasts_are_reported_as_clustered():
+    """Resolution is capped by how much the forecasts actually vary. VEGA's claims sit between
+    0.70 and 0.85, so the ceiling may be the binding constraint rather than the model — and the
+    report has to say which."""
+    tight = P.decompose([(0.72, True), (0.73, True), (0.74, False), (0.71, True)] * 10,
+                           bootstrap=0)
+    wide = P.decompose([(0.10, False), (0.40, True), (0.70, True), (0.95, True)] * 10,
+                          bootstrap=0)
+    assert tight["forecast_spread"] < 0.05
+    assert wide["forecast_spread"] > 0.25
+
+
+def test_equal_count_bins_survive_clustered_forecasts():
+    """Equal-WIDTH bins would drop every VEGA claim into one cell, and a single bin makes
+    resolution identically zero by construction — reporting 'no discrimination' when the bins
+    simply could not see any."""
+    pairs = [(0.71, False)] * 25 + [(0.84, True)] * 25
+    d = P.decompose(pairs, bootstrap=0)
+    assert d["n_bins"] >= 2
+    assert d["resolution"] >= 0.19, "the two groups differ completely and must be separable"
+
+
+def test_the_bootstrap_interval_is_reported_and_deterministic():
+    """A calibration report that moves when you re-run it is not a report."""
+    pairs = [(0.8, True)] * 30 + [(0.3, False)] * 30
+    a = P.decompose(pairs, bootstrap=400)
+    b = P.decompose(pairs, bootstrap=400)
+    assert a["resolution_ci"] == b["resolution_ci"] is not None
+    assert a["resolution_ci"][0] <= a["resolution"] <= a["resolution_ci"][1]
+
+
+def test_noise_is_not_mistaken_for_skill():
+    """Resolution is a sum of squares, so a forecaster that knows NOTHING still scores above
+    zero — and its bootstrap interval can sit entirely above zero too. Measured here: 40 random
+    forecasts gave resolution 0.019 with a CI of [0.004, 0.055], which "excludes zero" for a
+    model with no signal at all.
+
+    The permutation test is what actually answers it: shuffling outcomes against forecasts
+    breaks any real association while keeping both margins, so the shuffled scores are the
+    distribution of resolution under "knows nothing".
+
+    Asserted as a FALSE-POSITIVE RATE over many independent noise draws, not as p > 0.05 on
+    one lucky seed. A single draw can legitimately land in the tail — that is what a 5% test
+    means — so a test that pinned one seed would be asserting luck and would break the first
+    time anything downstream of the RNG changed.
+    """
+    import random as _r
+    rng = _r.Random(11)
+    flagged = 0
+    trials = 40
+    for _ in range(trials):
+        pairs = [(round(rng.uniform(0.6, 0.9), 3), rng.random() < 0.75) for _ in range(40)]
+        d = P.decompose(pairs, bootstrap=400)
+        assert d["resolution"] > 0, "noise is never exactly zero — that is the whole trap"
+        if d["resolution_p"] is not None and d["resolution_p"] < 0.05:
+            flagged += 1
+    # A correctly calibrated 5% test flags ~2 of 40. Anything near half would mean the null
+    # distribution is wrong and noise is being sold as skill.
+    assert flagged <= trials * 0.20, (
+        f"{flagged}/{trials} pure-noise samples read as discrimination — the permutation null "
+        f"is miscalibrated")
+
+
+def test_real_signal_clears_the_permutation_test():
+    """The other side: a forecaster that genuinely separates outcomes must be detected."""
+    d = P.decompose([(0.9, True)] * 25 + [(0.2, False)] * 25, bootstrap=1000)
+    assert d["resolution_p"] < 0.01
+
+
+def test_the_residual_is_reported_so_the_identity_is_checkable():
+    """Three terms that silently do not add up to the Brier they claim to decompose would be
+    unfalsifiable. Binning continuous forecasts leaves a remainder; it is exposed, not hidden."""
+    d = P.decompose([(0.71, True), (0.79, False), (0.83, True), (0.62, True)] * 10, bootstrap=0)
+    assert d["residual"] is not None
+    assert d["brier"] == pytest.approx(
+        d["reliability"] - d["resolution"] + d["uncertainty"] + d["residual"], abs=1e-4)
+
+
+def test_empty_input_reports_nothing_rather_than_zero():
+    d = P.decompose([], bootstrap=0)
+    assert d["n"] == 0 and d["brier"] is None and d["resolution"] is None
+
+
+def test_grade_exposes_the_decomposition_per_claim_type():
+    rows = [{"claim_type": "strike_holds", "status": "resolved", "correct": i < 7,
+             "probability": 0.9 if i < 7 else 0.2, "context": {}} for i in range(10)]
+    g = P.grade(rows)
+    d = g["by_type"]["strike_holds"]
+    assert d["resolution"] is not None and d["reliability"] is not None
+    assert d["skill"] is not None and d["resolution_ci"] is not None
+
+
+def test_the_verdict_says_when_a_type_does_not_discriminate():
+    """'78% correct, well calibrated' is what a base-rate parrot scores too. The verdict has to
+    name the difference or the ledger launders ignorance as calibration."""
+    rows = [{"claim_type": "strike_holds", "status": "resolved", "correct": i < 7,
+             "probability": 0.7, "context": {}} for i in range(10)]
+    v = P.grade(rows)["by_type"]["strike_holds"]["verdict"]
+    assert "does NOT discriminate" in v
+    assert "hardly vary" in v          # and names the clustered-forecast reason
+
+
+def test_the_verdict_credits_a_type_that_does_discriminate():
+    rows = [{"claim_type": "strike_holds", "status": "resolved", "correct": i < 15,
+             "probability": 0.95 if i < 15 else 0.05, "context": {}} for i in range(20)]
+    v = P.grade(rows)["by_type"]["strike_holds"]["verdict"]
+    assert "DISCRIMINATES" in v

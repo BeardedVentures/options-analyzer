@@ -527,3 +527,35 @@ Per gate, it compares candidates whose **only** failure was that gate against ca
 Stated caveats travel with every report: the snapshot keeps only the top 3 candidates per ticker by natural credit-to-width, so this measures gates *within that band*; and touch is a leading indicator, not a loss.
 
 **673 → 700 tests.**
+
+---
+
+## Part 11 — Brier decomposition (Sprint 3.3, shipped 2026-08-10)
+
+`grade()` already computed hit rate, raw Brier and a bias term, and the resolver was already wired into the cycle (`auto_paper_cycle:985` — not an orphan; checked). What it could not do was tell a model that knows something from one that has memorised the base rate.
+
+**BS = reliability − resolution + uncertainty.** A forecaster that always predicts the base rate scores a respectable Brier and has *exactly zero* resolution — perfectly calibrated, completely useless — and raw Brier calls that "well calibrated." That is Grok's point about claims matching the unconditional base rate, made measurable rather than rhetorical.
+
+### Three bugs the tests caught, two of them mine
+
+**1. The identity did not hold.** `BS = REL − RES + UNC` is exact only when every forecast in a bin is identical; binning continuous forecasts leaves a remainder. Three terms that silently don't sum to the Brier they claim to decompose are unfalsifiable. `residual` is now exposed and computed from the *rounded* terms, so the identity holds on the numbers actually published.
+
+**2. Tied forecasts were split on row order.** Equal-count binning sorted by probability, and when every forecast was the same number the sort fell back to input order — cutting a ledger that listed its hits before its misses into a "winners" bin and a "losers" bin. **A forecaster saying 70% about everything scored resolution 0.16.** The decomposition was manufacturing discrimination out of row order. Identical forecasts are now never split across bins.
+
+**3. The bin-closing guard collapsed everything into one cell** whenever forecasts took fewer distinct values than there were bins — which is exactly VEGA's case. A perfectly discriminating forecaster scored resolution 0.000.
+
+### The bootstrap was the wrong instrument
+
+Resolution is a sum of squares, so a forecaster that knows *nothing* still scores above zero — and its bootstrap CI can sit entirely above zero. Measured: 40 random forecasts gave resolution 0.019 with a CI of [0.004, 0.055], an interval that "excludes zero" for a model with no signal at all. Reading that as skill is the exact error the decomposition exists to prevent.
+
+The bar is now a **permutation test**: shuffle outcomes against forecasts, which breaks any real association while keeping both margins, and see where the observed resolution falls in that null. The verdict conditions on `p < 0.05`. Its test asserts a *false-positive rate* across 40 independent noise draws rather than `p > 0.05` on one lucky seed — a single draw can legitimately land in the tail, and pinning a seed would be asserting luck.
+
+### A finding for the roadmap
+
+VEGA's 32 open claims have a forecast spread of **sd = 0.065** (range 0.535–0.848), most between 0.70 and 0.85. **Resolution is capped by how much the forecasts actually vary.** If every claim resolved exactly at its stated probability — perfect calibration, real variation — the achievable resolution is only ~0.034 against uncertainty 0.132, a skill ceiling near 0.25.
+
+So the ledger's ability to demonstrate skill is currently limited less by sample size than by the engine saying nearly the same number about every trade. `forecast_spread` is reported alongside resolution, and the verdict names it when it is the binding constraint. **Making the engine's claims more varied is a prerequisite for ever proving they carry information** — that belongs in the roadmap next to accumulating more of them.
+
+First claims resolve **2026-08-23**.
+
+**700 → 715 tests.**

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
@@ -274,6 +275,184 @@ def _score(r: Dict, bars: Sequence) -> tuple:
     return None, f"no scorer for claim type {ct}"
 
 
+def _quantile_bins(obs: Sequence[tuple], k: int) -> List[List[tuple]]:
+    """Split (probability, outcome) pairs into k roughly equal-COUNT bins.
+
+    Equal-count rather than equal-width, because VEGA's forecasts are clustered: nearly every
+    claim lands between 0.70 and 0.85. Fixed-width bins would drop that whole mass into one
+    cell, and a single bin makes resolution identically zero by construction — the engine would
+    be reported as having no discrimination when what actually happened is that the bins could
+    not see any.
+
+    IDENTICAL FORECASTS ARE NEVER SPLIT ACROSS BINS, and that is load-bearing rather than
+    tidy. Splitting on position meant that when every forecast was the same number, the sort
+    fell back to input order — so a ledger that happened to list its hits before its misses got
+    cut into a "winners" bin and a "losers" bin, and a forecaster saying 70% about everything
+    scored resolution 0.16. The decomposition would have manufactured discrimination out of
+    row order. A bin means "the forecaster said approximately X"; two claims of exactly X
+    cannot belong to different cells.
+    """
+    ordered = sorted(obs, key=lambda x: x[0])
+    if k <= 1 or not ordered:
+        return [ordered]
+
+    groups: List[List[tuple]] = []
+    for pair in ordered:
+        if groups and groups[-1][0][0] == pair[0]:
+            groups[-1].append(pair)
+        else:
+            groups.append([pair])
+
+    target = len(ordered) / k
+    out: List[List[tuple]] = []
+    cur: List[tuple] = []
+    left = len(groups)
+    for g in groups:
+        cur.extend(g)
+        left -= 1
+        # Close once the bin is full enough AND at least one group is left to start the next.
+        # The guard is only there to avoid emitting an empty final bin: requiring enough groups
+        # to fill ALL k bins collapsed the whole sample into one cell whenever the forecasts
+        # took fewer distinct values than there were bins — which is exactly VEGA's case, and
+        # made a perfectly discriminating forecaster score resolution 0.000.
+        if len(out) < k - 1 and len(cur) >= target and left >= 1:
+            out.append(cur)
+            cur = []
+    if cur:
+        out.append(cur)
+    return out
+
+
+def decompose(pairs: Sequence[tuple], n_bins: Optional[int] = None,
+              bootstrap: int = 2000, seed: int = 20260810) -> Dict:
+    """Murphy's decomposition of the Brier score, with a bootstrap interval on resolution.
+
+        BS = reliability - resolution + uncertainty
+
+    Raw Brier conflates two things this system needs kept apart:
+
+      reliability  is 78% actually 78%?          (calibration; lower is better, 0 is perfect)
+      resolution   do the confident calls differ from the timid ones?  (higher is better)
+      uncertainty  o(1-o), fixed by the base rate and identical for every model
+
+    A forecaster that ALWAYS predicts the base rate scores a respectable Brier and has exactly
+    ZERO resolution. It is perfectly calibrated and completely useless, and raw Brier calls that
+    "well calibrated". That is not a hypothetical here: the claim probabilities on file span
+    0.535 to 0.848 with most inside 0.70-0.85, so the ledger could report a good Brier while
+    saying nearly the same number about every trade.
+
+    `skill` is Murphy's skill score, (resolution - reliability) / uncertainty — equivalently
+    1 - BS/BS_climatology. Above 0 means beating "always guess the base rate"; at or below 0
+    means not.
+
+    The bootstrap matters more than the point estimate. At the sample sizes this ledger will
+    have for months, resolution computed once is noise with a decimal point on it. The bar for
+    "this claim type carries information" is the LOWER bound of the interval above zero, not
+    the point estimate above zero.
+    """
+    obs = [(float(p), 1.0 if o else 0.0) for p, o in pairs if p is not None]
+    n = len(obs)
+    empty = {"n": n, "brier": None, "reliability": None, "resolution": None,
+             "uncertainty": None, "skill": None, "resolution_ci": None,
+             "resolution_p": None, "residual": None,
+             "n_bins": 0, "forecast_spread": None, "base_rate": None}
+    if n == 0:
+        return empty
+
+    def _terms(sample: Sequence[tuple], k: int) -> tuple:
+        m = len(sample)
+        base = sum(o for _, o in sample) / m
+        unc = base * (1.0 - base)
+        rel = res = 0.0
+        for cell in _quantile_bins(sample, k):
+            if not cell:
+                continue
+            w = len(cell) / m
+            p_bar = sum(p for p, _ in cell) / len(cell)
+            o_bar = sum(o for _, o in cell) / len(cell)
+            rel += w * (p_bar - o_bar) ** 2
+            res += w * (o_bar - base) ** 2
+        return rel, res, unc, base
+
+    # One bin per ~5 observations, never more than 5 and never fewer than 2. Ten bins on
+    # fifteen claims would give every cell its own perfect record and report resolution as
+    # near-total — overfitting the decomposition rather than measuring anything.
+    k = n_bins if n_bins else max(2, min(5, n // 5))
+    rel, res, unc, base = _terms(obs, k)
+    # What the binner ACTUALLY produced. Ties are never split, so a ledger whose forecasts take
+    # only two distinct values yields two bins however many were asked for — and reporting the
+    # requested number would overstate how finely this was measured.
+    k_used = len(_quantile_bins(obs, k))
+    brier = sum((p - o) ** 2 for p, o in obs) / n
+    mean_p = sum(p for p, _ in obs) / n
+    spread = (sum((p - mean_p) ** 2 for p, _ in obs) / n) ** 0.5
+
+    ci = p_value = None
+    if bootstrap and n >= 2:
+        rng = random.Random(seed)          # seeded: a calibration report must not move on re-run
+        draws = []
+        for _ in range(int(bootstrap)):
+            sample = [obs[rng.randrange(n)] for _ in range(n)]
+            if len({o for _, o in sample}) < 2:
+                continue                   # all-hit or all-miss resample: resolution undefined
+            draws.append(_terms(sample, k)[1])
+        if len(draws) >= 100:
+            draws.sort()
+            lo = draws[int(0.025 * len(draws))]
+            hi = draws[min(len(draws) - 1, int(0.975 * len(draws)))]
+            ci = [round(lo, 4), round(hi, 4)]
+
+        # A PERMUTATION test, not the CI, is what answers "could this have been luck?".
+        #
+        # Resolution is a sum of squares and therefore non-negative, so pure noise still scores
+        # above zero and a bootstrap interval around it can sit entirely above zero while the
+        # forecaster knows nothing. Measured here: 40 random forecasts produced resolution
+        # 0.019 with a bootstrap CI of [0.004, 0.055] — an interval that "excludes zero" for a
+        # model with no signal at all. Reading that as skill is precisely the error this whole
+        # decomposition exists to prevent.
+        #
+        # Shuffling the outcomes against the forecasts breaks any real association while keeping
+        # both margins intact, so the shuffled scores ARE the distribution of resolution under
+        # "this forecaster knows nothing". p is where the observed value falls in it.
+        probs = [p for p, _ in obs]
+        outs = [o for _, o in obs]
+        null = []
+        for _ in range(int(bootstrap)):
+            shuffled = outs[:]
+            rng.shuffle(shuffled)
+            null.append(_terms(list(zip(probs, shuffled)), k)[1])
+        if null:
+            p_value = round((sum(1 for x in null if x >= res) + 1) / (len(null) + 1), 4)
+
+    return {
+        "n": n,
+        "brier": round(brier, 4),
+        "reliability": round(rel, 4),
+        "resolution": round(res, 4),
+        "uncertainty": round(unc, 4),
+        "skill": round((res - rel) / unc, 4) if unc > 0 else None,
+        "resolution_ci": ci,
+        # P(resolution this high | the forecaster knows nothing). Below 0.05 is the bar for
+        # claiming discrimination. This is the number the verdict conditions on.
+        "resolution_p": p_value,
+        # BS = reliability - resolution + uncertainty holds EXACTLY only when every forecast in
+        # a bin is identical. Binning continuous forecasts leaves this remainder, and reporting
+        # the three terms without it would mean they silently do not add up to the Brier they
+        # claim to decompose. Exposed rather than hidden so the identity is checkable.
+        #
+        # Computed from the ROUNDED terms, so the identity holds on the numbers actually
+        # published rather than only on the full-precision ones nobody can see.
+        "residual": round(round(brier, 4)
+                          - (round(rel, 4) - round(res, 4) + round(unc, 4)), 4),
+        "n_bins": k_used,
+        # Resolution is capped by how much the forecasts actually vary. A model that says 75%
+        # about everything cannot discriminate no matter how right it is, and this is the number
+        # that says whether the ceiling or the model is the binding constraint.
+        "forecast_spread": round(spread, 4),
+        "base_rate": round(base, 4),
+    }
+
+
 def grade(rows: Optional[Sequence[Dict]] = None, cohort: Optional[str] = None) -> Dict:
     """Per claim type: how often it was right, and whether its confidence was earned.
 
@@ -289,13 +468,14 @@ def grade(rows: Optional[Sequence[Dict]] = None, cohort: Optional[str] = None) -
     by_type: Dict[str, Dict] = {}
     for r in resolved:
         t = r["claim_type"]
-        b = by_type.setdefault(t, {"n": 0, "hits": 0, "probs": [], "briers": []})
+        b = by_type.setdefault(t, {"n": 0, "hits": 0, "probs": [], "briers": [], "pairs": []})
         b["n"] += 1
         b["hits"] += 1 if r["correct"] else 0
         p = r.get("probability")
         if p is not None:
             b["probs"].append(p)
             b["briers"].append((p - (1.0 if r["correct"] else 0.0)) ** 2)
+            b["pairs"].append((p, bool(r["correct"])))
 
     out = {}
     min_n = int(_cfg("PREDICTION_MIN_FOR_GRADE", 10))
@@ -303,14 +483,23 @@ def grade(rows: Optional[Sequence[Dict]] = None, cohort: Optional[str] = None) -
         hit = b["hits"] / b["n"]
         brier = (sum(b["briers"]) / len(b["briers"])) if b["briers"] else None
         avg_p = (sum(b["probs"]) / len(b["probs"])) if b["probs"] else None
+        # The decomposition, not just the aggregate. Raw Brier cannot tell a model that knows
+        # something from one that has memorised the base rate; resolution can.
+        dec = decompose(b["pairs"])
         out[t] = {
             "n": b["n"],
             "hit_rate": round(hit * 100, 1),
             "avg_confidence": round(avg_p * 100, 1) if avg_p is not None else None,
             "brier": round(brier, 4) if brier is not None else None,
             "bias_pp": round((avg_p - hit) * 100, 1) if avg_p is not None else None,
+            "reliability": dec["reliability"],
+            "resolution": dec["resolution"],
+            "uncertainty": dec["uncertainty"],
+            "skill": dec["skill"],
+            "resolution_ci": dec["resolution_ci"],
+            "forecast_spread": dec["forecast_spread"],
             "gradeable": b["n"] >= min_n,
-            "verdict": _verdict(b["n"], min_n, hit, avg_p, brier),
+            "verdict": _verdict(b["n"], min_n, hit, avg_p, brier, dec),
         }
     return {
         "total_claims": len(rows),
@@ -322,7 +511,14 @@ def grade(rows: Optional[Sequence[Dict]] = None, cohort: Optional[str] = None) -
 
 
 def _verdict(n: int, min_n: int, hit: float, avg_p: Optional[float],
-             brier: Optional[float]) -> str:
+             brier: Optional[float], dec: Optional[Dict] = None) -> str:
+    """Leads with RESOLUTION, because that is the question raw Brier cannot answer.
+
+    "78% correct, Brier 0.17, well calibrated" is what a forecaster saying the base rate about
+    every trade also scores. Calibration says the numbers are honest; resolution says they
+    distinguish one trade from another. A claim type can be perfectly calibrated and carry no
+    information at all, and only the second sentence catches it.
+    """
     if n < min_n:
         return f"only {n} resolved — not gradeable yet ({min_n} needed)"
     if avg_p is None:
@@ -331,13 +527,33 @@ def _verdict(n: int, min_n: int, hit: float, avg_p: Optional[float],
     if brier is not None and brier > 0.25:
         return (f"{hit*100:.0f}% correct over {n} with a Brier of {brier:.2f} — worse than "
                 f"always guessing 50%. This claim type is not adding information.")
+
+    # Does it discriminate? Judged on the PERMUTATION p-value, not the bootstrap interval:
+    # resolution is a sum of squares, so noise scores above zero and its CI can sit entirely
+    # above zero for a forecaster that knows nothing.
+    disc = ""
+    p = (dec or {}).get("resolution_p")
+    if p is not None:
+        if p < 0.05:
+            disc = (f" It also DISCRIMINATES: resolution {dec['resolution']:.3f} "
+                    f"(p={p:.3f} against shuffled outcomes), skill {dec['skill']:+.2f} "
+                    f"versus always guessing the base rate.")
+        else:
+            disc = (f" But it does NOT discriminate: resolution {dec['resolution']:.3f} is "
+                    f"what shuffling the outcomes produces {p*100:.0f}% of the time. On this "
+                    f"evidence it is no better than saying {hit*100:.0f}% about every trade")
+            if (dec or {}).get("forecast_spread") is not None and dec["forecast_spread"] < 0.05:
+                disc += (f", and with a forecast spread of only {dec['forecast_spread']:.3f} it "
+                         f"barely could be — the probabilities hardly vary")
+            disc += "."
+
     if bias > 10:
         return (f"{hit*100:.0f}% correct but claiming {avg_p*100:.0f}% — overconfident by "
-                f"{bias:.0f}pp. The direction is useful; the certainty is not earned.")
+                f"{bias:.0f}pp. The direction is useful; the certainty is not earned.{disc}")
     if bias < -10:
         return (f"{hit*100:.0f}% correct while only claiming {avg_p*100:.0f}% — "
-                f"underconfident by {abs(bias):.0f}pp. This signal deserves more weight.")
-    return f"{hit*100:.0f}% correct over {n}, well calibrated (Brier {brier:.2f})."
+                f"underconfident by {abs(bias):.0f}pp. This signal deserves more weight.{disc}")
+    return f"{hit*100:.0f}% correct over {n}, well calibrated (Brier {brier:.2f}).{disc}"
 
 
 def record_trade_predictions(trade: Dict, trade_id: str) -> List[str]:
