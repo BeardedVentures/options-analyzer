@@ -69,7 +69,7 @@ _scan_status = {"running": False, "msg": "", "at": None}
 _COPILOT_PEERS: list = []
 _COPILOT_CTX: dict = {}
 
-VIEWS = ("today", "brief", "track", "open", "bitcoin", "history", "lottery")
+VIEWS = ("today", "track", "open", "bitcoin", "history", "lottery")
 IVR_MIN = getattr(config, "MIN_IV_RANK", 45)
 
 # Component max points for the score composition panel (mirrors edge_calculator).
@@ -2174,9 +2174,31 @@ def view_today(board, s, tier):
           'Click a row to open the Copilot view</span></div>'
         + board_table(trades, tier)
         + '</div></div>'
+        + _mc_tickets(trades, tier)
         + _mc_system_status(board, trades, tier)
         + '</div>'
         + book_footer(board))
+
+
+def _mc_tickets(trades, tier):
+    """The order tickets, folded in from what used to be a separate Brief tab.
+
+    Brief rendered the SAME trades from the SAME artifact as this page and said so in its own
+    intro — "the same engine scan as the board, written as actionable tickets". A tab that
+    answers no question no other tab answers is a layout, not a section of the product, and it
+    read as a mystery rather than a second opinion.
+
+    What it genuinely added was the part below: the executable ticket and the position size for
+    the current risk tier. That belongs directly under the table it sizes, not one click away.
+    """
+    if not trades:
+        return ""
+    cards = "".join(brief_card(c, tier) for c in trades[:5])
+    return ('<div class="mcpanel" style="padding:11px 12px;margin-top:14px">'
+            '<div class="hd">Order tickets'
+            '<span style="float:right;text-transform:none;letter-spacing:0;font-weight:400">'
+            'Strikes, expectancy and size for the tier above</span></div>'
+            f'{cards}</div>')
 
 
 def hero_card(trades, tier):
@@ -2780,32 +2802,6 @@ def brief_card(c, tier):
             + (f'<div class="wflist">{flags}</div>' if flags else '') + '</div>')
 
 
-def view_brief(board, s, tier):
-    trades = board.get("trades") or []
-    ctx = board.get("context") or {}
-    vix = ctx.get("vix") or {}; spy = ctx.get("spy") or {}
-    bias = ctx.get("bias") or "—"
-    great = sum(1 for t in trades if (t.get("edge_score") or 0) >= 80)
-    elite = sum(1 for t in trades if (t.get("edge_score") or 0) >= 90)
-    verdict = "Good day to sell premium" if trades else "Nothing qualifies right now"
-    strip = (f'<div class="bstrip">'
-             f'<div class="ms"><div class="msl">VERDICT</div><div class="msv">{esc(verdict)}</div>'
-             f'<div class="mss">{len(trades)} qualified · {great} great · {elite} elite</div></div>'
-             f'<div class="ms"><div class="msl">VIX</div><div class="msv num">{(vix.get("current") or 0):.2f}</div>'
-             f'<div class="mss">{esc((vix.get("label") or "").title())} · {esc(vix.get("trend") or "")}</div></div>'
-             f'<div class="ms"><div class="msl">SPY</div><div class="msv num">${(spy.get("price") or 0):.2f}</div>'
-             f'<div class="mss">{(spy.get("day_change_pct") or 0):+.2f}% today</div></div>'
-             f'<div class="ms"><div class="msl">Bias</div><div class="msv">{esc(bias)}</div>'
-             f'<div class="mss">engine artifact</div></div></div>')
-    if not trades:
-        return f'<h2>Daily brief</h2>{strip}<div class="empty">No qualified setups on the latest scan.</div>'
-    cards = "".join(brief_card(c, tier) for c in trades)
-    intro = ('<p class="q" style="margin:2px 0 14px">The same engine scan as the board, written as actionable '
-             'tickets — real strikes, real expectancy, and position sizing per risk tier. '
-             'Numbers reconcile with the Today tab.</p>')
-    return f'<h2>Daily brief — options to consider selling</h2>{intro}{strip}{cards}{book_footer(board)}'
-
-
 def _tile(label, value, sub, cls=""):
     return (f'<div class="tktile"><div class="tkl">{esc(label)}</div>'
             f'<div class="tkv {cls}">{value}</div><div class="tks">{esc(sub)}</div></div>')
@@ -3065,13 +3061,76 @@ def _gate_value_block() -> str:
             f'indicator, not a loss, and the sample is the top 3 candidates per ticker.</div>')
 
 
-def view_bitcoin():
-    """The BTC layer: what the free feeds read now, and how its claims are grading.
+def _btc_candidates_block() -> str:
+    """The spreads actually available on the BTC-proxy names, with their gate results.
 
-    Everything on this page is advisory. Nothing here gates a trade, opens one or closes one —
-    the cross-venue gap never enters the gates dict, and the daily forecast writes a claim to the
-    prediction ledger and nothing else. It earns its place on the nav by being FALSIFIABLE: every
-    number is dated, and the claims resolve on a schedule whether or not anyone looks.
+    This page was a readout: BTC spot, DVOL, realised vol, the cross-venue gap, and how the
+    daily direction claim is grading. Every number on it was true and none of it led anywhere —
+    the page about Bitcoin contained no Bitcoin trade you could take, while IBIT was passing all
+    eleven gates in the same scan the rest of the app was reading.
+
+    The volatility research below is the reason a trade here might be worth taking. It belongs
+    under the trades it justifies, not instead of them.
+    """
+    proxies = {t.upper() for t in getattr(config, "BTC_PROXY_TICKERS", {"IBIT"})}
+    try:
+        data, path = _latest_candidates()
+    except Exception as e:
+        return f'<div class="empty">Candidate snapshot unavailable: {esc(str(e))}</div>'
+    if not data:
+        return ('<div class="empty">No candidate snapshot yet — run a scan and the tradeable '
+                'BTC-proxy spreads will appear here.</div>')
+
+    cands = []
+    for row in data.get("rows") or []:
+        if str(row.get("ticker") or "").upper() not in proxies:
+            continue
+        for c in row.get("candidates") or []:
+            cands.append(c)
+    if not cands:
+        return (f'<div class="empty">Nothing tradeable on {esc(", ".join(sorted(proxies)))} in the '
+                f'latest scan — no spread in the delta band survived the chain filter.</div>')
+
+    cands.sort(key=lambda c: (c.get("gates_passed") or 0, c.get("score") or 0), reverse=True)
+    rows_html = ""
+    for c in cands[:6]:
+        gp, gt = c.get("gates_passed") or 0, c.get("gates_total") or 0
+        failed = [k for k, v in (c.get("gates") or {}).items() if not v]
+        ok = gp == gt and gt
+        gcls = "gpass" if ok else "gwarn"
+        why = ("passes every gate" if ok else "blocked by " + ", ".join(f.replace("_", " ")
+                                                                       for f in failed[:3]))
+        tp = c.get("true_pop")
+        rows_html += (
+            f'<tr><td class="l"><b>{esc(c.get("ticker"))}</b> '
+            f'<span class="num">{c.get("short_strike"):g}/{c.get("long_strike"):g}</span> '
+            f'<span class="dim">{esc(str(c.get("expiration"))[:10])} · {c.get("dte")}d</span></td>'
+            f'<td class="num">${(c.get("natural_credit_usd") or 0):.0f}</td>'
+            f'<td class="num">{(c.get("natural_credit_to_width") or 0)*100:.0f}%</td>'
+            f'<td class="num">{abs(c.get("short_delta") or 0):.2f}</td>'
+            f'<td class="num">{f"{tp*100:.0f}%" if tp is not None else "—"}</td>'
+            f'<td class="num">${(c.get("max_loss_usd") or 0):.0f}</td>'
+            f'<td class="{gcls}">{gp}/{gt}</td>'
+            f'<td class="l dim">{esc(why)}</td></tr>')
+
+    stamp = (data.get("meta") or {}).get("stamp") or ""
+    return (f'<table class="gtbl"><thead><tr><th class="l">Spread</th><th>Credit</th>'
+            f'<th>cr/w</th><th>&Delta;</th><th>True POP</th><th>Max risk</th><th>Gates</th>'
+            f'<th class="l">Reading</th></tr></thead><tbody>{rows_html}</tbody></table>'
+            f'<div class="dim" style="font-size:11px;margin-top:4px">'
+            f'Natural credit — sell the bid, buy the ask, which is what a fill actually pays. '
+            f'From the same snapshot the auto-trader opens from ({esc(stamp)}). '
+            f'Max risk is per contract; size it to your own budget.</div>')
+
+
+def view_bitcoin():
+    """The BTC layer: what is tradeable on the proxies, and whether the vol read justifies it.
+
+    The volatility research here is advisory and stays that way — the cross-venue gap never
+    enters the gates dict, and the daily forecast writes a claim to the prediction ledger and
+    nothing else. What changed is the order: the tradeable spreads come first, and the research
+    sits under them as the reason to care. A page that only reads instruments is a readout; the
+    trades are what make it a board.
     """
     try:
         from data import crypto
@@ -3080,8 +3139,8 @@ def view_bitcoin():
     except Exception as e:
         return f'<h2>Bitcoin</h2><div class="empty">Crypto layer unavailable: {esc(str(e))}</div>'
 
-    intro = ('<p class="q">Is Bitcoin\'s own options market pricing risk differently from IBIT\'s '
-             '— and is the daily directional call any good?</p>')
+    intro = ('<p class="q">What is tradeable on the BTC proxies right now, and does Bitcoin\'s own '
+             'options market justify it?</p>')
 
     s = crypto.snapshot()
     if not s.get("ok"):
@@ -3188,7 +3247,13 @@ def view_bitcoin():
             'never enters the gates dict, so it cannot block or force a trade whatever it reads. '
             'Band thresholds are provisional and ungraded — the raw gap is what gets stored, so '
             'calibration can set the bands from outcomes rather than from a guess.</div>')
-    return f'<h1>Bitcoin</h1>{intro}{head}{tiles}{xv}{fc_block}{foot}'
+    # Trades first, research under them. The volatility read is the REASON one of these might be
+    # worth taking, which makes it context for the table rather than a substitute for it.
+    tradeable = (f'<h2 style="margin-top:4px">Tradeable now — BTC proxies</h2>'
+                 f'{_btc_candidates_block()}')
+    return (f'<h1>Bitcoin</h1>{intro}{tradeable}'
+            f'<h2 style="margin-top:22px">Why — what Bitcoin\'s own market is pricing</h2>'
+            f'{head}{tiles}{xv}{fc_block}{foot}')
 
 
 def _btc_card(label, value, sub, color=None):
@@ -3200,7 +3265,7 @@ def _btc_card(label, value, sub, color=None):
 
 def nav(view):
     links = ""
-    labels = {"today": "Today", "brief": "Brief", "track": "Track Record", "open": "Open",
+    labels = {"today": "Today", "track": "Track Record", "open": "Open",
               "bitcoin": "Bitcoin", "history": "History", "lottery": "Lottery"}
     for v in VIEWS:
         links += f'<a class="{"on" if v == view else ""}" href="/?view={v}">{labels[v]}</a>'
@@ -3225,9 +3290,7 @@ def render(view="today", flash=""):
     if _scan_status["msg"] and _scan_status["msg"] not in flash:
         banner += f'<div class="flash">{esc(_scan_status["msg"])}</div>'
 
-    if view == "brief":
-        content = view_brief(board, s, tier)
-    elif view == "track":
+    if view == "track":
         content = view_track()
     elif view == "open":
         content = view_open(open_)

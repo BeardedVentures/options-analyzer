@@ -291,3 +291,52 @@ def test_the_panels_degrade_instead_of_taking_the_page_down(monkeypatch):
 def test_every_view_still_renders(view):
     html = vega_app.render(view)
     assert "<html" in html and len(html) > 500
+
+
+# ── Brief merged into Today · Bitcoin made a board (2026-08-10) ───────────────────────────────
+
+def test_brief_is_gone_and_old_links_still_work():
+    """Brief rendered the SAME trades from the SAME artifact as Today and said so in its own
+    intro. A tab that answers no question no other tab answers is a layout, not a section — and
+    a bookmark to it must not 404."""
+    assert "brief" not in vega_app.VIEWS
+    assert not hasattr(vega_app, "view_brief")
+    assert "<html" in vega_app.render("brief")      # falls back to Today
+
+
+def test_the_order_tickets_survived_the_merge():
+    """The one thing Brief genuinely added was the executable ticket and the position size for
+    the current tier. Dropping the tab must not drop those."""
+    txt = _txt(vega_app.render("today"))
+    assert "Order tickets" in txt
+
+
+def test_bitcoin_leads_with_something_tradeable():
+    """The page about Bitcoin contained no Bitcoin trade you could take, while IBIT was passing
+    all eleven gates in the same scan the rest of the app was reading."""
+    html = vega_app.view_bitcoin()
+    txt = _txt(html)
+    assert "Tradeable now" in txt
+    assert txt.index("Tradeable now") < txt.index("Why"), "trades come before the research"
+
+
+def test_bitcoin_still_shows_the_volatility_read_underneath():
+    """The research is the REASON a trade here might be worth taking. It becomes context for
+    the table, never a substitute for it."""
+    txt = _txt(vega_app.view_bitcoin())
+    for term in ("DVOL", "Variance premium", "Cross-venue"):
+        assert term in txt
+
+
+def test_the_btc_board_reads_the_same_snapshot_the_robot_trades_from():
+    """A board showing one engine's output while the desk opens from another is the two-engine
+    divergence this codebase has fought four enforcement leaks over."""
+    import inspect
+    src = inspect.getsource(vega_app._btc_candidates_block)
+    assert "_latest_candidates" in src
+    assert "natural_credit" in src, "credit must be the fillable basis, not the mid"
+
+
+def test_the_btc_board_degrades_without_a_snapshot(monkeypatch):
+    monkeypatch.setattr(vega_app, "_latest_candidates", lambda: (None, None))
+    assert "No candidate snapshot" in _txt(vega_app._btc_candidates_block())
