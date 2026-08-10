@@ -450,3 +450,43 @@ Test suite: **652 → 661 passing**, 10.7s. Nine files modified, no new modules.
 - **2.2b exit replay** — needs `mark_history` to accumulate. 2.2a is now recording, so the clock has started.
 - **3.1 counterfactuals** — pipeline buildable; 20 snapshots over 5 days is not enough to conclude.
 - **3.5 historical data purchase — DECIDED: deferred.** No paid data until the free-tier system is maxed out and paid data is the only remaining improvement. See the four-point test in Sprint 3.5. This makes Sprints 2.2a, 3.1 and 3.3 the critical path: they are what turn live-forward time into answers, and they are all free.
+
+---
+
+## Part 9 — The field-name contract (2026-08-10, follow-up)
+
+Part 8 closed by naming the gap the reachability test does not cover: it catches an *orphaned implementation* — a function nothing calls — but not a live call reading a key its producer never writes. `.get()` on a missing key is a successful call returning `None`, so nothing fails. Five bugs that day had exactly that shape. This closes it.
+
+### The underlying design fault
+
+Two producers fill the same `tech` slot on the assessment context:
+
+| | `vega_candidates.vol_context` (fast scan / auto-open) | `data.technicals.calculate_all` (main.py engine) |
+|---|---|---|
+| VRP, in vol points | `vrp_pp` | `vrp` |
+| IV rank | `iv_rank` | `iv_rank` |
+| ATM IV | `atm_iv` (decimal) | `current_iv` (percent) |
+
+`assess()` accepts either and reads `tech["vrp"]`. One producer matched; the other did not; the largest edge component was zero on every auto-opened trade. **Units were verified identical before unifying** — both are `(IV − RV) × 100`, which is what `calculate_edge_score`'s `>=9 / >=7 / >=5` thresholds are written against. So `vol_context` now emits `vrp`, and `vrp_pp` survives as a read-only fallback for the 20 snapshots already on disk.
+
+### The guard — `tests/test_schema_contracts.py`
+
+1. **Producer conformance.** `vol_context` emits exactly `VOL_CONTEXT_KEYS` on *every* return path, including the early ones. A key that appears only when the happy path completes is indistinguishable, to a consumer, from a key that was renamed.
+2. **Consumer conformance.** An AST scan resolves every string-literal key read against that dict — handling both real shapes, `_ctx.get("x")` and the `(row.get("ctx") or {}).get("x")` idiom — and asserts each key is one the producer writes. Unresolvable nodes are skipped rather than guessed at, so it reports no false positives.
+3. **The scanner is tested against a known-bad snippet**, so a guard that silently stopped resolving anything would fail rather than pass vacuously.
+4. **The same check on the assessment context**, including an explicit test that `earnings_date` is not a field and `earnings_days` is — the exact error that would have made the original plan block every trade forever.
+
+### It found two more bugs on its first run
+
+- `_auto_open_from_candidates` still read `_ctx.get("vix")` as a fallback — a key `vol_context` has never emitted. Removed; `_meta_vix` is the only source.
+- **`_entry_state` read `ctx["spot"]` and `ctx["price"]`. `vol_context` emits neither.** Spot was `None` on every trade, and with it `expected_move_at_entry`, which requires `atm_iv and spot and dte`. Spot lives on the candidate — `build_candidates` has recorded it since the credit floor started scaling with price. **Sixth instance of this shape, and the first caught by a test rather than a person.**
+
+The `test_entry_state.py` fixtures had been passing `spot` inside the ctx — a shape production never produces. The tests were green because the fixture encoded the bug. Same failure as the orphaned earnings gate, one layer down.
+
+Verified live: `expected_move_at_entry = 13.28` and `pop_gap_at_entry = −0.0398` now compute on a real candidate. `pop_gap` is described in the source as "the central claim of the whole system... the one number the ledger could never grade" — it was populated on 4 of 79 records.
+
+**652 → 673 tests.**
+
+### What this still does not cover
+
+Value-domain mismatches, not name mismatches — the `999`-vs-`None` sentinel is the example, and it was caught by a hand-written test, not by this. A producer and consumer can agree on a field name and disagree about what the values mean. That is the next gap, and it is narrower than the one just closed.

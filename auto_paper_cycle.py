@@ -208,7 +208,13 @@ def _entry_state(c: Dict, ctx: Dict) -> Dict:
             return None
 
     atm_iv = _f(ctx.get("atm_iv")) or _f(c.get("short_iv"))
-    spot = _f(ctx.get("spot")) or _f(ctx.get("price"))
+    # Spot comes off the CANDIDATE. This read `ctx["spot"]` and `ctx["price"]`, and the row
+    # context is vega_candidates.vol_context's output, which emits neither — the price lives on
+    # the enclosing row and, since the credit floor started scaling with it, on the candidate
+    # itself. So spot was None on every trade, and with it expected_move_at_entry, because the
+    # move needs `atm_iv and spot and dte`. Found by tests/test_schema_contracts.py, which is
+    # the sixth instance of this shape and the first one a test caught rather than a person.
+    spot = _f(c.get("spot"))
     dte = c.get("dte")
 
     em = None
@@ -523,21 +529,21 @@ def _auto_open_from_candidates(cand_data: Dict, source_file: str) -> int:
                 # feedback loop. Absent from the vega_candidates fast-scan schema, so they
                 # stay None on that path rather than being faked.
                 edge_score=c.get("edge_score"),
-                # vega_candidates.vol_context emits `vrp_pp`, not `vrp`. This read the key that
-                # does not exist, so vrp was null on all 79 real trades from TWO independent
-                # causes — this mismatch and the true_pop ordering bug. Same shape as the
-                # earnings_date/earnings_days error: a field name that was never checked
-                # against the producer.
-                vrp=c.get("vrp") or _ctx.get("vrp_pp") or _ctx.get("vrp"),
+                # `vrp_pp` is vol_context's old spelling, read only so candidate snapshots
+                # already on disk still record a VRP. This site used to read ONLY "vrp" while
+                # the producer emitted only "vrp_pp", so vrp was null on all 79 real trades —
+                # the same shape as the earnings_date/earnings_days error: a field name never
+                # checked against its producer. tests/test_schema_contracts.py now checks it.
+                vrp=c.get("vrp") or _ctx.get("vrp") or _ctx.get("vrp_pp"),
                 technical_score=c.get("composite_score") or c.get("technical_score"),
                 term_slope=c.get("term_slope"),
                 skew_steepness=c.get("skew_steepness"),
-                # VIX is fetched once per scan and lives in the snapshot's META, not in the
-                # per-ticker ctx this used to read — so it was null on every trade, which also
-                # silently defeated muninn.record_stress_snapshot's documented fallback to
-                # "the VIX at entry when the live read is unavailable". A fallback that never
-                # had a value to fall back to.
-                vix_at_entry=_ctx.get("vix") or _meta_vix,
+                # VIX is fetched once per scan and lives in the snapshot's META. This used to
+                # read the per-ticker ctx, which has never carried one — so it was null on
+                # every trade, which also silently defeated muninn.record_stress_snapshot's
+                # documented fallback to "the VIX at entry when the live read is unavailable".
+                # A fallback that never had a value to fall back to.
+                vix_at_entry=_meta_vix,
                 atm_iv_at_entry=_entry["atm_iv_at_entry"],
                 rv_at_entry=_entry["rv_at_entry"],
                 expected_move_at_entry=_entry["expected_move_at_entry"],

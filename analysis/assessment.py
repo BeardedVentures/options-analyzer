@@ -477,16 +477,18 @@ def assess(spread: Dict, ctx: Dict, strategy: str = BULL_PUT) -> Dict:
             ep = ec.calculate_edge_points(true_pop, implied).get("edge_points", 0)
             ts = ctx.get("term_structure") or {}
             _tech = ctx.get("tech") or {}
-            # VRP is the single largest component of the edge score (30 of 100). The fast scan's
-            # vol_context emits it as `vrp_pp` and main.py's technicals emit `vrp`; this read
-            # only knew the second name, so on the auto-open path the biggest term in the score
-            # was silently zero. Both spellings carry the SAME unit — volatility points, which
-            # is what calculate_edge_score's thresholds (>=9, >=7, >=5) are written against —
-            # so accepting either is a rename, not a conversion.
+            # `tech` is filled by EITHER data.technicals.calculate_all (engine path) or
+            # vega_candidates.vol_context (fast scan). They now share field names where they
+            # describe the same quantity; `vrp_pp` is the fast scan's old spelling and is read
+            # only so snapshots already on disk still score. Both are volatility POINTS, the
+            # unit calculate_edge_score's thresholds (>=9, >=7, >=5) are written against.
+            #
+            # This read knew only "vrp" while the fast scan emitted only "vrp_pp", so the
+            # largest component of the score — 30 of 100 — was zero on every auto-opened trade.
             es = ec.calculate_edge_score(
                 ticker=ctx.get("ticker"), strategy=strategy,
                 technical_score=_tech.get("composite_score", 50) or 50,
-                vrp_pct=_tech.get("vrp_pp") or _tech.get("vrp") or 0,
+                vrp_pct=_tech.get("vrp") or _tech.get("vrp_pp") or 0,
                 edge_points=ep,
                 news_sentiment=(ctx.get("sentiment") or "NEUTRAL"),
                 earnings_days_away=(ctx.get("earnings_days")

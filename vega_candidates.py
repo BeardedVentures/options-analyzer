@@ -74,9 +74,30 @@ SPY_LIKE = getattr(config, "SPY_BUFFER_TICKERS", {"SPY", "QQQ", "IWM", "DIA", "G
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-ticker vol context (IV-Rank / VRP) — best effort
 # ─────────────────────────────────────────────────────────────────────────────
+# The keys vol_context promises. This dict is SERIALISED into the candidates snapshot as
+# row["ctx"] and read back by a different module on a later run, which makes it a schema
+# crossing a process boundary with nothing checking it — and that is where three of the
+# 2026-08-10 bugs lived. `vrp` was emitted as `vrp_pp` and read as `vrp`; `vix` was read and
+# never emitted at all. Both read None forever and nothing failed.
+#
+# Names match data.technicals.calculate_all wherever the two producers describe the same
+# quantity, because assessment.load_context accepts EITHER of them as `tech`. A consumer
+# cannot be expected to know which producer filled the dict it was handed.
+VOL_CONTEXT_KEYS = frozenset({"atm_iv", "iv_rank", "iv_rank_method", "rv", "vrp"})
+
+# Emitted by an older vega_candidates; still present in snapshots already on disk. Consumers
+# may read these as fallbacks, and nothing new should be added here.
+VOL_CONTEXT_LEGACY_KEYS = frozenset({"vrp_pp"})
+
+
 def vol_context(ticker: str, puts: list, current_price: float) -> dict:
-    """ATM IV, IV-Rank (APPROX until history accrues), VRP. All best-effort."""
-    ctx = {"atm_iv": None, "iv_rank": None, "iv_rank_method": None, "rv": None, "vrp_pp": None}
+    """ATM IV, IV-Rank (APPROX until history accrues), VRP. All best-effort.
+
+    Emits exactly VOL_CONTEXT_KEYS on every return path, including the early ones — a key that
+    appears only when the happy path completes is indistinguishable, to a consumer, from a key
+    that was renamed.
+    """
+    ctx = {"atm_iv": None, "iv_rank": None, "iv_rank_method": None, "rv": None, "vrp": None}
     if not puts:
         return ctx
     # ONE definition of ATM IV, shared with the engine path via technicals.estimate_atm_iv.
@@ -101,7 +122,11 @@ def vol_context(ticker: str, puts: list, current_price: float) -> dict:
         rv = _tech._historical_vol(close, getattr(config, "VRP_HV_WINDOW", 35))
         if rv:
             ctx["rv"] = round(float(rv), 4)
-            ctx["vrp_pp"] = round((atm_iv - float(rv)) * 100, 1)  # vol points
+            # Volatility POINTS, the same unit as technicals.calculate_all's "vrp" — which is
+            # why it carries the same name. It was `vrp_pp`, and assessment.assess and
+            # auto_paper_cycle both read "vrp", so the largest component of the edge score
+            # (30 of 100) was silently zero on every trade the auto-trader ever opened.
+            ctx["vrp"] = round((atm_iv - float(rv)) * 100, 1)
     except Exception as e:
         logger.debug(f"[{ticker}] vol_context failed: {e}")
     return ctx

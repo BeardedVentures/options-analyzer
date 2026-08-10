@@ -61,8 +61,8 @@ def test_attach_true_pop_fills_the_gap_that_build_time_could_not():
 # ── entry state extraction ────────────────────────────────────────────────────────────────────
 
 def test_entry_state_reads_everything_the_ctx_already_had():
-    c = make_candidate(dte=35, true_pop=0.81, pop_implied=0.78, pop_gap=0.03)
-    s = apc._entry_state(c, {"atm_iv": 0.2800, "rv": 0.2150, "spot": 100.0})
+    c = make_candidate(dte=35, spot=100.0, true_pop=0.81, pop_implied=0.78, pop_gap=0.03)
+    s = apc._entry_state(c, {"atm_iv": 0.2800, "rv": 0.2150})
     assert s["atm_iv_at_entry"] == 0.28
     assert s["rv_at_entry"] == 0.215
     assert s["pop_gap_at_entry"] == 0.03
@@ -73,18 +73,18 @@ def test_expected_move_uses_the_same_unit_as_the_rest_of_the_board():
     """Calendar days (365), matching analysis.horizon. A 252-trading-day denominator would
     overstate the move by ~20% and make it silently incomparable with the strike distances and
     level cushions the cockpit already shows in sigma."""
-    s = apc._entry_state(make_candidate(dte=35), {"atm_iv": 0.30, "spot": 100.0})
+    s = apc._entry_state(make_candidate(dte=35, spot=100.0), {"atm_iv": 0.30})
     assert s["expected_move_at_entry"] == pytest.approx(expected_move(100.0, 0.30, 35), abs=1e-4)
     wrong_252 = 100.0 * 0.30 * math.sqrt(35 / 252)
     assert s["expected_move_at_entry"] != pytest.approx(wrong_252, abs=1e-3)
 
 
 def test_entry_state_falls_back_to_the_leg_iv_when_ctx_has_none():
-    s = apc._entry_state(make_candidate(short_iv=0.31), {"spot": 100.0})
+    s = apc._entry_state(make_candidate(short_iv=0.31, spot=100.0), {})
     assert s["atm_iv_at_entry"] == 0.31
 
 
-@pytest.mark.parametrize("ctx", [{}, {"spot": 100.0}, {"atm_iv": 0.28}, {"atm_iv": None, "rv": None}])
+@pytest.mark.parametrize("ctx", [{}, {"rv": 0.21}, {"atm_iv": 0.28}, {"atm_iv": None, "rv": None}])
 def test_every_field_degrades_independently(ctx):
     """A missing IV must not cost the trade its pop_gap. Partial data is the normal case."""
     c = make_candidate(true_pop=0.81, pop_implied=0.78)
@@ -95,12 +95,12 @@ def test_every_field_degrades_independently(ctx):
 
 
 def test_entry_state_survives_junk_without_raising():
-    s = apc._entry_state({"dte": "not-a-number"}, {"atm_iv": "n/a", "rv": None, "spot": "x"})
+    s = apc._entry_state({"dte": "not-a-number", "spot": "x"}, {"atm_iv": "n/a", "rv": None})
     assert all(v is None for v in s.values())
 
 
 def test_a_fast_scan_candidate_records_no_edge_claim():
-    s = apc._entry_state(make_candidate(true_pop=None, pop_gap=None), {"spot": 100.0})
+    s = apc._entry_state(make_candidate(true_pop=None, pop_gap=None, spot=100.0), {})
     assert s["pop_gap_at_entry"] is None
 
 

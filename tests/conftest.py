@@ -62,6 +62,11 @@ def make_candidate(**overrides):
     """A candidate that passes _candidate_passes_minimum unless a test breaks it."""
     c = {
         "ticker": "TEST",
+        # build_candidates records the price the candidate was built against, and it is the
+        # ONLY place spot survives to the snapshot — the row context (vol_context's output)
+        # has never carried one. _entry_state read it off the context and got None on every
+        # trade, taking expected_move_at_entry down with it.
+        "spot": 110.0,
         "short_strike": 100.0,
         "long_strike": 95.0,
         "expiration": "2026-09-18",
