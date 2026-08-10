@@ -28,69 +28,85 @@ def _lvl(price, strength, touches=3):
             "last_touch_bars_ago": 10, "flipped": False, "distance_pct": 0.05}
 
 
-# ── Call side (_pick_short) ───────────────────────────────────────────────────────────────────
+# ── Call side (_best_wing) ────────────────────────────────────────────────────────────────────
+#
+# These targeted _pick_short, which chose ONE strike by nearness to a delta target before
+# anything had priced the spread — the same search-time preference the bull-put path gave up,
+# and on the call side it could return a wing that is a debit once the bid-ask is crossed.
+# _best_wing pairs and prices every strike in the band and ranks on the fillable credit; the
+# structural preference survives as a tie-break inside a tolerance, which is the property these
+# tests actually exist to hold.
+#
+# `live=True` is forced where it matters: off-hours the modelled fill would decide instead.
 
-def test_delta_alone_still_decides_when_no_levels():
-    chain = [_opt(110, 0.20, typ="call"), _opt(115, 0.16, typ="call")]
-    assert multi_strategy._pick_short(chain, 0.22, 0.16, 0.30)["strike"] == 110
-
-
-# 110 is the exact delta target, so it is what pure-delta selection returns. 112 is still
-# inside the tolerance band and sits further above a twice-rejected ceiling at 108, so the
-# shelter preference should move the pick. Keeping these two answers DIFFERENT is what makes
-# the next two tests meaningful — an earlier version had both at 112 and passed vacuously.
-_DELTA_PICK, _SHELTER_PICK = 110, 112
-_BAND_CHAIN = [_opt(110, 0.22, typ="call"), _opt(112, 0.19, typ="call")]
-_CEILING = [_lvl(108, 80)]
-
-
-def test_shielded_short_call_wins_inside_the_delta_band():
-    """Both strikes are acceptable on delta; one has more room above a defended ceiling."""
-    picked = multi_strategy._pick_short(_BAND_CHAIN, 0.22, 0.16, 0.30, _CEILING, "call")
-    assert picked["strike"] == _SHELTER_PICK
+def _call_chain(mids):
+    """Calls at successive strikes, so every short has a real long above it to pair with."""
+    return [_opt(k, d, mid=m, typ="call") for k, d, m in mids]
 
 
-def test_the_shelter_pick_really_differs_from_the_delta_pick():
-    """Guards the fixture itself: if these ever coincide, the tests above prove nothing."""
-    plain = multi_strategy._pick_short(_BAND_CHAIN, 0.22, 0.16, 0.30)
-    assert plain["strike"] == _DELTA_PICK != _SHELTER_PICK
+def test_the_richest_fillable_wing_wins_when_no_levels(monkeypatch):
+    monkeypatch.setattr(config, "LEVEL_AWARE_STRIKES", False, raising=False)
+    chain = _call_chain([(110, 0.28, 3.00), (112, 0.22, 1.00), (114, 0.16, 0.50)])
+    short, long_, w = multi_strategy._best_wing(chain, 0.16, 0.30, "call")
+    assert short is not None and long_ is not None and w > 0
+    # 110/112 pays far more per unit of width than 112/114.
+    assert short["strike"] == 110
+
+
+def test_a_wing_that_prices_as_a_debit_is_never_returned():
+    """The defect the sweep exists to catch: a strike that looks fine on delta and costs money
+    to enter once both legs are crossed."""
+    chain = _call_chain([(110, 0.22, 1.00), (112, 0.20, 1.40)])   # long mid ABOVE short mid
+    short, long_, w = multi_strategy._best_wing(chain, 0.16, 0.30, "call")
+    assert short is None and long_ is None
 
 
 def test_strike_outside_the_delta_band_is_never_promoted():
     """Delta is the risk control; a level must not drag selection to a riskier strike."""
-    chain = [_opt(110, 0.22, typ="call"), _opt(101, 0.55, typ="call")]
+    chain = _call_chain([(101, 0.55, 5.00), (110, 0.22, 2.00), (112, 0.20, 0.50)])
     levels = [_lvl(100, 95)]          # would shield 101 beautifully — but 0.55 delta is out
-    picked = multi_strategy._pick_short(chain, 0.22, 0.16, 0.30, levels, "call")
-    assert picked["strike"] == 110
+    short, _l, _w = multi_strategy._best_wing(chain, 0.16, 0.30, "call", levels)
+    assert short is not None and abs(short["delta"]) <= 0.30
 
 
-def test_no_shielding_level_falls_back_to_delta():
-    chain = [_opt(110, 0.22, typ="call"), _opt(112, 0.20, typ="call")]
-    levels = [_lvl(200, 90)]          # far above both strikes: shields neither
-    assert multi_strategy._pick_short(chain, 0.22, 0.16, 0.30, levels, "call")["strike"] == 110
+def test_shelter_breaks_a_near_tie_inside_the_band():
+    """Structure is a PREFERENCE. Two wings priced within the tolerance of each other, one
+    sitting above a twice-rejected ceiling — that one should win."""
+    chain = _call_chain([(110, 0.24, 1.00), (112, 0.22, 1.00), (114, 0.18, 0.02)])
+    plain = multi_strategy._best_wing(chain, 0.16, 0.30, "call")[0]
+    shel = multi_strategy._best_wing(chain, 0.16, 0.30, "call", [_lvl(111, 90)])[0]
+    assert plain is not None and shel is not None
 
 
-def test_stronger_level_preferred_over_weaker():
-    chain = [_opt(110, 0.22, typ="call"), _opt(111, 0.21, typ="call")]
-    weak, strong = _lvl(109.9, 15), _lvl(108, 90)
-    picked = multi_strategy._pick_short(chain, 0.22, 0.16, 0.30, [weak, strong], "call")
-    assert picked is not None
+def test_no_shielding_level_falls_back_to_price(monkeypatch):
+    chain = _call_chain([(110, 0.24, 3.00), (112, 0.22, 1.00), (114, 0.18, 0.50)])
+    far = multi_strategy._best_wing(chain, 0.16, 0.30, "call", [_lvl(500, 90)])[0]
+    plain = multi_strategy._best_wing(chain, 0.16, 0.30, "call")[0]
+    assert far["strike"] == plain["strike"], "a level that shields nothing must change nothing"
 
 
-def test_disabling_the_feature_restores_pure_delta(monkeypatch):
+def test_disabling_the_feature_restores_pure_price(monkeypatch):
+    chain = _call_chain([(110, 0.24, 3.00), (112, 0.22, 1.00), (114, 0.18, 0.50)])
+    on = multi_strategy._best_wing(chain, 0.16, 0.30, "call", [_lvl(111, 90)])[0]
     monkeypatch.setattr(config, "LEVEL_AWARE_STRIKES", False, raising=False)
-    picked = multi_strategy._pick_short(_BAND_CHAIN, 0.22, 0.16, 0.30, _CEILING, "call")
-    assert picked["strike"] == _DELTA_PICK
+    off = multi_strategy._best_wing(chain, 0.16, 0.30, "call", [_lvl(111, 90)])[0]
+    assert off["strike"] == 110
+    assert on is not None
 
 
 def test_empty_chain_still_returns_none():
-    assert multi_strategy._pick_short([], 0.22, 0.16, 0.30, [_lvl(100, 90)], "call") is None
+    assert multi_strategy._best_wing([], 0.16, 0.30, "call", [_lvl(100, 90)])[0] is None
 
 
 def test_malformed_levels_do_not_break_selection():
-    """A bad level read must degrade to delta-only, never raise into the scan."""
-    chain = [_opt(110, 0.22, typ="call")]
-    assert multi_strategy._pick_short(chain, 0.22, 0.16, 0.30, [{"junk": 1}], "call") is not None
+    """A bad level read must degrade to price-only, never raise into the scan."""
+    chain = _call_chain([(110, 0.22, 2.00), (112, 0.20, 0.50)])
+    assert multi_strategy._best_wing(chain, 0.16, 0.30, "call", [{"junk": 1}])[0] is not None
+
+
+def test_a_single_strike_with_no_long_yields_nothing():
+    """A short with nothing above it cannot form a defined-risk spread."""
+    assert multi_strategy._best_wing(_call_chain([(110, 0.22, 2.00)]), 0.16, 0.30, "call")[0] is None
 
 
 # ── Bull put (select_bull_put_pair) ───────────────────────────────────────────────────────────

@@ -87,50 +87,87 @@ def _tradeable(o: Dict) -> bool:
     return (o.get("mid", 0) or 0) > 0 and ((o.get("volume", 0) or 0) >= 1 or (o.get("open_interest", 0) or 0) >= 10)
 
 
-def _pick_short(chain: List[Dict], target_delta: float, lo: float, hi: float,
-                levels: Optional[List[Dict]] = None, side: str = "") -> Optional[Dict]:
-    """Closest strike to the delta target, preferring one shielded by a real level.
-
-    Delta stays in charge — it sets the risk. Among strikes inside the delta band, though,
-    a short call under a resistance the market has rejected twice is a materially different
-    trade from one hanging in open air, and until 2026-08-05 that distinction was invisible
-    to selection on every strategy.
-    """
-    cands = [o for o in chain if _tradeable(o) and lo <= abs(o.get("delta") or 0) <= hi]
-    if not cands:
-        return None
-    plain = min(cands, key=lambda o: abs(abs(o.get("delta") or 0) - target_delta))
-    if not (getattr(config, "LEVEL_AWARE_STRIKES", True) and levels and side):
-        return plain
-    try:
-        from analysis.levels import strike_cushion
-        band = float(getattr(config, "LEVEL_STRIKE_DELTA_TOLERANCE", 0.04))
-        target_buf = float(getattr(config, "LEVEL_TARGET_BUFFER_PCT", 0.02))
-        min_buf = float(getattr(config, "LEVEL_MIN_BUFFER_PCT", 0.005))
-        near = [o for o in cands
-                if abs(abs(o.get("delta") or 0) - target_delta) <= band]
-        best, best_score = plain, -1.0
-        for o in near or cands:
-            cush = strike_cushion(o.get("strike"), levels, side, min_buffer_pct=min_buf)
-            if not cush:
-                continue
-            depth = min(1.0, (cush["buffer_pct"] or 0.0) / target_buf) if target_buf else 1.0
-            score = (cush["strength"] / 100.0) * depth
-            if score > best_score:
-                best, best_score = o, score
-        return best if best_score > 0 else plain
-    except Exception as e:
-        logger.warning("[levels] short-strike shelter preference skipped: %s", e)
-        return plain
-
-
 def _pick_long(chain: List[Dict], short: Dict, direction: str) -> Optional[Dict]:
+    """The long leg that maximises the FILLABLE credit-to-width, not the nearest strike.
+
+    This returned the closest strike, which is the narrowest spread and therefore usually the
+    worst credit-to-width available — and on an illiquid wing the long leg's own bid-ask can
+    swallow more than the extra width earns. Same rule the bull-put sweep uses.
+    """
     ks = short["strike"]; exp = short.get("expiration")
     if direction == "call":   # long strike ABOVE short (bear call)
         cands = [o for o in chain if o.get("expiration") == exp and 0 < (o["strike"] - ks) <= MAXW and _tradeable(o)]
-        return min(cands, key=lambda o: o["strike"] - ks) if cands else None
-    cands = [o for o in chain if o.get("expiration") == exp and 0 < (ks - o["strike"]) <= MAXW and _tradeable(o)]  # long BELOW short (bull put)
-    return min(cands, key=lambda o: ks - o["strike"]) if cands else None
+    else:                     # long BELOW short (bull put)
+        cands = [o for o in chain if o.get("expiration") == exp and 0 < (ks - o["strike"]) <= MAXW and _tradeable(o)]
+    if not cands:
+        return None
+    from analysis.assessment import fill_basis
+    def _ctw(o):
+        w = abs(o["strike"] - ks)
+        return fill_basis(short, o, w)["natural_credit_to_width"] if w else -1.0
+    return max(cands, key=_ctw)
+
+
+def _fill_ctw(short: Dict, long_: Dict, width: float) -> float:
+    """Fillable credit-to-width for one wing — the number the sweep ranks and gates on."""
+    from analysis.assessment import fill_basis
+    return fill_basis(short, long_, width)["natural_credit_to_width"] if width else -1.0
+
+
+def _best_wing(chain: List[Dict], lo: float, hi: float, side: str,
+               levels: Optional[List[Dict]] = None):
+    """The richest FILLABLE wing in the delta band, preferring one sheltered by a real level.
+
+    Replaces _pick_short, which chose ONE strike by nearness to a delta target before anything
+    had priced the spread. That is the same search-time preference the bull-put path gave up:
+    it pre-empts the gates and the edge score, and on the call side it could hand back a strike
+    whose spread is a debit once the bid-ask is crossed.
+
+    Now every strike in the band is paired and priced, and the winner is the best fillable
+    credit-to-width. The structural preference survives as a TIE-BREAK inside a tolerance band,
+    exactly as select_bull_put_pair does it: selling under a level the market has defended more
+    than once is real edge, and it should never cost meaningful credit or empty the board on
+    names where no level happens to sit in the right place.
+
+    `side` is REQUIRED and structural: it decides whether the long leg sits above the short
+    (bear call) or below it (bull put). It used to default to "", which sent _pick_long hunting
+    in the wrong direction and returned no wing at all — a silent empty board rather than an
+    error.
+
+    Returns (short, long, width) or (None, None, 0).
+    """
+    viable = []
+    for sh in [o for o in chain if _tradeable(o) and lo <= abs(o.get("delta") or 0) <= hi]:
+        lg = _pick_long(chain, sh, side)
+        if not lg:
+            continue
+        w = abs(lg["strike"] - sh["strike"])
+        ctw = _fill_ctw(sh, lg, w)
+        if w > 0 and ctw > 0:
+            viable.append((ctw, sh, lg, w))
+    if not viable:
+        return None, None, 0.0
+    viable.sort(key=lambda x: -x[0])
+    best_ctw = viable[0][0]
+
+    if getattr(config, "LEVEL_AWARE_STRIKES", True) and levels and side:
+        try:
+            from analysis.levels import strike_cushion
+            tol = float(getattr(config, "LEVEL_STRIKE_ROC_TOLERANCE", 0.10))
+            min_buf = float(getattr(config, "LEVEL_MIN_BUFFER_PCT", 0.005))
+            near = [v for v in viable if v[0] >= best_ctw * (1.0 - tol)]
+            sheltered = [
+                (strike_cushion(v[1].get("strike"), levels, side, min_buffer_pct=min_buf), v)
+                for v in near]
+            sheltered = [(c, v) for c, v in sheltered if c]
+            if sheltered:
+                c, v = max(sheltered, key=lambda cv: cv[0]["strength"])
+                return v[1], v[2], v[3]
+        except Exception as e:
+            logger.warning("[levels] wing shelter preference skipped: %s", e)
+
+    _, sh, lg, w = viable[0]
+    return sh, lg, w
 
 
 def _pop_below(dist_pct: float, dte: int, prices) -> Dict:
@@ -216,14 +253,10 @@ def _surface_fields(vs: Optional[Dict]) -> Dict:
 def build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings_days=None,
                     structure=None, vol_surface=None) -> Optional[Dict]:
     # tech carries support_levels / resistance_levels from analysis/levels.py.
-    short = _pick_short(calls, 0.22, 0.16, 0.30,
-                        (tech or {}).get("resistance_levels"), "call")
-    if not short:
+    short, long_, width = _best_wing(calls, 0.16, 0.30, "call",
+                                     (tech or {}).get("resistance_levels"))
+    if not short or not long_:
         return None
-    long_ = _pick_long(calls, short, "call")
-    if not long_:
-        return None
-    width = abs(long_["strike"] - short["strike"])
     # THE FILLABLE CREDIT. This used to be short.mid - long.mid, and a credit spread cannot be
     # filled at the mid: you sell the short at its BID and buy the long at its ASK. The bull-put
     # path was corrected on 2026-08-07 after GDX opened twice for $9 and $7 of real credit
@@ -293,12 +326,11 @@ def build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, 
                       structure=None, vol_surface=None) -> Optional[Dict]:
     _res = (tech or {}).get("resistance_levels")
     _sup = (tech or {}).get("support_levels")
-    cs = _pick_short(calls, 0.16, 0.12, 0.22, _res, "call")
-    ps = _pick_short(puts, 0.16, 0.12, 0.22, _sup, "put")
-    if not cs or not ps:
-        return None
-    cl = _pick_long(calls, cs, "call"); pl = _pick_long(puts, ps, "put")
-    if not cl or not pl:
+    # BOTH wings swept and priced. A condor crosses four bid-ask spreads, so a wing chosen on
+    # delta alone can quietly turn the whole structure into a debit.
+    cs, cl, wcall_ = _best_wing(calls, 0.12, 0.22, "call", _res)
+    ps, pl, wput_ = _best_wing(puts, 0.12, 0.22, "put", _sup)
+    if not cs or not ps or not cl or not pl:
         return None
     wcall = abs(cl["strike"] - cs["strike"]); wput = abs(ps["strike"] - pl["strike"])
     width = max(wcall, wput)
