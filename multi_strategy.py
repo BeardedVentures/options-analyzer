@@ -223,8 +223,16 @@ def build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings
     long_ = _pick_long(calls, short, "call")
     if not long_:
         return None
-    credit_ps = round((short.get("mid", 0) or 0) - (long_.get("mid", 0) or 0), 2)
     width = abs(long_["strike"] - short["strike"])
+    # THE FILLABLE CREDIT. This used to be short.mid - long.mid, and a credit spread cannot be
+    # filled at the mid: you sell the short at its BID and buy the long at its ASK. The bull-put
+    # path was corrected on 2026-08-07 after GDX opened twice for $9 and $7 of real credit
+    # against a $19 floor; bear calls and condors were never touched, so they carried the same
+    # defect and then became the whole board once the put side started pricing honestly.
+    # One definition, in analysis.assessment.natural_credit.
+    from analysis.assessment import natural_credit as _natural
+    mid_ps = round((short.get("mid", 0) or 0) - (long_.get("mid", 0) or 0), 2)
+    credit_ps = _natural(short, long_, width)["natural_credit_per_share"]
     if credit_ps <= 0 or width <= 0:
         return None
     credit_usd = round(credit_ps * 100, 0); max_loss = round(width * 100 - credit_usd, 0)
@@ -255,6 +263,14 @@ def build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings
     t.update({
         "short_strike": short["strike"], "long_strike": long_["strike"], "credit_per_share": credit_ps,
         "credit_usd": credit_usd, "max_loss_usd": max_loss, "delta": short.get("delta"),
+        # credit_per_share above IS the natural (fillable) credit. The mid is kept beside it
+        # because the difference between them is the execution cost, and a board that shows
+        # only one of the two is either flattering the trade or hiding what it costs to get in.
+        "natural_credit_per_share": credit_ps, "natural_credit_usd": credit_usd,
+        "natural_credit_to_width": round(credit_ps / width, 4) if width else 0,
+        "mid_credit_per_share": mid_ps, "mid_credit_usd": round(mid_ps * 100, 0),
+        "short_bid": short.get("bid"), "short_ask": short.get("ask"),
+        "long_bid": long_.get("bid"), "long_ask": long_.get("ask"), "width": width,
         "credit_to_width_pct": round(credit_ps / width * 100, 1), "true_pop": true_pop,
         "p_max_profit": p_max_profit, "breakeven": round(be, 2),
         "true_pop_confidence": pr_res.get("confidence", "LOW"),
@@ -280,9 +296,16 @@ def build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, 
     cl = _pick_long(calls, cs, "call"); pl = _pick_long(puts, ps, "put")
     if not cl or not pl:
         return None
-    credit_ps = round((cs["mid"] - cl["mid"]) + (ps["mid"] - pl["mid"]), 2)
     wcall = abs(cl["strike"] - cs["strike"]); wput = abs(ps["strike"] - pl["strike"])
     width = max(wcall, wput)
+    # A condor is two verticals, so it crosses FOUR bid-ask spreads — roughly double a
+    # vertical's execution cost, and the structure where pricing on mids flatters the credit
+    # most. Each wing is priced the way it fills: sell the short at its bid, buy the long at
+    # its ask.
+    from analysis.assessment import natural_credit as _natural
+    mid_ps = round((cs["mid"] - cl["mid"]) + (ps["mid"] - pl["mid"]), 2)
+    credit_ps = round(_natural(cs, cl, wcall)["natural_credit_per_share"]
+                      + _natural(ps, pl, wput)["natural_credit_per_share"], 2)
     if credit_ps <= 0 or width <= 0:
         return None
     credit_usd = round(credit_ps * 100, 0); max_loss = round(width * 100 - credit_usd, 0)
@@ -312,6 +335,11 @@ def build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, 
         "put_short_strike": ps["strike"], "put_long_strike": pl["strike"],
         "call_short_strike": cs["strike"], "call_long_strike": cl["strike"],
         "credit_per_share": credit_ps, "credit_usd": credit_usd, "max_loss_usd": max_loss,
+        "natural_credit_per_share": credit_ps, "natural_credit_usd": credit_usd,
+        "natural_credit_to_width": round(credit_ps / width, 4) if width else 0,
+        "mid_credit_per_share": mid_ps, "mid_credit_usd": round(mid_ps * 100, 0),
+        "call_short_bid": cs.get("bid"), "call_long_ask": cl.get("ask"),
+        "put_short_bid": ps.get("bid"), "put_long_ask": pl.get("ask"), "width": width,
         "delta": round((abs(cs.get("delta") or 0) - abs(ps.get("delta") or 0)), 3),
         "credit_to_width_pct": round(credit_ps / width * 100, 1),
         "true_pop": true_pop, "p_max_profit": p_max_profit,

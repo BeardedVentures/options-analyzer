@@ -146,3 +146,47 @@ def test_all_four_enforcement_sites_route_through_the_one_definition():
     assert "min_credit_usd_for" in _code_only(apc._min_credit_floor)
     assert "min_credit_usd_for" in inspect.getsource(sv.validate_strike)
     assert "min_credit_usd_for" in inspect.getsource(main.select_bull_put_pair)
+
+
+# ── The fillable credit, on every strategy path (2026-08-10) ──────────────────────────────────
+
+def test_natural_credit_is_sell_the_bid_buy_the_ask():
+    """A credit spread cannot be filled at the mid — you cross the spread on BOTH legs."""
+    from analysis.assessment import natural_credit
+    n = natural_credit({"bid": 2.00, "ask": 2.40}, {"bid": 1.00, "ask": 1.30}, width=5.0)
+    assert n["natural_credit_per_share"] == pytest.approx(0.70)     # 2.00 - 1.30, not 2.20 - 1.15
+    assert n["natural_credit_usd"] == pytest.approx(70.0)
+    assert n["natural_credit_to_width"] == pytest.approx(0.14)
+
+
+def test_an_unquotable_leg_gives_zero_not_none():
+    """Zero cannot clear a floor. None might sail through a gate that defaults to passing."""
+    from analysis.assessment import natural_credit
+    n = natural_credit({"bid": None, "ask": None}, {"bid": 1.0, "ask": 1.2}, width=5.0)
+    assert n["natural_credit_per_share"] <= 0
+    assert n["natural_credit_usd"] is not None
+
+
+def test_a_spread_that_is_a_debit_at_real_prices_is_caught():
+    """Measured live 2026-08-10: WMT 122/123 quoted an $11 MID credit and a NEGATIVE $31
+    natural — the bid-ask on the two legs exceeded the whole theoretical credit. It was on the
+    board as a qualified trade."""
+    from analysis.assessment import natural_credit
+    n = natural_credit({"bid": 0.60, "ask": 1.05}, {"bid": 0.55, "ask": 0.91}, width=1.0)
+    assert n["natural_credit_per_share"] < 0
+
+
+@pytest.mark.parametrize("mod, fn", [("main", "select_bull_put_pair"), ("multi_strategy", "build_bear_call"),
+                          ("multi_strategy", "build_iron_condor"),
+                          ("vega_candidates", "build_candidates")])
+def test_no_strategy_path_still_gates_on_the_mid(mod, fn):
+    """The bull-put path was corrected on 2026-08-07; bear calls and condors were not, and then
+    became the entire board once the put side started pricing honestly. Every generator must
+    reach the one definition."""
+    import importlib, inspect
+    m = importlib.import_module(mod)
+    f = getattr(m, fn, None)
+    if f is None:
+        pytest.skip(f"{mod}.{fn} not present")
+    assert "natural_credit" in inspect.getsource(f), (
+        f"{mod}.{fn} does not use analysis.assessment.natural_credit — it is pricing on mids")

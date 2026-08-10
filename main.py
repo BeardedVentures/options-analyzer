@@ -311,15 +311,31 @@ def select_bull_put_pair(
             if metrics.get("credit_per_share", 0) <= 0:
                 _bump("credit_non_positive")
                 continue
+
+            # DECIDE ON THE BASIS YOU EXECUTE ON. Everything `metrics` returns is priced off
+            # MIDS, and a credit spread cannot be filled at the mid — you cross the spread on
+            # both legs. Selecting and gating pairs on the mid while the desk fills at the
+            # natural is the same gate/execution mismatch that opened GDX 82/81 twice for $9
+            # and $7 against a $19 floor. vega_candidates was fixed on 2026-08-07; this path
+            # never was, so the board has been showing "passes all 11 gates" computed against
+            # a price that does not exist.
+            from analysis.assessment import natural_credit as _natural
+            nat = _natural(short_put, long_put, spread_width)
+            nat_ps = nat["natural_credit_per_share"]
+            if nat_ps <= 0:
+                # ~25% of pairs price this way: at natural prices they are DEBIT spreads.
+                _bump("natural_credit_non_positive")
+                continue
             # Price-scaled floor, one definition (config.min_credit_usd_for). See the comment
             # on MIN_CREDIT_USD: a flat dollar floor is 20x stricter on a $37 underlying than
             # on a $773 one, which kept IBIT out of the book entirely.
-            if metrics.get("credit_usd", 0) < config.min_credit_usd_for(current_price):
+            if nat["natural_credit_usd"] < config.min_credit_usd_for(current_price):
                 _bump("credit_below_min_usd")
                 continue
 
-            # Universal credit-to-width quality gate — applies to ALL spreads regardless of width
-            credit_per_share = float(metrics.get("credit_per_share", 0) or 0)
+            # Universal credit-to-width quality gate — applies to ALL spreads regardless of
+            # width, and on the natural basis for the same reason as the floor above.
+            credit_per_share = nat_ps
             min_ctw = getattr(config, "MIN_CREDIT_TO_WIDTH_PCT", 0.25)
             if spread_width > 0 and (credit_per_share / spread_width) < min_ctw:
                 _bump("credit_to_width_below_min")
@@ -333,11 +349,14 @@ def select_bull_put_pair(
                     _bump("narrow_spread_exception_failed")
                     continue
 
-            # Rank key: net realized ROC when available (accounts for profit target + commissions),
-            # else raw gross ROC. Higher is better.
-            roc_rank = metrics.get("net_realized_roc")
-            if roc_rank is None:
-                roc_rank = metrics.get("gross_roc", 0.0)
+            # Rank on the SAME basis the gates enforce and the desk fills. Ranking on a
+            # mid-derived ROC while gating on the natural credit lets the top of the board
+            # advertise a pair the contract has already refused, and picks the pair with the
+            # best THEORETICAL return rather than the best achievable one — two spreads with
+            # identical mids can pay very different natural credits when their long legs quote
+            # differently. Natural credit-to-width is the fillable version of the same idea.
+            roc_rank = nat["natural_credit_to_width"]
+            metrics = {**metrics, **nat}
             valid_pairs.append((short_put, long_put, metrics, float(roc_rank or 0.0)))
 
     if diagnostics is not None:
@@ -740,7 +759,11 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "iv_rank": tech.get("iv_rank"),
         "strike_distance_usd": metrics.get("strike_distance_usd"),
         "strike_distance_pct": metrics.get("strike_distance_pct"),
-        "credit_to_width_pct": round(
+        # The FILLABLE ratio, matching the gate that enforces it. Showing the mid ratio here
+        # while credit_to_width gated the natural one meant the board's headline quality number
+        # and the rule that admitted the trade were two different measurements.
+        "credit_to_width_pct": round((metrics.get("natural_credit_to_width") or 0) * 100, 1),
+        "credit_to_width_mid_pct": round(
             (metrics.get("credit_per_share", 0) / metrics.get("spread_width", 1)) * 100, 1
         ) if metrics.get("spread_width") else 0,
         "true_pop": p_profit,                       # C2: real probability of profit (at breakeven)
@@ -798,6 +821,20 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "warnings": warnings,
         "auto_reasoning": f"IV Rank {tech.get('iv_rank', 0):.0f}, VRP {tech.get('vrp', 0):.1f}pp, edge {edge_points:.1f} pts.",
         "trade_type": trade_type,
+        # ── The fillable price, and the quotes it came from ──
+        # credit_per_share/credit_usd above are MIDS — what the spread is theoretically worth.
+        # These are what a fill actually pays. Both are kept because the difference between
+        # them IS the execution cost, and a board that shows only the mid is quoting a price
+        # its reader cannot get. The raw leg quotes are persisted too: without them nothing
+        # downstream can recompute the fill basis or audit why a gate read as it did, which is
+        # how this path went months gating on a number nobody could execute.
+        "natural_credit_per_share": metrics.get("natural_credit_per_share"),
+        "natural_credit_usd": metrics.get("natural_credit_usd"),
+        "natural_credit_to_width": metrics.get("natural_credit_to_width"),
+        "short_bid": short_put.get("bid"), "short_ask": short_put.get("ask"),
+        "short_mid": short_put.get("mid"),
+        "long_bid": long_put.get("bid"), "long_ask": long_put.get("ask"),
+        "width": metrics.get("spread_width"),
     }
 
     # ── Shared assessment (analysis/assessment.py) ──
@@ -817,9 +854,15 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
             "short_strike": short_put["strike"], "long_strike": long_put["strike"],
             "dte": short_put.get("dte"), "side": "put", "short_leg": short_put,
             "short_delta": short_put.get("delta"), "short_iv": short_put.get("iv"),
-            "natural_credit_per_share": metrics.get("credit_per_share"),
-            "natural_credit_usd": metrics.get("credit_usd"),
-            "natural_credit_to_width": (trade.get("credit_to_width_pct") or 0) / 100.0,
+            # The FILLABLE credit, computed once in analysis.assessment.natural_credit and
+            # attached to `metrics` at pair selection. These keys used to be fed the MID values
+            # under a natural name, so the eleven gates on the board — including the two that
+            # decide whether a spread pays enough to be worth its risk — were judged against a
+            # price no fill could achieve.
+            "natural_credit_per_share": metrics.get("natural_credit_per_share"),
+            "natural_credit_usd": metrics.get("natural_credit_usd"),
+            "natural_credit_to_width": metrics.get("natural_credit_to_width"),
+            "long_leg": long_put,
             "pop": p_profit, "true_pop": p_profit,
             "implied_pop": implied_pop,
         }

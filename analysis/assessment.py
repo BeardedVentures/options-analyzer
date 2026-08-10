@@ -233,6 +233,38 @@ def _btc_cross_venue(ctx: Dict) -> Dict:
         return {"available": False, "reading": "unavailable", "note": str(e)[:120]}
 
 
+def natural_credit(short_leg: Dict, long_leg: Dict, width: float) -> Dict:
+    """The credit a fill actually pays: sell the short leg at its BID, buy the long at its ASK.
+
+    THE one definition. A credit spread cannot be filled at the mid — you cross the spread on
+    both legs — and the gap is not small: across the 2026-07-31 snapshot the mid overstated the
+    achievable credit by 75.5% on average, $92.33 against $21.85. Every trade in the ledger
+    booked at a mid is priced at a number that was never available.
+
+    The damage is not only in the P&L. `min_credit_usd` and `credit_to_width` are the two gates
+    that decide whether a spread pays enough to be worth its risk, so gating them on the mid
+    passes spreads that are dead at inception. GDX 82/81 opened twice on 2026-08-07 for $9 and
+    $7 of real credit against a $19 floor, because the mid said $31 and $29, and both were
+    stopped out inside the same cycle.
+
+    Returns zeros — never None — when a leg is unquotable, so the caller's gates see a credit
+    that cannot clear a floor rather than a missing key that might default to passing.
+    """
+    def _f(x):
+        try:
+            return float(x or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    per_share = round(_f(short_leg.get("bid")) - _f(long_leg.get("ask")), 4)
+    w = _f(width)
+    return {
+        "natural_credit_per_share": per_share,
+        "natural_credit_usd": round(per_share * 100, 2),
+        "natural_credit_to_width": round(per_share / w, 4) if w > 0 else 0.0,
+    }
+
+
 def _min_credit_floor(spot) -> float:
     """The price-scaled credit floor. Delegates to config so the rule has one definition —
     see config.min_credit_usd_for. Falls back to the flat floor if config predates it."""
