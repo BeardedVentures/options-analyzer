@@ -559,3 +559,51 @@ So the ledger's ability to demonstrate skill is currently limited less by sample
 First claims resolve **2026-08-23**.
 
 **700 → 715 tests.**
+
+---
+
+## Part 12 — One list: scope (agreed 2026-08-10)
+
+### The frame this serves
+
+VEGA is a curated tip sheet on AI steroids: reasoned, defined-risk premium-selling opportunities that give a 30-minute-a-day investor the read a seasoned options professional would have. **The board is the product.** Trades are opened and closed manually. **The paper bot exists only to build an honest learning history of that board** — so it must trade what the operator reviewed, or the history validates something nobody was shown.
+
+Today it does not. The board comes from `main.py`; the bot opens from `vega_candidates`. Different searches, different lists.
+
+### Why this is a swap, not a rewrite
+
+Strike selection in `main.py` is a single isolated call (`main.py:516`):
+
+```python
+pair = select_bull_put_pair(options, current_price, ticker, diagnostics=pair_diag, ...)
+short_put, long_put, metrics = pair
+```
+
+Everything downstream — true POP, edge score, vol surface, the shared gate contract, the narrative — is research **on the chosen pair**. Replacing the search leaves all of it intact. `multi_strategy` has the same shape via `_pick_short` / `_pick_long`.
+
+### Decision taken: wide sweep, best fillable credit
+
+Enumerate 0.12–0.35 delta across every expiration in the DTE window, price **every** pair on the natural basis, rank by natural credit-to-width, keep the best per ticker for full research. Preserve the level-aware tie-break.
+
+Least opinionated: the gates and the edge score do the filtering, rather than the search pre-deciding it. Measured on 2026-08-10 this finds **29 spreads passing all 11 gates** where the current DTE-and-delta-target search finds **0** — e.g. GOOG $100 on a 5-wide (20% cr/w), GDX $94 on a 4-wide (24%).
+
+Accepted cost: it will pick strikes that differ from what the board shows today.
+
+### Phases
+
+| # | Work | Effort | Risk |
+|---|---|---|---|
+| 1 | Replace the body of `select_bull_put_pair` with the sweep. Nothing downstream changes. | Small | Low — this is the code path the fast scan has run for weeks |
+| 2 | Point the paper bot at `scan_latest.json`. The bot now validates the board. | Small | **Medium** — the paper desk has never opened a bear call or condor; close logic and the ravens must be checked against non-put structures first |
+| 3 | Same enumeration for bear calls and condors, so all three defined-risk structures are searched and priced identically. | Medium | Low |
+| 4 | Retire `vega_candidates` as a second opinion. | Small | See dependency below |
+
+### Two things that must not be forgotten
+
+**The counterfactual ledger reads `output/candidates/*.json`.** That is the source behind the Gate value panel and 639 resolved spreads. Phase 4 must give it a new home first — `main.py` writing its full enumeration, not only the winner. Cheap, and silently breaking it would destroy the only measurement of whether the gates earn their place.
+
+**Bot cadence becomes `main.py`'s cadence.** Unmeasured. Time it before Phase 2 and confirm the paper desk still gets a usable number of cycles per day; if not, the sweep may need to feed a cheaper analysis tier.
+
+### Sequencing
+
+Phase 1 first and alone — it is the change that takes the board from empty to usable, and it is independently verifiable against the fast scan's 29. Measure runtime. Then Phase 2 only after the close logic is confirmed safe for non-put structures.
