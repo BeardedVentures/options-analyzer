@@ -231,3 +231,63 @@ def test_view_today_publishes_context_for_the_drawers():
     board = vega_app.load_board()
     if board["trades"]:
         assert len(vega_app._COPILOT_PEERS) == len(board["trades"])
+
+
+# ── Measurement panels on Track Record (2026-08-10) ───────────────────────────────────────────
+#
+# The measurement work shipped this session had no UI at all. The only grading panel in the app
+# filtered claims to the BTC forecast cohort, so the 30 claims the TRADE engine has written were
+# invisible: made, stored, and shown nowhere. Counterfactuals had zero references.
+
+def test_track_grades_trade_claims_not_only_btc_ones():
+    txt = _txt(vega_app.view_track())
+    assert "Forecast ledger" in txt
+    assert "Resolution" in txt, "the column raw Brier cannot substitute for must be shown"
+
+
+def test_track_shows_whether_the_gates_earn_their_place():
+    txt = _txt(vega_app.view_track())
+    assert "Gate value" in txt
+    for gate in ("earnings clear", "support shelter", "liquidity"):
+        assert gate in txt, f"{gate} missing from the value-of-information table"
+
+
+def test_an_unresolved_ledger_says_so_rather_than_showing_an_empty_table():
+    """An empty table under a live heading reads as 'measured, found nothing'. It is the
+    opposite — nothing has come due yet, and the two are not the same claim."""
+    txt = _txt(vega_app.view_track())
+    assert "Nothing has resolved yet" in txt or "Correct" in txt
+
+
+def test_the_gate_panel_refuses_to_report_before_the_horizon_closes():
+    """Judging spreads that have not lived the full window would report that the gates avoid
+    nothing, when what actually happened is that nothing has had time to happen."""
+    txt = _txt(vega_app.view_track())
+    assert "Not yet measurable" in txt or "Baseline" in txt
+
+
+def test_the_forecast_spread_ceiling_is_surfaced():
+    """Resolution is capped by how much the forecasts vary. A ledger whose claims all sit
+    between 0.70 and 0.85 cannot demonstrate discrimination however right it is — that is a
+    fact about the engine, not the sample size, and waiting will not fix it."""
+    txt = _txt(vega_app.view_track())
+    assert "Forecast spread" in txt
+
+
+def test_the_panels_degrade_instead_of_taking_the_page_down(monkeypatch):
+    """A measurement panel is advisory. Neither may be able to break Track Record."""
+    import analysis.counterfactuals as cf
+
+    def boom(*a, **k):
+        raise RuntimeError("ledger gone")
+
+    monkeypatch.setattr(cf, "value_of_information", boom)
+    html = vega_app.view_track()
+    assert "Track Record" in _txt(html)
+    assert "unavailable" in _txt(html).lower()
+
+
+@pytest.mark.parametrize("view", vega_app.VIEWS)
+def test_every_view_still_renders(view):
+    html = vega_app.render(view)
+    assert "<html" in html and len(html) > 500

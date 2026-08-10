@@ -2908,7 +2908,161 @@ def view_track():
                 f'capture slippage). The board/Brief pre-trade EV is more conservative — net of '
                 f'<b>~${_mc:.2f}/ct</b> (commission + assumed slippage) — so a trade can read a touch better here '
                 f'than its pre-trade EV. Same trade, two honest cost lenses.</div>')
-    return f'<h2>Track Record — the learning loop</h2>{intro}{stale_banner}{tilerow}{cal}{postbl}{newsblk}{costfoot}'
+    return (f'<h2>Track Record — the learning loop</h2>{intro}{stale_banner}{tilerow}{cal}'
+            f'{_forecast_ledger_block()}{_gate_value_block()}{postbl}{newsblk}{costfoot}')
+
+
+def _forecast_ledger_block() -> str:
+    """Per claim type: is it calibrated, and does it DISCRIMINATE?
+
+    Grades every claim in the ledger. The only grading UI that existed filtered to the BTC
+    forecast cohort, so the 32 claims the trade engine has written — strike_holds,
+    strike_untouched, direction — were invisible to it: made, stored, and shown nowhere.
+
+    Two columns carry the weight. `Brier` says whether the stated confidence was honest.
+    `Resolution` says whether the numbers distinguished one trade from another, which is the
+    question Brier cannot answer — a forecaster who says the base rate about everything scores
+    a respectable Brier and knows nothing.
+    """
+    try:
+        from analysis import predictions as pred
+        try:
+            from analysis import btc_forecast as _bf
+            btc_cohort = getattr(_bf, "COHORT", None)
+        except Exception:
+            btc_cohort = None
+        # Everything EXCEPT the BTC forecast cohort, which has its own page. The filter used to
+        # run the other way round and was the only grading UI in the app.
+        rows = [r for r in pred.load()
+                if not btc_cohort or (r.get("context") or {}).get("cohort") != btc_cohort]
+        g = pred.grade(rows)
+    except Exception as e:
+        return (f'<h3 style="margin-top:20px">Forecast ledger</h3>'
+                f'<div class="empty">Ledger unavailable: {esc(str(e))}</div>')
+
+    if not g["total_claims"]:
+        return ('<h3 style="margin-top:20px">Forecast ledger — what the engine claimed</h3>'
+                '<div class="empty">No trade claims recorded yet.</div>')
+
+    trows = ""
+    for t, d in sorted(g["by_type"].items()):
+        res = d.get("resolution")
+        p = d.get("resolution_p")
+        if p is None:
+            disc, dcls = "—", "dim"
+        elif p < 0.05:
+            disc, dcls = f"yes (p={p:.3f})", "gpass"
+        else:
+            disc, dcls = f"no (p={p:.2f})", "gwarn"
+        trows += (f'<tr><td class="l">{esc(t.replace("_", " "))}</td>'
+                  f'<td class="num">{d["n"]}</td>'
+                  f'<td class="num">{d["hit_rate"]:.0f}%</td>'
+                  f'<td class="num">{d["avg_confidence"]:.0f}%</td>'
+                  f'<td class="num">{d["brier"] if d["brier"] is not None else "—"}</td>'
+                  f'<td class="num">{res if res is not None else "—"}</td>'
+                  f'<td class="{dcls}">{disc}</td></tr>')
+    if not trows:
+        # An empty table under a live heading reads as "measured, found nothing". It is the
+        # opposite: nothing has come due yet.
+        nxt = min((r.get("resolves_on") or "" for r in rows if r.get("status") == "open"),
+                  default="")
+        trows = (f'<tr><td class="l dim" colspan="7">Nothing has resolved yet — no claim has '
+                 f'reached its horizon'
+                 f'{f", the first on {esc(nxt)}" if nxt else ""}. '
+                 f'A claim type appears here once it can be graded.</td></tr>')
+
+    # The ceiling. Resolution is bounded by how much the forecasts actually vary, so a ledger
+    # whose claims all sit between 0.70 and 0.85 cannot demonstrate much discrimination however
+    # right it is. That is a fact about the ENGINE, not about the sample size, and it will not
+    # improve by waiting.
+    probs = [r["probability"] for r in rows if r.get("probability") is not None]
+    ceiling = ""
+    if probs:
+        mean = sum(probs) / len(probs)
+        sd = (sum((x - mean) ** 2 for x in probs) / len(probs)) ** 0.5
+        note = ("" if sd >= 0.12 else
+                " — narrow. Resolution is capped by how much the forecasts vary, so widening "
+                "what the engine is willing to claim matters as much as resolving more of them.")
+        ceiling = (f'<div class="dim" style="font-size:11px;margin-top:4px">'
+                   f'Forecast spread: sd {sd:.3f} across {len(probs)} claims '
+                   f'({min(probs):.2f}–{max(probs):.2f}){esc(note)}</div>')
+
+    pend = ('' if not g["open"] else
+            f'<div class="dim" style="font-size:11px;margin-top:4px">'
+            f'{g["open"]} claim(s) still open — nothing grades until its horizon passes.</div>')
+
+    return (f'<h3 style="margin-top:20px">Forecast ledger — was the engine right, and did it '
+            f'know something?</h3>'
+            f'<table class="gtbl"><thead><tr><th class="l">Claim type</th><th>n</th>'
+            f'<th>Correct</th><th>Claimed</th><th>Brier</th><th>Resolution</th>'
+            f'<th>Discriminates?</th></tr></thead><tbody>{trows}</tbody></table>'
+            f'{ceiling}{pend}'
+            f'<div class="dim" style="font-size:11px;margin-top:4px">'
+            f'<b>Brier</b> asks whether the stated confidence was honest. <b>Resolution</b> asks '
+            f'whether it separated winners from losers — a forecaster who says the same number '
+            f'about every trade scores a good Brier and knows nothing. Discrimination is judged '
+            f'by shuffling outcomes against forecasts, so noise cannot pass as skill.</div>')
+
+
+def _gate_value_block() -> str:
+    """Per gate: did the candidates it BLOCKED actually behave worse than the ones it let through?
+
+    The trade ledger can only say whether the picks were good. Eleven gates decide every entry
+    and none had ever been measured, because a rejected candidate leaves no record — except
+    that it does: every scan snapshot already stores each candidate's full gate results.
+    """
+    try:
+        from analysis import counterfactuals as cf
+        v = cf.value_of_information()
+    except Exception as e:
+        return (f'<h3 style="margin-top:20px">Gate value</h3>'
+                f'<div class="empty">Counterfactual ledger unavailable: {esc(str(e))}</div>')
+
+    if not v["n_total"]:
+        return ('<h3 style="margin-top:20px">Gate value — are the eleven gates earning their '
+                'place?</h3>'
+                '<div class="empty">No counterfactual ledger yet. Build it with '
+                '<code>python analysis/counterfactuals.py</code>.</div>')
+
+    grows = ""
+    for gate, d in sorted(v["gates"].items(),
+                          key=lambda kv: -(kv[1].get("lift_pp") if kv[1].get("lift_pp") is not None else -999)):
+        lift = d.get("lift_pp")
+        if lift is None:
+            lcell, lcls, verdict = "—", "dim", "not enough yet"
+        elif lift > 0:
+            lcell, lcls, verdict = f"{lift:+.0f}pp", "gpass", "avoids trouble"
+        else:
+            lcell, lcls, verdict = f"{lift:+.0f}pp", "gwarn", "no measured value"
+        rate = (f'{d["touch_rate"]*100:.0f}%' if d.get("touch_rate") is not None else "—")
+        grows += (f'<tr><td class="l">{esc(gate.replace("_", " "))}</td>'
+                  f'<td class="num">{d["n_blocked"]}</td><td class="num">{rate}</td>'
+                  f'<td class="{lcls}">{lcell}</td>'
+                  f'<td class="l dim">{esc(verdict)}</td></tr>')
+
+    base = v["qualified_touch_rate"]
+    if base is None:
+        head = (f'<div class="warn" style="margin-bottom:8px">Not yet measurable — '
+                f'{v["n_total"]} spreads on record, none has lived the full '
+                f'{v["horizon_days"]}-day horizon. Every spread is judged over the same window, '
+                f'so a rate computed before that window closes would say the gates avoid nothing '
+                f'when what actually happened is that nothing has had time to happen.</div>')
+    else:
+        head = (f'<div class="kv"><span class="k">Baseline — spreads that passed every gate</span>'
+                f'<b>{base*100:.0f}% touched</b></div>')
+
+    return (f'<h3 style="margin-top:20px">Gate value — are the eleven gates earning their place?</h3>'
+            f'{head}'
+            f'<table class="gtbl"><thead><tr><th class="l">Gate</th><th>Blocked</th>'
+            f'<th>Touched</th><th>vs baseline</th><th class="l">Reading</th></tr></thead>'
+            f'<tbody>{grows}</tbody></table>'
+            f'<div class="dim" style="font-size:11px;margin-top:4px">'
+            f'{v["n_total"]} spreads · {v["n_records"]} measurable · {v["n_maturing"]} still '
+            f'maturing. Each row counts only candidates whose <b>only</b> failure was that gate '
+            f'— the single clean read on it. A gate that blocks spreads which go on to be '
+            f'touched more often is doing work; one whose rejects fare no worse is costing '
+            f'opportunity and belongs in the ranking, not the contract. Touch is a leading '
+            f'indicator, not a loss, and the sample is the top 3 candidates per ticker.</div>')
 
 
 def view_bitcoin():
