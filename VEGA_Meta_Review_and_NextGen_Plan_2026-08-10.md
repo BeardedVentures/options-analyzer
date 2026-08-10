@@ -490,3 +490,40 @@ Verified live: `expected_move_at_entry = 13.28` and `pop_gap_at_entry = −0.039
 ### What this still does not cover
 
 Value-domain mismatches, not name mismatches — the `999`-vs-`None` sentinel is the example, and it was caught by a hand-written test, not by this. A producer and consumer can agree on a field name and disagree about what the values mean. That is the next gap, and it is narrower than the one just closed.
+
+---
+
+## Part 10 — Counterfactuals (Sprint 3.1, shipped 2026-08-10)
+
+The trade ledger can only ever say whether the *picks* were good. Eleven gates decide every entry and **not one has ever been measured against an outcome**, because a rejected candidate leaves no record of what it would have done.
+
+### Nothing new had to be recorded
+
+Every scan already writes `output/candidates/*.json` with each candidate's full gate results. On disk today: **2,590 candidates across 20 snapshots, 327 passing every gate, and 562 that failed exactly one gate** — the last being the only sample that can price a single gate's contribution. `analysis/counterfactuals.py` resolves them; no new write path was added to the scan, so no scan risk was taken.
+
+### Two failures it produced on itself, both caught before they became conclusions
+
+**1. A confident zero from an empty window.** The first real run resolved 639 spreads and reported **0% touched on every gate** — which reads as *"none of the eleven gates avoids anything."* The median spread had been observed for **two days**. A 39-DTE spread at 0.20 delta is not expected to be touched in two days; nothing had had time to happen. Worse, window length is confounded with scan date, so a gate whose blocked candidates came from the oldest scan would look worse than one whose came from today purely through exposure.
+
+Fixed with a **fixed horizon**: every spread is judged over the same `HORIZON_DAYS` (10) trading days after its scan, and one that has not lived that long is excluded rather than counted as untouched. The honest output today:
+
+```
+  639 spreads on record · 0 have lived the full horizon · 639 still maturing
+  baseline: NOT YET MEASURABLE — no qualified spread has lived the full horizon.
+```
+
+First answers arrive around **2026-08-20**, when the 08-06 cohort matures.
+
+**2. The ledger would have destroyed its own history.** `output/candidates/` is gitignored under a comment describing it as a "regenerated artifact" directory — and it is not. A past scan cannot be re-run, so a pruned snapshot is a permanently lost observation, and the original wholesale-rewrite `build()` would have silently erased the counterfactual record the moment anyone cleaned that folder. `build()` now merges: rows whose snapshot survives are re-resolved, rows whose snapshot is gone are kept and flagged `source_snapshot_missing`, with a warning. **`logs/vega_counterfactuals.jsonl` is now the durable artifact** — ~200× smaller than the snapshots and the thing worth backing up.
+
+### What it measures, and what it refuses to
+
+`touched` — did the underlying trade at or through the short strike within the horizon. For a credit spread that is the event that drives a delta breach, a stop-out and a loss, and unlike expiry it answers in two weeks rather than forty days. Measured on the **low**, not the close: a spread does not care that price recovered by 4pm.
+
+`held_at_expiry` is the cleaner measure and the slower one. It is `None` until contracts actually expire, and is never inferred from `touched`.
+
+Per gate, it compares candidates whose **only** failure was that gate against candidates that passed everything. A gate earning its place blocks spreads that go on to be touched more often. A gate whose blocked candidates fare no worse is costing opportunity and buying nothing — it belongs in the ranking function, not the contract. Below `MIN_GATE_SAMPLE` (20) it reports `insufficient` rather than a number, the same refusal `muninn` makes.
+
+Stated caveats travel with every report: the snapshot keeps only the top 3 candidates per ticker by natural credit-to-width, so this measures gates *within that band*; and touch is a leading indicator, not a loss.
+
+**673 → 700 tests.**
