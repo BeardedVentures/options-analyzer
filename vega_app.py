@@ -839,6 +839,9 @@ button:disabled{opacity:.75;cursor:default}
 .btoolbar{display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:1px solid var(--line);font-size:12px}
 .btoolbar .flab{color:var(--ink3);text-transform:uppercase;font-size:10px;letter-spacing:.05em;font-weight:700}
 .ghostbtn{background:var(--panel3);color:var(--ink2);border:0;border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer}
+/* Reject is destructive of an opportunity, not of data — muted, never the loudest button. */
+.ghostbtn.danger{color:var(--red)}
+.ghostbtn.danger:hover{background:var(--redsoft)}
 .ghostbtn:hover{color:var(--ink)}
 th.srt{cursor:pointer;user-select:none}th.srt:hover{color:var(--ink)}
 th.srt .arw{color:var(--green);font-size:9px}
@@ -862,6 +865,12 @@ th.srt .arw{color:var(--green);font-size:9px}
 /* IV rank chip: cheap options are good news for a buyer, rich ones are the warning. */
 .lotto .conv.cheap{color:var(--green);background:var(--greensoft)}
 .lotto .conv.rich{color:var(--red);background:var(--redsoft)}
+/* Whether the call runs with the chart or against it — the part that actually varies. */
+.dtag{display:inline-block;font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;border-radius:4px;padding:2px 6px;margin-right:6px}
+.dtag.bull{color:var(--green);background:var(--greensoft)}
+.dtag.bear{color:var(--amber);background:var(--ambersoft)}
+.dtag.flat{color:var(--ink3);background:var(--panel3)}
+.lacts{display:flex;gap:6px;margin-top:9px}
 .lotto .conv.hi{color:var(--amber);background:#2a2413}
 .lgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
 @media(max-width:700px){.lgrid{grid-template-columns:repeat(2,1fr)}}
@@ -1531,9 +1540,31 @@ def detail_drawer(c, i, tier):
             f'<input type="hidden" name="delta" value="{esc(delta if delta is not None else "")}">'
             f'<input type="hidden" name="implied_pop" value="{esc(c.get("implied_pop") or "")}">'
             f'<input type="hidden" name="iv_rank" value="{esc(c.get("iv_rank") if c.get("iv_rank") is not None else "")}">')
+    # The decision snapshot. Wider than the open form's fields because a WATCH or a REJECT has
+    # to be gradeable months later against a chain that no longer exists — a row saying
+    # "rejected WMT" with no entry state is a diary entry, not data.
+    dec_hidden = hidden + "".join(
+        f'<input type="hidden" name="{k}" value="{esc(v if v is not None else "")}">'
+        for k, v in (("strategy", c.get("strat_type") or c.get("strategy")),
+                     ("true_pop", c.get("true_pop")),
+                     ("pop_implied", c.get("implied_pop")),
+                     ("edge_score", c.get("edge_score") or c.get("priority")),
+                     ("vrp", c.get("vrp")),
+                     ("roi", c.get("roi")),
+                     ("credit_usd", c.get("credit_usd")),
+                     ("max_loss_usd", c.get("max_loss_usd")),
+                     ("spot", c.get("price"))))
     log_form=(f'<form class="inline" method="post" action="/open_board" style="margin-top:12px">{hidden}'
               f'<input class="n" type="number" name="contracts" value="1" min="1">'
-              f'<button class="go" type="submit" data-busy="Logging...">Log paper trade</button></form>')
+              f'<button class="go" type="submit" data-busy="Logging...">Log paper trade</button></form>'
+              f'<form class="inline" method="post" action="/watch" style="margin-top:12px">{dec_hidden}'
+              f'<button class="ghostbtn" type="submit" data-busy="Saving..." '
+              f'title="Track it without committing. A setup you passed on that later works is '
+              f'the cheapest lesson available.">Watch</button></form>'
+              f'<form class="inline" method="post" action="/reject" style="margin-top:12px">{dec_hidden}'
+              f'<button class="ghostbtn danger" type="submit" data-busy="Saving..." '
+              f'title="Record that you declined this. Over enough rows this answers whether '
+              f'your overrides beat the engine or cost you.">Reject</button></form>')
 
     conf=c.get("true_pop_conf") or "-"
     deep=(f'<div><div class="payhd"><span>Payoff at expiration</span><span>{esc(c.get("dte"))} DTE</span></div>{diag}'
@@ -2973,6 +3004,7 @@ def _lottery_card(x):
     # Suppress the generic "no significant news" filler line.
     if cat and "no significant" in cat.lower():
         cat=""
+    dir_tag=_lottery_direction_tag(trend)
     return (
         '<div class="lotto">'
         f'<div class="lh"><div><span class="tchip" title="Long call">CALL</span> <b class="tk">{tk}</b>'
@@ -2987,12 +3019,56 @@ def _lottery_card(x):
         f'<div><div class="cap">Breakeven move</div><div class="v">{(bemv or 0):+.1f}%</div><div class="dim">to ${(be or 0):.2f}</div></div>'
         f'<div><div class="cap">Prob ITM (Δ)</div><div class="v">{prob}</div><div class="dim">IV {(iv*100 if iv and iv<3 else iv) or 0:.0f}%</div></div>'
         f'</div>'
-        f'<div class="lwhy"><b>Why {tk}:</b> '
+        f'<div class="lwhy">{dir_tag}<b>Why {tk}:</b> '
         f'{(" · ".join(esc(sg) for sg in signals)) if signals else (setup or "-")}'
         f'{(" · <b>Catalyst:</b> "+cat) if cat else ""}'
         f'{(" · News "+sent) if sent else ""}{(" · "+", ".join(tech)) if tech else ""}</div>'
+        f'{_lottery_actions(x)}'
         '</div>'
     )
+
+
+def _lottery_direction_tag(trend):
+    """Whether this call runs with the trend or against it.
+
+    A long call is bullish by construction, so a "BULLISH" tag on every card would be the
+    same decoration the fixed HIGH badge was. What varies — and what the buyer should see
+    before anything else — is whether the chart agrees. A call on a name making lower lows
+    is a counter-trend bet, and that is a different trade from a momentum continuation
+    whatever the payoff diagram looks like.
+    """
+    t = (trend or "").strip().upper().replace(" ", "_")
+    if t.startswith("STRONG_UP") or t == "UP":
+        return '<span class="dtag bull">Momentum &middot; with the trend</span>'
+    if t.startswith("STRONG_DOWN") or t == "DOWN":
+        return '<span class="dtag bear">Counter-trend &middot; buying into weakness</span>'
+    if t:
+        return '<span class="dtag flat">No clear trend</span>'
+    return ""
+
+
+def _lottery_actions(x):
+    """Watch / Reject on the asymmetry cards too.
+
+    A watched call that later runs +300% is exactly the counterfactual that trains judgement,
+    and it is the cheapest one available — nothing was risked to learn it. The paper-trade
+    path for single long calls is not wired here, so this card offers the two decisions it
+    can actually honour rather than a button that does nothing.
+    """
+    fields = {"ticker": x.get("ticker"), "strategy": "long_call",
+              "short": x.get("strike"), "exp": x.get("expiration"), "dte": x.get("dte"),
+              "credit": x.get("premium_per_share"), "credit_usd": x.get("premium_usd"),
+              "max_loss_usd": x.get("max_loss_usd") or x.get("premium_usd"),
+              "delta": x.get("delta"), "iv_rank": x.get("iv_rank"),
+              "spot": x.get("current_price")}
+    hidden = "".join(f'<input type="hidden" name="{k}" value="{esc(v if v is not None else "")}">'
+                     for k, v in fields.items())
+    return ('<div class="lacts">'
+            f'<form class="inline" method="post" action="/watch">{hidden}'
+            f'<button class="ghostbtn" type="submit" data-busy="Saving...">Watch</button></form>'
+            f'<form class="inline" method="post" action="/reject">{hidden}'
+            f'<button class="ghostbtn danger" type="submit" data-busy="Saving...">Reject</button>'
+            f'</form></div>')
 
 
 def view_lottery():
@@ -3740,6 +3816,27 @@ class H(BaseHTTPRequestHandler):
                     delta=float(f["delta"]) if f.get("delta") else None,
                     contracts=int(f.get("contracts") or 1), source="manual")
                 self._send(render("history", f"Logged manual paper trade {tid}."))
+            elif p in ("/watch", "/reject"):
+                # Same handler for both: the only thing that differs is the word stored, and
+                # splitting them would be two chances for the snapshot to drift apart.
+                from analysis import decisions as dec
+                which = dec.WATCH if p == "/watch" else dec.REJECT
+                tk = (f.get("ticker") or "").upper()
+                try:
+                    dec.record(which, tk, snapshot={
+                        "strategy": f.get("strategy"), "short_strike": f.get("short"),
+                        "long_strike": f.get("long"), "expiration": f.get("exp"),
+                        "dte": f.get("dte"), "credit_per_share": f.get("credit"),
+                        "credit_usd": f.get("credit_usd"), "max_loss_usd": f.get("max_loss_usd"),
+                        "delta": f.get("delta"), "true_pop": f.get("true_pop"),
+                        "pop_implied": f.get("pop_implied") or f.get("implied_pop"),
+                        "edge_score": f.get("edge_score"), "iv_rank": f.get("iv_rank"),
+                        "vrp": f.get("vrp"), "spot": f.get("spot"), "roi": f.get("roi"),
+                    })
+                    word = "Watching" if which == dec.WATCH else "Rejected"
+                    self._send(render("today", f"{word} {tk} — recorded with its entry state."))
+                except Exception as e:
+                    self._send(render("today", f"Could not record {tk}: {e}"))
             elif p == "/close":
                 ok = ol.set_close(f.get("id"), float(f["exit_debit"]), f.get("outcome"), f.get("reason") or None)
                 self._send(render("open", "Closed." if ok else "Close failed: id not found."))
