@@ -234,6 +234,49 @@ def _btc_cross_venue(ctx: Dict) -> Dict:
         return {"available": False, "reading": "unavailable", "note": str(e)[:120]}
 
 
+def _cross_venue_read(ctx: Dict) -> Dict:
+    """Generalised cross-venue read for any underlying that DECLARES a reference.
+
+    Costs nothing for the ~50 names that declare none: `cross_venue` returns None and this
+    returns immediately, before any network call. The BTC proxies are skipped too — they are
+    already served by `_btc_cross_venue`, and computing the same gap twice per candidate would
+    double the Deribit reads to produce a number the analysis dict already holds.
+
+    Fails to an `available: False` dict rather than raising, on the same principle as the BTC
+    path: a reference endpoint being down must narrow what can be said about GDX, never stop
+    the equity scan that shares this function.
+    """
+    ticker = (ctx.get("ticker") or "").upper()
+    try:
+        from analysis.ticker_profile import cross_venue as _declared
+        cv = _declared(ticker)
+        if not cv or not cv.get("enabled"):
+            return {"available": False, "reading": "not_applicable"}
+        from analysis import btc_signal
+        if btc_signal.applies_to(ticker):
+            return {"available": False, "reading": "see_btc_cross_venue"}
+
+        iv = ctx.get("atm_iv")
+        if iv is None and ctx.get("puts") and ctx.get("spot"):
+            from data import technicals
+            iv = technicals.estimate_atm_iv(ctx["puts"], ctx["spot"])
+            ctx["atm_iv"] = iv
+
+        sig = cv["ref_signal"]
+        if sig not in ctx:
+            from data import vol_indices
+            # Only the published-index sources are fetchable here. A DVOL reference on a
+            # non-BTC-proxy name would need a crypto snapshot, and no such asset exists today —
+            # when one does it lands as None and reads as absence, not as a wrong number.
+            ctx[sig] = vol_indices.get_index(sig) if sig in vol_indices.SOURCES else None
+
+        from analysis import cross_venue
+        return cross_venue.evaluate(ticker, iv, ctx)
+    except Exception as e:
+        logger.debug("[assessment] cross-venue failed for %s: %s", ticker, e)
+        return {"available": False, "reading": "unavailable", "note": str(e)[:120]}
+
+
 def natural_credit(short_leg: Dict, long_leg: Dict, width: float) -> Dict:
     """The credit a fill actually pays: sell the short leg at its BID, buy the long at its ASK.
 
@@ -531,6 +574,16 @@ def assess(spread: Dict, ctx: Dict, strategy: str = BULL_PUT) -> Dict:
     # enters the gates dict cannot block a trade whatever it reads — advisory by construction
     # rather than by remembering to set a flag.
     a["btc_cross_venue"] = _btc_cross_venue(ctx)
+
+    # The same read for every OTHER asset that declares a reference — gold against GVZ today,
+    # whatever is declared tomorrow. Kept under its own key rather than folded into
+    # btc_cross_venue: that key's exact shape is written into the trade ledger by
+    # auto_paper_cycle (btc_iv_gap_pp, btc_vrp_pp), and widening a field the ledger already
+    # carries would silently change the meaning of rows recorded before the change.
+    #
+    # Advisory on the same terms — it never enters the gates dict, so it cannot block or force
+    # a trade whatever it reads.
+    a["cross_venue"] = _cross_venue_read(ctx)
 
     # What this system knows about THIS underlying, as opposed to underlyings. The gates above
     # are textbook rules applied identically to 56 names; this is the place that says where a

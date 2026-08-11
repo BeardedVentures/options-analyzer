@@ -26,6 +26,7 @@ from __future__ import annotations
 import glob
 import html
 import json
+import logging
 import math
 import os
 import sys
@@ -68,6 +69,10 @@ _scan_status = {"running": False, "msg": "", "at": None}
 # request and each render repopulates it.
 _COPILOT_PEERS: list = []
 _COPILOT_CTX: dict = {}
+
+# A cross-venue fetch that fails must narrow this page, never take the cockpit down with it —
+# so those failures are logged rather than raised, and this is where they go.
+logger = logging.getLogger(__name__)
 
 VIEWS = ("today", "track", "open", "bitcoin", "history", "lottery")
 IVR_MIN = getattr(config, "MIN_IV_RANK", 45)
@@ -1000,6 +1005,18 @@ th.srt .arw{color:var(--green);font-size:9px}
 .copmore>summary:hover{color:var(--ink2)}
 .copdeep{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;padding-top:10px}
 @media(max-width:1100px){.copdeep{grid-template-columns:1fr}}
+/* Cross-venue gap: the two numbers and their difference, in the order they are read. */
+.xvgap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-top:10px}
+.xvrow{display:flex;align-items:baseline;gap:10px;padding:4px 0;font-size:12px}
+.xvrow .k{min-width:190px;color:var(--ink3)}
+.xvrow b{font-size:15px;font-weight:800}
+.xvrow.tot{border-top:1px solid var(--line);margin-top:4px;padding-top:7px}
+.xvnote{margin-top:8px;padding-top:7px;border-top:1px solid var(--line);font-size:11.5px;color:var(--ink2);line-height:1.5}
+.xvh{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);font-weight:700;margin:14px 0 5px}
+.xvdrv{margin-top:7px;font-size:11px;color:var(--ink3)}
+.xvdrv summary{cursor:pointer;font-weight:700}
+.xvdrv ul{margin:5px 0 0 16px;line-height:1.6}
+@media(max-width:620px){.xvrow{flex-wrap:wrap}.xvrow .k{min-width:0;flex-basis:100%}}
 /* ── Phone (A5-2) ───────────────────────────────────────────────────────────────────────────
    The SpreadSignal audience arrives from a YouTube link on a phone, and every layout above
    assumes a desk. Breakpoints only — no separate mobile document, because two documents drift
@@ -3615,6 +3632,262 @@ def _btc_candidates_block() -> str:
             f'Max risk is per contract; size it to your own budget.</div>')
 
 
+# Per-asset glyphs for the block headers. Absent is fine — the header just carries the ticker.
+_ASSET_ICONS = {"IBIT": "&#8383;", "ETHA": "&#926;", "SOLZ": "&#9678;",
+                "GLD": "&#9679;", "GDX": "&#9935;", "TLT": "&#8362;"}
+
+
+def _tradeable_block(ticker):
+    """The spreads actually available on THIS name, with their gate results.
+
+    Generalised from the BTC-only version: the page about an asset that contains no trade in
+    that asset is a readout, and that was the original complaint. Same table, driven by
+    whichever ticker's block it appears under.
+    """
+    try:
+        data, _path = _latest_candidates()
+    except Exception as e:
+        return f'<div class="empty">Candidate snapshot unavailable: {esc(str(e))}</div>'
+    if not data:
+        return ('<div class="dim" style="font-size:11px;margin-top:6px">No candidate snapshot '
+                'yet — run a scan and any tradeable spreads appear here.</div>')
+
+    cands = [c for row in (data.get("rows") or [])
+             if str(row.get("ticker") or "").upper() == ticker.upper()
+             for c in (row.get("candidates") or [])]
+    if not cands:
+        return (f'<div class="dim" style="font-size:11px;margin-top:6px">Nothing tradeable on '
+                f'{esc(ticker)} in the latest scan — no spread in the delta band survived the '
+                f'chain filter.</div>')
+
+    cands.sort(key=lambda c: (c.get("gates_passed") or 0, c.get("score") or 0), reverse=True)
+    rows_html = ""
+    for c in cands[:5]:
+        gp, gt = c.get("gates_passed") or 0, c.get("gates_total") or 0
+        failed = [k for k, v in (c.get("gates") or {}).items() if not v]
+        ok = gp == gt and gt
+        why = ("passes every gate" if ok
+               else "blocked by " + ", ".join(f.replace("_", " ") for f in failed[:3]))
+        tp_ = c.get("true_pop")
+        gap = c.get("pop_gap")
+        if gap is None and tp_ is not None and c.get("pop_implied") is not None:
+            gap = float(tp_) - float(c["pop_implied"])
+        gtxt = f'{gap*100:+.1f}pp' if gap is not None else "—"
+        gcol = ("var(--green)" if gap > 0 else "var(--red)") if gap is not None else "var(--ink3)"
+        rows_html += (
+            f'<tr><td class="l"><b>{esc(c.get("ticker"))}</b> '
+            f'<span class="num">{c.get("short_strike"):g}/{c.get("long_strike"):g}</span> '
+            f'<span class="dim">{esc(str(c.get("expiration"))[:10])} · {c.get("dte")}d</span></td>'
+            f'<td class="num">${(c.get("natural_credit_usd") or 0):.0f}</td>'
+            f'<td class="num">{abs(c.get("short_delta") or 0):.2f}</td>'
+            f'<td class="num">{f"{tp_*100:.0f}%" if tp_ is not None else "—"}</td>'
+            f'<td class="num" style="color:{gcol}">{gtxt}</td>'
+            f'<td class="num">${(c.get("max_loss_usd") or 0):.0f}</td>'
+            f'<td class="{"gpass" if ok else "gwarn"}">{gp}/{gt}</td>'
+            f'<td class="l dim">{esc(why)}</td></tr>')
+
+    return (f'<table class="gtbl"><thead><tr><th class="l">Spread</th><th>Credit</th>'
+            f'<th>&Delta;</th>'
+            f'<th title="The drift-removed probability of profit VEGA computes">VEGA POP</th>'
+            f'<th title="VEGA POP minus the market-implied POP (1-delta).">Edge</th>'
+            f'<th>Max risk</th><th>Gates</th>'
+            f'<th class="l">Reading</th></tr></thead><tbody>{rows_html}</tbody></table>')
+
+
+def _cross_venue_ctx():
+    """Every declared reference signal, fetched once for the whole page.
+
+    Keyed by `cross_venue_ref_signal` exactly as the profiles declare it, so a profile and its
+    feed cannot drift apart without landing as None — which the placeholder path already
+    handles — rather than raising in the middle of a render.
+
+    Only ENABLED assets are fetched. TLT declares MOVE and SOLZ declares SOL DVOL, and neither
+    has a working feed; asking for them every page load would be two guaranteed network
+    failures per render to produce a placeholder that is already decided by config.
+    """
+    ctx = {}
+    try:
+        from analysis import ticker_profile as tp
+    except Exception:
+        return ctx
+    wanted = set()
+    for tk in tp.cross_venue_tickers(enabled_only=True):
+        cv = tp.cross_venue(tk)
+        if cv and cv.get("ref_signal"):
+            wanted.add(cv["ref_signal"])
+
+    # Deribit: one snapshot per currency, reused by every ETF tracking it.
+    for sig, cur in (("BTC_DVOL", "BTC"), ("ETH_DVOL", "ETH")):
+        if sig not in wanted:
+            continue
+        try:
+            from data import crypto
+            snap = crypto.snapshot(cur)
+            ctx[sig] = snap.get("dvol")
+            ctx[f"_snap_{cur}"] = snap
+        except Exception as e:
+            logger.debug("[crypto] %s snapshot failed: %s", cur, e)
+            ctx[sig] = None
+
+    # Published indices, each carrying its own as-of date so staleness is checkable.
+    try:
+        from data import vol_indices
+        vol_indices.populate(ctx, [s for s in wanted if s in vol_indices.SOURCES])
+    except Exception as e:
+        logger.debug("[vol_indices] populate failed: %s", e)
+    return ctx
+
+
+def _asset_block(ticker, ctx):
+    """One asset's cross-venue block: four cards, the gap read, and its drivers.
+
+    The same shell for every asset — an unenabled one gets the placeholder and the reason,
+    never a card with blank numbers in it. A blank card claims the read was attempted and came
+    back empty; the placeholder says it was never possible, and only one of those is true.
+    """
+    try:
+        from analysis import ticker_profile as tp, cross_venue as cvmod
+    except Exception as e:
+        return f'<div class="empty">Cross-venue layer unavailable: {esc(str(e))}</div>'
+    cv = tp.cross_venue(ticker)
+    if cv is None:
+        return ""
+    icon = _ASSET_ICONS.get(ticker.upper(), "")
+    # .title() alone renders the tickers-as-assets as "Btc"/"Eth"/"Sol"; the acronyms keep
+    # their case and the words get title case.
+    _tracks = (tp.declared(ticker).get("tracks") or ticker).replace("_", " ")
+    name = " ".join(w.upper() if w.lower() in ("btc", "eth", "sol") else w.title()
+                    for w in _tracks.split())
+    hd = (f'<h2 style="margin-top:22px">{icon} {esc(ticker)} '
+          f'<span class="dim" style="font-weight:400;font-size:13px">{esc(name)}</span></h2>')
+
+    if not cv["enabled"]:
+        return (hd + f'<div class="empty"><b>No native volatility reference in service.</b><br>'
+                     f'{esc(cv["blocked_reason"] or "Reference declared but not fed.")}<br>'
+                     f'<span class="dim">Declared reference: {esc(cv["ref_name"] or "—")} '
+                     f'({esc(cv["source"] or "—")}). The block appears here the moment a '
+                     f'current feed exists — nothing else has to change.</span></div>')
+
+    # The currency comes from the ref_signal and is None for anything that is not a DVOL
+    # reference. A default of "BTC" for the else-branch put Bitcoin's spot, DVOL, realised vol
+    # and variance premium on GLD's card under gold's heading — one asset's numbers wearing
+    # another's name, which is precisely the failure this whole layer exists to prevent and
+    # which no test would have caught because every value rendered was individually true.
+    cur = {"BTC_DVOL": "BTC", "ETH_DVOL": "ETH"}.get(cv["ref_signal"])
+    snap = (ctx.get(f"_snap_{cur}") or {}) if cur else {}
+    ref = cvmod.ref_value(ctx.get(cv["ref_signal"]))
+    # A dead feed narrows the page and says so. Silence here would leave four empty cards
+    # looking like a market with nothing to say, which is the opposite of the truth.
+    dead = ""
+    if cur and not snap.get("ok"):
+        dead = (f'<div class="warn">No {esc(cur)} read this cycle — Deribit or Coinbase did not '
+                f'answer. Treat this as absence of information, not a neutral reading.</div>')
+    tiles = "" if dead else _asset_tiles(ticker, cv, ref, snap, ctx)
+
+    # The gap itself, against this asset's own IV.
+    x = None
+    try:
+        from data import fetcher, technicals
+        ch = fetcher.get_options_chain(ticker, config.MIN_DTE, config.MAX_DTE)
+        px = fetcher.get_price_data(ticker, period="5d")
+        if ch and px is not None and not px.empty:
+            iv = technicals.estimate_atm_iv(ch, float(px["Close"].iloc[-1]))
+            x = cvmod.evaluate(ticker, iv, ctx)
+    except Exception as e:
+        logger.debug("[cross_venue] %s read failed: %s", ticker, e)
+
+    if not (x and x.get("available")):
+        gap_html = ('<div class="empty">No comparable read this cycle — '
+                    + esc((x or {}).get("note") or "the chain or the reference did not answer.")
+                    + '</div>')
+    else:
+        gap = x["gap_pp"]
+        floor = x["noise_floor_pp"] or 0
+        # Colour on the READING, not the sign. A quality-check gap is not good or bad news,
+        # and painting it green because it happens to be negative would invite it to be read
+        # as an edge, which is the one thing it never is.
+        cls = {"etf_rich": "pos", "etf_cheap": "neg",
+               "quality_check": "dim", "aligned": "dim"}.get(x["reading"], "dim")
+        asof = (f' <span class="dim">as of {esc(x["ref_asof"])}</span>'
+                if x.get("ref_asof") else "")
+        gap_html = (
+            '<div class="xvgap">'
+            f'<div class="xvrow"><span class="k">{esc(ticker)} ATM IV</span>'
+            f'<b class="num">{x["proxy_iv_pp"]:.1f}%</b>'
+            f'<span class="dim">this ETF&rsquo;s option chain</span></div>'
+            f'<div class="xvrow"><span class="k">{esc(cv["ref_name"])}</span>'
+            f'<b class="num">{x["ref_pp"]:.1f}%</b>'
+            f'<span class="dim">{esc(cv["source"] or "")}{asof}</span></div>'
+            f'<div class="xvrow tot"><span class="k">Gap</span>'
+            f'<b class="num {cls}">{gap:+.1f}pp</b>'
+            f'<span class="dim">{esc(x["reading"].replace("_", " ").upper())} '
+            f'&middot; noise floor {floor:g}pp</span></div>'
+            f'<div class="xvnote">{esc(x["note"])}</div>'
+            '</div>')
+
+    drivers = ""
+    if cv["drivers"]:
+        items = "".join(f'<li>{esc(d)}</li>' for d in cv["drivers"])
+        drivers = ('<details class="xvdrv"><summary>What moves this gap</summary>'
+                   f'<ul>{items}</ul></details>')
+
+    # Trades first, research under them — per asset, so the reason sits beside the thing it is
+    # a reason FOR. A page that only reads instruments is a readout; the spreads make it a
+    # board, and burying them under the vol study is how it became a readout the first time.
+    return (hd
+            + f'<h3 class="xvh">Tradeable now — {esc(ticker)}</h3>'
+            + _tradeable_block(ticker)
+            + f'<h3 class="xvh">Why — what {esc(name)}{"&rsquo;" if name.endswith("s") else "&rsquo;s"}'
+              f' own market is pricing</h3>'
+            + dead + tiles
+            + '<h3 class="xvh">Cross-venue volatility</h3>'
+            + gap_html + drivers)
+
+
+def _asset_tiles(ticker, cv, ref, snap, ctx):
+    """The four-card shell — spot, implied, realised, variance premium.
+
+    Identical shape for every asset, populated from whatever that asset actually has. The
+    crypto path carries a full snapshot (spot and realised vol from Coinbase); a published
+    index carries only the index level, so the cards it cannot fill say so rather than
+    printing a zero.
+    """
+    def card(lab, val, sub, col=None):
+        return _btc_card(lab, val, sub, col)
+
+    if snap and snap.get("ok"):
+        vrp = snap.get("vrp_pp")
+        return ('<div class="cards">'
+                + card(f'{snap.get("currency", "")} spot', f'${snap["spot"]:,.0f}',
+                       "Deribit index")
+                + card("Implied (DVOL)", f'{snap["dvol"]:.1f}%', "30-day implied vol")
+                + card("Realised 30d", f'{snap["rv_30d"]:.1f}%'
+                       if snap.get("rv_30d") is not None else "—",
+                       "annualised on 365 — crypto never closes")
+                + card("Variance premium",
+                       f'{vrp:+.1f}pp' if vrp is not None else "—",
+                       "implied over realised",
+                       "var(--green)" if (vrp or 0) > 0 else "var(--amber)")
+                + '</div>')
+
+    raw = ctx.get(cv["ref_signal"])
+    asof = raw.get("asof") if isinstance(raw, dict) else None
+    return ('<div class="cards">'
+            + card(cv["ref_name"] or "Reference",
+                   f'{ref:.1f}%' if ref is not None else "—",
+                   f'{cv["source"] or ""}{" · " + asof if asof else ""}')
+            + card("Venue", cv["source"] or "—", cv["hours"].replace("_", " ")
+                   if cv.get("hours") else "")
+            + card("Noise floor", f'{cv["noise_floor_pp"]:g}pp'
+                   if cv["noise_floor_pp"] is not None else "—",
+                   "below this the gap is noise")
+            + card("Independent?", "No" if cv["derived_from"] else "Yes",
+                   f'derived from {cv["derived_from"].replace("_", " ")}'
+                   if cv["derived_from"] else "separate venue",
+                   "var(--amber)" if cv["derived_from"] else "var(--green)")
+            + '</div>')
+
+
 def view_bitcoin():
     """The BTC layer: what is tradeable on the proxies, and whether the vol read justifies it.
 
@@ -3625,62 +3898,23 @@ def view_bitcoin():
     trades are what make it a board.
     """
     try:
-        from data import crypto
-        from analysis import btc_signal, btc_forecast as bf
+        from analysis import btc_forecast as bf
         from analysis import predictions as pred
+        from analysis import ticker_profile as tp
     except Exception as e:
         return f'<h2>Crypto research</h2><div class="empty">Crypto layer unavailable: {esc(str(e))}</div>'
 
-    intro = ('<p class="q">What is tradeable on the BTC proxies right now, and does Bitcoin\'s own '
-             'options market justify it?</p>')
+    intro = ('<p class="q">What is tradeable on these names right now, and does the underlying '
+             'asset\'s own options market justify it?</p>')
 
-    s = crypto.snapshot()
-    if not s.get("ok"):
-        head = ('<div class="warn">No BTC read this cycle — Deribit or Coinbase did not answer. '
-                'Treat this as absence of information, not a neutral reading.</div>')
-        tiles = ""
-    else:
-        head = ""
-        vrp = s.get("btc_vrp_pp")
-        tiles = ('<div class="cards">'
-                 + _btc_card("BTC spot", f'${s["btc_spot"]:,.0f}', "Deribit index")
-                 + _btc_card("Implied (DVOL)", f'{s["dvol"]:.1f}%', "BTC 30-day implied vol")
-                 + _btc_card("Realised 30d", f'{s["btc_rv_30d"]:.1f}%', "annualised on 365 — BTC never closes")
-                 + _btc_card("Variance premium", f'{vrp:+.1f}pp',
-                             "implied over realised",
-                             "var(--green)" if (vrp or 0) > 0 else "var(--amber)")
-                 + '</div>')
-
-    # ── Cross-venue ──
-    rows = ""
-    for tk in sorted(getattr(config, "BTC_PROXY_TICKERS", {"IBIT"})):
-        try:
-            from data import fetcher, technicals
-            ch = fetcher.get_options_chain(tk, config.MIN_DTE, config.MAX_DTE)
-            px = fetcher.get_price_data(tk, period="5d")
-            if not ch or px is None or px.empty:
-                continue
-            iv = technicals.estimate_atm_iv(ch, float(px["Close"].iloc[-1]))
-            x = btc_signal.evaluate(tk, iv, s)
-        except Exception:
-            continue
-        if not x.get("available"):
-            continue
-        gap = x["iv_gap_pp"]
-        wide = float(getattr(config, "BTC_IV_GAP_WIDE_PP", 3.0))
-        cls = "pos" if gap <= -wide else ("neg" if gap >= wide else "dim")
-        rows += (f'<tr><td class="l"><b>{esc(tk)}</b></td>'
-                 f'<td class="num">{x["proxy_iv_pp"]:.2f}%</td>'
-                 f'<td class="num">{x["dvol"]:.2f}%</td>'
-                 f'<td class="num"><span class="{cls}">{gap:+.2f}pp</span></td>'
-                 f'<td class="l">{esc(x["reading"].replace("_", " "))}</td>'
-                 f'<td class="l dim">{esc(x["note"])}</td></tr>')
-    xv = (f'<h2>Cross-venue volatility</h2>'
-          f'<div class="board"><table><thead><tr class="col"><th class="l">Ticker</th>'
-          f'<th>ETF IV</th><th>BTC DVOL</th><th>Gap</th><th class="l">Reading</th>'
-          f'<th class="l">What it means</th></tr></thead><tbody>{rows}</tbody></table></div>'
-          if rows else
-          '<h2>Cross-venue volatility</h2><div class="empty">No comparable read this cycle.</div>')
+    # ── One block per declared asset, looped from config ──────────────────────
+    # This page used to be BTC and nothing else: one snapshot, one proxy set, one hardcoded
+    # DVOL label. Every asset now comes from ticker_profile.DECLARED, so adding ETH was a
+    # config entry rather than a second copy of this view — and a copy is exactly where one
+    # asset's noise floor silently becomes another's.
+    ctx = _cross_venue_ctx()
+    head, tiles = "", ""
+    xv = "".join(_asset_block(tk, ctx) for tk in tp.cross_venue_tickers())
 
     # ── The forecast ledger ──
     try:
@@ -3757,17 +3991,16 @@ def view_bitcoin():
 
     foot = ('<div class="foot">All data here is free and unauthenticated: Deribit publishes DVOL '
             '(BTC 30-day implied vol) and its spot index; Coinbase serves daily candles. No broker '
-            'is connected and no crypto order can be placed from this system. The cross-venue gap '
-            'never enters the gates dict, so it cannot block or force a trade whatever it reads. '
-            'Band thresholds are provisional and ungraded — the raw gap is what gets stored, so '
-            'calibration can set the bands from outcomes rather than from a guess.</div>')
-    # Trades first, research under them. The volatility read is the REASON one of these might be
-    # worth taking, which makes it context for the table rather than a substitute for it.
-    tradeable = (f'<h2 style="margin-top:4px">Tradeable now — BTC proxies</h2>'
-                 f'{_btc_candidates_block()}')
-    return (f'<h1>Crypto research</h1>{intro}{tradeable}'
-            f'<h2 style="margin-top:22px">Why — what Bitcoin\'s own market is pricing</h2>'
-            f'{head}{tiles}{xv}{fc_block}{foot}')
+            'is connected and no crypto order can be placed from this system. CBOE\'s GVZ comes '
+            'from FRED. The cross-venue gap never enters the gates dict, so it cannot block or '
+            'force a trade whatever it reads. Noise floors are DECLARED per asset and never '
+            'shared — BTC\'s ordinary venue basis would be a large move in gold. A reference '
+            'older than three days is discarded rather than shown, because a gap is a '
+            'subtraction and will happily produce a confident number from a stale operand.</div>')
+    # Trades and research per asset, interleaved by _asset_block: the vol read is the REASON a
+    # spread on that name might be worth taking, so it belongs beside those spreads rather than
+    # in a separate section the reader has to hold two pages of context to connect.
+    return f'<h1>Crypto research</h1>{intro}{head}{tiles}{xv}{fc_block}{foot}'
 
 
 def _btc_card(label, value, sub, color=None):
