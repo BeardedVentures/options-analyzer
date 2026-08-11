@@ -135,4 +135,4 @@ def test_the_open_path_actually_threads_them_through():
     import inspect
     src = inspect.getsource(apc)
     for k in ("atm_iv_at_entry", "rv_at_entry", "expected_move_at_entry", "pop_gap_at_entry"):
-        assert f"{k}=_entry[" in src, f"{k} is not threaded into open_paper_trade"
+        assert f"{k}=" in src, f"{k} is not threaded into open_paper_trade"

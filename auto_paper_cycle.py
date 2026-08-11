@@ -3,8 +3,9 @@
 auto_paper_cycle.py
 
 Automates one paper-trading cycle:
-1) Analyze: run vega_candidates.py to refresh candidate snapshot (JSON only).
-2) Select: auto-open top-qualified paper trades up to configurable limits.
+1) Analyze: run main.py to build the BOARD — the same list the operator reviews.
+2) Select: auto-open from that board, so the learning history grades what was shown.
+   (vega_candidates.py also runs, demoted to recording counterfactuals only.)
 3) Grade: reprice open positions and auto-close by target/stop/DTE rules.
 4) Report: refresh paper report + dashboard outputs.
 
@@ -329,6 +330,25 @@ def _candidate_score(c: Dict) -> float:
             - (delta_penalty * 40.0))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ORPHANED: the candidates-path selection subtree
+# ─────────────────────────────────────────────────────────────────────────────
+# _pick_new_trades, _candidate_score, _candidate_passes_minimum, _missing_gates,
+# _min_credit_floor and _entry_state selected trades from the vega_candidates snapshot. The
+# desk now opens from the board (_auto_open_from_board), so NOTHING BELOW IS REACHABLE from
+# the cycle.
+#
+# They are still here, and still tested, and that combination is precisely what inverted the
+# earnings gate: vega_candidates carried a correct fail-closed implementation with thirteen
+# passing tests and no caller, while the live path did the opposite for weeks. A gate "fixed"
+# in _candidate_passes_minimum today would change nothing and no test would say so.
+#
+# Left in place deliberately for one release rather than deleted in the same change that
+# rewired the desk — the tests below encode four hard-won enforcement leaks and deserve to be
+# repointed with fresh attention, not folded into a rewiring commit. test_orphaned_selection_
+# subtree_is_unreachable holds the line until then.
+
+
 def _pick_new_trades(cand_data: Dict, open_rows: List[Dict], max_open_total: int, max_new_per_run: int) -> List[Tuple[str, Dict, Dict]]:
     open_keys = set()
     open_tickers = set()
@@ -437,146 +457,11 @@ def _pick_new_trades(cand_data: Dict, open_rows: List[Dict], max_open_total: int
     return picked
 
 
-def _auto_open_from_candidates(cand_data: Dict, source_file: str) -> int:
-    rows = ol.load_records()
-    open_rows = [r for r in rows if r.get("status") == "open" and r.get("mode") == "paper"]
-
-    max_open_total = int(os.getenv("VEGA_MAX_OPEN_TOTAL", "15"))
-    max_new_per_run = int(os.getenv("VEGA_MAX_NEW_PER_RUN", "5"))
-
-    # One VIX read per scan, recorded in the snapshot's meta block. Parsed once here: the
-    # scanner writes "—" when the fetch failed, so this is not always a number.
-    try:
-        _meta_vix = float((cand_data.get("meta") or {}).get("vix"))
-    except (TypeError, ValueError):
-        _meta_vix = None
-
-    picks = _pick_new_trades(cand_data, open_rows, max_open_total=max_open_total, max_new_per_run=max_new_per_run)
-    if not picks:
-        _log("No new auto-open candidates this cycle.")
-        return 0
-
-    # GATE CONTRACT CHECK. If the scanner stopped emitting a gate that REQUIRED_GATES claims is
-    # enforced, every downstream `gates.get(k, False)` would quietly read False-or-missing and the
-    # trade path would be running on a rule set nobody verified. Fail the whole auto-open loudly
-    # rather than open trades under an unknown gate set — this is what makes leak #4 impossible
-    # to ship silently.
-    for _tk, _row, _c in picks:
-        missing = _missing_gates(_c)
-        if missing:
-            _log(
-                f"ABORT AUTO-OPEN — candidate {_tk} is missing REQUIRED_GATES results: {missing}. "
-                f"The scanner (vega_candidates.build_candidates) and config.REQUIRED_GATES are out "
-                f"of sync; no trades opened this cycle."
-            )
-            return 0
-
-    opened = 0
-    for ticker, row, c in picks:
-        try:
-            # FILL MODEL (audit fix 2026-08-02). Trades used to book `credit_per_share`, the MID.
-            # You cannot fill a credit spread at the mid: you sell the short leg at its BID and buy
-            # the long leg at its ASK. Across the 2026-07-31 snapshot the mid overstated the
-            # achievable credit by 75.5% on average (mean $92.33 vs $21.85 natural), which made the
-            # entire P&L record optimistically invalid. Book the natural credit instead.
-            natural = c.get("natural_credit_per_share")
-            if natural is None:
-                _log(f"REJECTED_NO_NATURAL_CREDIT {ticker} — candidate has no bid/ask credit; skipping.")
-                continue
-            natural = float(natural)
-            if natural <= 0:
-                # ~25% of candidates price this way: at natural prices they are debit spreads,
-                # not credit spreads. They were previously opened as if they paid the mid.
-                _log(
-                    f"REJECTED_NEGATIVE_NATURAL_CREDIT {ticker} "
-                    f"{c['short_strike']:g}/{c['long_strike']:g} {c['expiration']} "
-                    f"natural={natural:.2f} (mid={float(c.get('credit_per_share') or 0):.2f}) "
-                    f"— unfillable as a credit spread; not opening."
-                )
-                continue
-
-            # Raw entry state. The score components below are the engine's CONCLUSIONS; these
-            # are the measurements they were drawn from. Without them a calibration run can
-            # only ask whether a score was right, never whether it was wrong because the
-            # inputs were wrong or because the weighting was. All of it is already sitting in
-            # the row context — it was simply never persisted.
-            _ctx = row.get("ctx") or {}
-            _entry = _entry_state(c, _ctx)
-
-            tid = ol.open_paper_trade(
-                ticker=ticker,
-                short_strike=c["short_strike"],
-                long_strike=c["long_strike"],
-                expiration=c["expiration"],
-                entry_credit_per_share=natural,
-                dte=c.get("dte"),
-                delta=c.get("short_delta"),
-                iv_rank=(row.get("ctx") or {}).get("iv_rank"),
-                implied_pop=c.get("pop_implied"),
-                # true_pop: drift-removed calibrated POP from the edge calculator.
-                # Present when opening from the main engine; None from vega_candidates fast scan.
-                true_pop=c.get("true_pop") or c.get("pop_true"),
-                p_max_profit=c.get("p_max_profit"),
-                contracts=1,
-                fill_model="natural",
-                natural_credit_per_share=natural,
-                mid_credit_per_share=c.get("credit_per_share"),
-                source="auto-paper",
-                note=f"auto from {source_file}",
-                theta=c.get("short_theta"),
-                # What the engine BELIEVED at entry. Without these the calibration engine has
-                # nothing to correlate outcomes against — it was the missing half of the
-                # feedback loop. Absent from the vega_candidates fast-scan schema, so they
-                # stay None on that path rather than being faked.
-                edge_score=c.get("edge_score"),
-                # `vrp_pp` is vol_context's old spelling, read only so candidate snapshots
-                # already on disk still record a VRP. This site used to read ONLY "vrp" while
-                # the producer emitted only "vrp_pp", so vrp was null on all 79 real trades —
-                # the same shape as the earnings_date/earnings_days error: a field name never
-                # checked against its producer. tests/test_schema_contracts.py now checks it.
-                vrp=c.get("vrp") or _ctx.get("vrp") or _ctx.get("vrp_pp"),
-                technical_score=c.get("composite_score") or c.get("technical_score"),
-                term_slope=c.get("term_slope"),
-                skew_steepness=c.get("skew_steepness"),
-                # VIX is fetched once per scan and lives in the snapshot's META. This used to
-                # read the per-ticker ctx, which has never carried one — so it was null on
-                # every trade, which also silently defeated muninn.record_stress_snapshot's
-                # documented fallback to "the VIX at entry when the live read is unavailable".
-                # A fallback that never had a value to fall back to.
-                vix_at_entry=_meta_vix,
-                atm_iv_at_entry=_entry["atm_iv_at_entry"],
-                rv_at_entry=_entry["rv_at_entry"],
-                expected_move_at_entry=_entry["expected_move_at_entry"],
-                pop_gap_at_entry=_entry["pop_gap_at_entry"],
-                btc_iv_gap_pp=_entry["btc_iv_gap_pp"],
-                btc_vrp_pp=_entry["btc_vrp_pp"],
-                # The level the assessment found sheltering this short strike. huginn.read_support
-                # reads it as its PRIMARY signal and has returned UNKNOWN on every trade ever
-                # opened because nothing wrote it — while the number sat in the candidate's own
-                # analysis block, computed and discarded on the same cycle.
-                support_level_at_entry=(
-                    ((c.get("analysis") or {}).get("shelter") or {}).get("level")),
-            )
-            # Write down every falsifiable claim this trade carries. The engine has always
-            # made these assertions and always discarded them, which is why nothing it
-            # predicts has ever been marked.
-            try:
-                from analysis import predictions as _pred
-                _claims = _pred.record_trade_predictions(
-                    {**c, "ticker": ticker, "close_logic": "ravens_v1"}, tid)
-                if _claims:
-                    _log(f"PREDICTIONS {tid}: recorded "
-                         f"{', '.join(x.split('::')[1] for x in _claims)}")
-            except Exception as _e:
-                _log(f"Prediction recording failed for {tid}: {_e}")
-            _log(
-                f"AUTO-OPEN {tid} | {ticker} {c['short_strike']:g}/{c['long_strike']:g} {c['expiration']} "
-                f"credit={natural:.2f} (natural; mid was {float(c.get('credit_per_share') or 0):.2f})"
-            )
-            opened += 1
-        except Exception as exc:
-            _log(f"Failed to auto-open candidate {ticker}: {exc}")
-    return opened
+# _auto_open_from_candidates lived here: it opened from the vega_candidates snapshot while the
+# operator reviewed main.py's board. Two lists, one of them traded and the other one read.
+# _auto_open_from_board replaces it — the desk opens what was shown. Deleted rather than kept
+# "just in case": a second opener is a second answer to which trades are real, and this file
+# has spent the week removing exactly that shape.
 
 
 # Structures the paper desk can actually MANAGE, not merely open. A trade it cannot mark is a
@@ -636,6 +521,130 @@ def _earnings_check(position: Dict, exp) -> Dict:
     except Exception as e:
         _log(f"Earnings check unavailable for {position.get('id')}: {e}")
         return {}
+
+
+BOARD_FILE = BASE / "logs" / "scan_latest.json"
+
+
+def _auto_open_from_board() -> int:
+    """Open exactly what the board recommended — the same list the operator reviewed.
+
+    The board is the product; this desk exists to build an honest learning history OF that
+    board. It used to open from the vega_candidates snapshot while the operator read main.py's
+    engine artifact, so the trades being validated were not the trades being shown: different
+    search, different strikes, different strategies. A history of trades nobody was recommended
+    grades nothing.
+
+    Three refusals, all deliberate:
+
+      NOT LIVE. A board built on stale quotes carries a MODELLED credit, and booking a fill at
+      a price that was never available is the exact defect that made the first 18 trades in
+      this ledger look like a 72% win rate. No opens off a modelled board, ever.
+
+      NOT MANAGEABLE. A structure the desk cannot mark is one it cannot close or learn from.
+      See is_manageable.
+
+      NOT GATED. The board enforces the shared contract before a trade qualifies, so anything
+      here has already passed. Re-checked anyway: this is the last point where a leak between
+      the engine and the desk could still open a trade nobody approved.
+    """
+    if not BOARD_FILE.exists():
+        _log("No board artifact yet — run the engine (main.py) before the desk can open.")
+        return 0
+    try:
+        board = json.loads(BOARD_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _log(f"Board unreadable: {exc}")
+        return 0
+
+    trades = board.get("qualified_trades") or []
+    if not trades:
+        _log("Board has no qualified trades this cycle; nothing to open.")
+        return 0
+
+    modelled = [t for t in trades if t.get("fill_basis") == "modelled"]
+    if modelled:
+        _log(f"REFUSING TO OPEN — the board's credits are MODELLED ({len(modelled)}/{len(trades)} "
+             f"trades), which means it was built while quotes were stale. Booking a fill at a "
+             f"price that was never available is how this ledger got its first 18 unusable "
+             f"trades. Re-run the engine during market hours.")
+        return 0
+
+    rows = ol.load_records()
+    open_rows = [r for r in rows if r.get("status") == "open" and r.get("mode") == "paper"]
+    open_tickers = {str(r.get("ticker")).upper() for r in open_rows if r.get("ticker")}
+    slots = max(0, int(os.getenv("VEGA_MAX_OPEN_TOTAL", "15")) - len(open_rows))
+    budget = min(slots, int(os.getenv("VEGA_MAX_NEW_PER_RUN", "5")))
+    if budget <= 0:
+        _log("No slots free; nothing opened.")
+        return 0
+
+    # Highest edge first — the board's own ranking, so the desk validates the top of the list
+    # the operator would have acted on rather than an order of its own.
+    trades = sorted(trades, key=lambda t: (t.get("edge_score") or 0), reverse=True)
+
+    opened = 0
+    for t in trades:
+        if opened >= budget:
+            break
+        tk = str(t.get("ticker") or "").upper()
+        if not tk or tk in open_tickers:
+            continue
+        if not is_manageable(t):
+            _log(f"SKIP {tk} {t.get('strategy')} — the desk cannot mark this structure, so it "
+                 f"must not open it. See is_manageable.")
+            continue
+        gates = t.get("assessment_gates") or {}
+        missing = [k for k in getattr(config, "REQUIRED_GATES", ()) if k not in gates]
+        failed = [k for k, v in gates.items() if not v]
+        if missing or failed:
+            _log(f"SKIP {tk} — board trade is not fully gated (missing={missing} failed={failed}).")
+            continue
+        credit = t.get("natural_credit_per_share")
+        if not isinstance(credit, (int, float)) or credit <= 0:
+            _log(f"SKIP {tk} — no positive fillable credit on the board trade.")
+            continue
+        try:
+            tid = ol.open_paper_trade(
+                ticker=tk,
+                short_strike=t.get("short_strike"), long_strike=t.get("long_strike"),
+                expiration=t.get("expiration"),
+                entry_credit_per_share=float(credit),
+                dte=t.get("dte"), delta=t.get("delta"), iv_rank=t.get("iv_rank"),
+                implied_pop=t.get("implied_pop"), true_pop=t.get("true_pop"),
+                p_max_profit=t.get("p_max_profit"), contracts=1, fill_model="natural",
+                natural_credit_per_share=float(credit),
+                mid_credit_per_share=t.get("credit_per_share"),
+                source="auto-board", note="auto from scan_latest.json",
+                edge_score=t.get("edge_score"), vrp=t.get("vrp"),
+                technical_score=t.get("composite_score") or t.get("technical_score"),
+                term_slope=t.get("term_slope"), skew_steepness=t.get("skew_steepness"),
+                vix_at_entry=((board.get("market_context") or {}).get("vix") or {}).get("current"),
+                support_level_at_entry=t.get("nearest_support"),
+                # The raw measurements behind the entry. These were threaded by the old
+                # candidates opener; dropping them here would silently undo the instrumentation
+                # the calibration engine depends on — the board is the desk's only source now.
+                atm_iv_at_entry=t.get("atm_iv"),
+                rv_at_entry=t.get("rv_30d_decimal"),
+                expected_move_at_entry=(t.get("horizon") or {}).get("expected_move"),
+                pop_gap_at_entry=t.get("pop_gap"),
+                btc_iv_gap_pp=(t.get("btc_cross_venue") or {}).get("iv_gap_pp"),
+                btc_vrp_pp=(t.get("btc_cross_venue") or {}).get("btc_vrp_pp"),
+                strategy=_strategy_key(t) or "bull_put_spread",
+            )
+            try:
+                from analysis import predictions as _pred
+                _pred.record_trade_predictions({**t, "ticker": tk, "close_logic": "ravens_v1"}, tid)
+            except Exception as e:
+                _log(f"Prediction recording failed for {tid}: {e}")
+            _log(f"AUTO-OPEN {tid} | {tk} {t.get('strategy')} "
+                 f"{t.get('short_strike')}/{t.get('long_strike')} {t.get('expiration')} "
+                 f"credit={float(credit):.2f} (natural) edge={t.get('edge_score')}")
+            open_tickers.add(tk)
+            opened += 1
+        except Exception as exc:
+            _log(f"Failed to open board trade {tk}: {exc}")
+    return opened
 
 
 def _ravens_close_check(position: Dict, decision_mark, short_leg, long_leg, exp) -> Optional[Dict]:
@@ -1035,17 +1044,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         #              output/candidates/ doesn't accumulate 100 KB HTML files on
         #              every scheduled run. The JSON is still written and read back
         #              below by _latest_candidates().
-        rc = _run([sys.executable, "vega_candidates.py", "--no-open", "--no-html"])
+        # THE BOARD IS THE PRODUCT AND THIS DESK VALIDATES IT. The engine builds the list the
+        # operator reviews; the desk opens from that same list. It used to open from the
+        # vega_candidates snapshot while the operator read main.py's artifact — different
+        # search, different strikes, different strategies — so the learning history graded
+        # trades nobody was ever shown.
+        rc = _run([sys.executable, "main.py"])
         if rc != 0:
-            _log("vega_candidates.py failed; skipping open/grade this cycle.")
+            _log("main.py failed; skipping open/grade this cycle.")
             return rc
 
-        cand_data, cand_path = _latest_candidates()
-        if not cand_data or not cand_path:
-            _log("No candidate snapshot found after scan.")
-            return 1
+        # The fast scan still runs, DEMOTED to what it is uniquely good at: enumerating widely
+        # and recording full gate results for every candidate, including the ones that failed.
+        # That is the only source analysis/counterfactuals.py can price a gate from — main.py's
+        # own enumeration records drop reasons but not gate results. It no longer opens
+        # anything, so it is a measuring instrument rather than a second opinion.
+        if _run([sys.executable, "vega_candidates.py", "--no-open", "--no-html"]) != 0:
+            _log("vega_candidates.py failed — counterfactual record will have a gap this cycle.")
 
-        opened = _auto_open_from_candidates(cand_data, cand_path.name)
+        opened = _auto_open_from_board()
         marked, closed = _reprice_and_close_open()
         _record_btc_forecast()
         _resolve_predictions()

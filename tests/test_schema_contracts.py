@@ -104,7 +104,6 @@ def _literal_key_reads(fn_or_src, aliases):
 
 # (function, variable names that hold a vol_context dict)
 VOL_CONTEXT_CONSUMERS = [
-    (apc._auto_open_from_candidates, {"_ctx", "ctx"}),
     (apc._pick_new_trades, {"ctx"}),
     (apc._entry_state, {"ctx"}),
 ]

@@ -94,7 +94,8 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
                      atm_iv_at_entry=None, rv_at_entry=None,
                      expected_move_at_entry=None, pop_gap_at_entry=None,
                      btc_iv_gap_pp=None, btc_vrp_pp=None,
-                     support_level_at_entry=None) -> str:
+                     support_level_at_entry=None,
+                     strategy: str = "bull_put_spread") -> str:
     """
     Open a PAPER position from a real candidate (or manual entry). Records the entry credit you
     would realistically collect; net P/L on close subtracts Robinhood round-trip commissions.
@@ -152,7 +153,11 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
         "scan_ts": ts,
         "session_type": "paper",
         "ticker": ticker,
-        "strategy": "bull_put_spread",
+        # The structure, not an assumption about it. Hardcoded to bull_put_spread
+        # while that was the only thing the desk could open; the board also carries
+        # bear calls, and a record that mislabels the structure cannot be marked,
+        # cohorted or graded correctly.
+        "strategy": strategy or "bull_put_spread",
         "short_strike": short_strike,
         "long_strike": long_strike,
         "expiration": expiration,

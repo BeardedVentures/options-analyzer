@@ -259,7 +259,7 @@ def test_the_cycle_records_and_resolves():
     import inspect
 
     import auto_paper_cycle as apc
-    assert "record_trade_predictions" in inspect.getsource(apc._auto_open_from_candidates)
+    assert "record_trade_predictions" in inspect.getsource(apc._auto_open_from_board)
     assert "_resolve_predictions()" in inspect.getsource(apc.main)
 
 

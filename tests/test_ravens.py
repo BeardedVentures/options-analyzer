@@ -465,9 +465,9 @@ def test_support_level_at_entry_is_actually_written_at_open():
     from analysis import outcome_logger as ol
 
     assert "support_level_at_entry" in inspect.signature(ol.open_paper_trade).parameters
-    src = inspect.getsource(apc._auto_open_from_candidates)
+    src = inspect.getsource(apc._auto_open_from_board)
     assert "support_level_at_entry=" in src, "the open path must pass the level it just computed"
-    assert '"shelter"' in src, "and it must come from the assessment's shelter block"
+    assert "nearest_support" in src, "and it must come from the board's own level read"
 
 
 def test_huginn_reads_structure_once_the_level_is_recorded():

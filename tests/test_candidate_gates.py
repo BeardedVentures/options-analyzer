@@ -213,7 +213,7 @@ def test_shelter_gate_is_switchable(monkeypatch):
 
 
 def test_shelter_is_in_the_enforcement_contract():
-    """REQUIRED_GATES is what makes _auto_open_from_candidates refuse to open when a gate goes
+    """REQUIRED_GATES is what makes _auto_open_from_board refuse to open when a gate goes
     missing — the mechanism that turns a silent widening into a loud failure."""
     import config
     assert "support_shelter" in config.REQUIRED_GATES
@@ -385,3 +385,22 @@ def test_every_gate_implementation_is_reachable_from_the_live_scan():
             f"{orphan} is back in vega_candidates — the gate contract is defined in "
             f"analysis/assessment.py and a second implementation will silently take over "
             f"or silently stop being called, which is how the earnings gate inverted.")
+
+
+def test_orphaned_selection_subtree_is_unreachable_and_labelled():
+    """The desk opens from the board now, so the candidates-path selectors are dead code.
+
+    Dead code with passing tests is the exact shape that inverted the earnings gate — a correct
+    implementation, thirteen green tests, and no caller, while the live path did the opposite.
+    This holds the line until they are deleted: they must stay unreachable AND stay labelled,
+    so nobody "fixes" a gate in a function the cycle never calls.
+    """
+    import inspect
+    src = inspect.getsource(apc)
+    assert "ORPHANED: the candidates-path selection subtree" in src, (
+        "the orphan marker was removed — either these functions are live again (rewire the "
+        "tests) or the block was deleted (delete this test with it)")
+    # The cycle must reach the board opener and nothing else.
+    cycle = inspect.getsource(apc.main)
+    assert "_auto_open_from_board" in cycle
+    assert "_pick_new_trades" not in cycle and "_candidate_passes_minimum" not in cycle

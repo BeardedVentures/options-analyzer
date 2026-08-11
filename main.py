@@ -891,6 +891,18 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         # counterfactual ledger compares the spreads that were passed over against
         # the one that was taken, so it needs the losers from QUALIFIED tickers too
         # — a record of rejected tickers alone cannot price a gate.
+        # RAW MEASUREMENTS the calibration engine needs, not just the conclusions drawn from
+        # them. Without these a calibration run can only ask whether a score was right, never
+        # whether it was wrong because the INPUTS were wrong or because the weighting was.
+        # The board is now the desk's only source, so anything absent here is absent from the
+        # ledger forever.
+        "atm_iv": (lambda v: round(v / 100.0, 4) if isinstance(v, (int, float)) and v else None)(
+            tech.get("current_iv")),
+        "rv_30d_decimal": (lambda v: round(v / 100.0, 4) if isinstance(v, (int, float)) and v else None)(
+            tech.get("rv_30d")),
+        "pop_gap": (round(p_profit - implied_pop, 4)
+                    if isinstance(p_profit, (int, float)) and isinstance(implied_pop, (int, float))
+                    else None),
         "enumerated": pair_diag.get("enumerated") or [],
         "fill_basis": metrics.get("fill_basis"),
         "quotes_live": metrics.get("quotes_live"),

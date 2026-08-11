@@ -202,7 +202,7 @@ def test_the_open_path_threads_the_gap_through():
     import inspect
     import auto_paper_cycle as apc
     src = inspect.getsource(apc)
-    assert "btc_iv_gap_pp=_entry[" in src and "btc_vrp_pp=_entry[" in src
+    assert "btc_iv_gap_pp=" in src and "btc_cross_venue" in src and "btc_vrp_pp=" in src
 
 
 def test_entry_state_reads_the_gap_the_scan_measured_not_a_fresh_one():
