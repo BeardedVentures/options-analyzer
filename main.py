@@ -506,6 +506,42 @@ def _horizon_read(strategy, current_price, tech, short_put, metrics, entry_timin
         return {}
 
 
+HIGH_EDGE_SCORE = getattr(config, "HIGH_EDGE_SCORE", 65)
+EXCEPTIONAL_EDGE_SCORE = getattr(config, "EXCEPTIONAL_EDGE_SCORE", 80)
+
+
+def build_scan_summary(tickers: List[str], tech_map: Dict[str, Dict],
+                       qualified_trades: List[Dict]) -> Dict:
+    """The opportunity-density funnel: how much was looked at to produce what is on the board.
+
+    Four numbers that narrow — structures evaluated, structures that cleared every gate, of
+    those the high-edge ones, and the exceptional ones. The point is context: an edge score
+    of 78 means nothing on its own, and "5 opportunities" reads identically whether it is the
+    best 5 of 2,000 or the only 5 a thin session could build.
+
+    `total_scanned` counts real enumerated short/long pairs, not tickers, and only those from
+    the bull-put enumeration that select_bull_put_pair walks. Bear call and iron condor
+    structures come from multi_strategy.scan_extra, which does not report a count, so they are
+    excluded rather than estimated. The number therefore understates the true work and never
+    overstates it — which is the only direction a proof-of-work figure is allowed to be wrong.
+
+    `tickers_scanned` is kept alongside it so the UI never has to infer one from the other.
+    """
+    def _edge(t: Dict) -> float:
+        return float(t.get("edge_score") or 0.0)
+
+    structures = sum(int((tech_map.get(tk) or {}).get("structures_considered") or 0)
+                     for tk in tickers)
+    return {
+        "tickers_scanned": len(tickers),
+        "total_scanned": structures,
+        "total_qualified": len(qualified_trades),
+        "high_edge_count": sum(1 for t in qualified_trades if _edge(t) >= HIGH_EDGE_SCORE),
+        "exceptional_count": sum(1 for t in qualified_trades if _edge(t) >= EXCEPTIONAL_EDGE_SCORE),
+        "counts_structures_from": "bull_put_enumeration",
+    }
+
+
 def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional[Dict], Optional[Dict], Dict]:
     price_data = fetcher.get_price_data(ticker, period="2y")
     if price_data is None or price_data.empty:
@@ -574,11 +610,20 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     pair_diag: Dict = {}
     pair = select_bull_put_pair(options, current_price, ticker, diagnostics=pair_diag,
                                 support_levels=_levels.get("support_levels"))
+    # How many real short/long pairs this ticker actually put through the contract. This is
+    # the denominator behind "27 qualified" — without it the board shows five setups and
+    # cannot say whether they are the best five of two thousand or the only five that
+    # survived a thin chain. Counts the bull-put enumeration only, which is what
+    # select_bull_put_pair walks; bear call and condor structures are added by
+    # multi_strategy.scan_extra and are NOT included, so this is a floor, never an inflation.
+    _structures = len(pair_diag.get("enumerated") or [])
     if not pair:
+        _empty = technicals._empty_result(ticker)
+        _empty["structures_considered"] = _structures
         return _avoid(
             "No valid same-expiration credit spread found",
             "NO_VALID_SPREAD",
-            technicals._empty_result(ticker),
+            _empty,
             extra={"pair_selection_diagnostics": pair_diag},
         )
     short_put, long_put, metrics = pair
@@ -586,6 +631,7 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     current_iv = short_put.get("iv") or estimate_current_iv(options, current_price)
     logger.debug(f"[screen] {ticker}: current_iv = {current_iv}")
     tech = technicals.calculate_all(price_data, ticker, current_iv=current_iv, short_strike=short_put["strike"])
+    tech["structures_considered"] = _structures
 
     iv_rank = tech.get("iv_rank", 0)
     iv_rank_method = (tech.get("iv_rank_method") or "").upper()
@@ -1578,6 +1624,7 @@ def run_scan(session_type: str) -> None:
         "session_type": session_type,
         "market_context": market_context,
         "regime": regime,
+        "scan_summary": build_scan_summary(tickers, tech_map, qualified_trades),
         "source_health": source_health,
         "qualified_trades": qualified_trades,
         "rejected_trades": avoided,

@@ -71,6 +71,10 @@ _COPILOT_CTX: dict = {}
 
 VIEWS = ("today", "track", "open", "bitcoin", "history", "lottery")
 IVR_MIN = getattr(config, "MIN_IV_RANK", 45)
+# The two edge-score bands the density funnel and the status ladder both count against.
+# Defined once so the bar, the cards and the engine's scan_summary cannot drift apart.
+HIGH_EDGE = getattr(config, "HIGH_EDGE_SCORE", 65)
+EXCEPTIONAL_EDGE = getattr(config, "EXCEPTIONAL_EDGE_SCORE", 80)
 
 # Component max points for the score composition panel (mirrors edge_calculator).
 # The first six sum to a 100-point base; skew (0-15) and post-earnings (0-5) are
@@ -526,6 +530,9 @@ def load_board():
                 return {"source": "engine", "trades": trades, "asof": d.get("timestamp"),
                         "session": d.get("session_type"),
                         "context": d.get("market_context") or {}, "regime": d.get("regime") or {},
+                        # Absent on boards written before the funnel existed; the bar renders
+                        # nothing rather than guessing a denominator from the row count.
+                        "scan_summary": d.get("scan_summary") or {},
                         "book": d.get("book") or {}, "note": ""}
         except Exception:
             pass
@@ -852,6 +859,9 @@ th.srt .arw{color:var(--green);font-size:9px}
 .lotto .lh{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .lotto .tk{font-size:17px;font-weight:800}
 .lotto .conv{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink3);background:var(--panel3);border-radius:5px;padding:2px 7px}
+/* IV rank chip: cheap options are good news for a buyer, rich ones are the warning. */
+.lotto .conv.cheap{color:var(--green);background:var(--greensoft)}
+.lotto .conv.rich{color:var(--red);background:var(--redsoft)}
 .lotto .conv.hi{color:var(--amber);background:#2a2413}
 .lgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
 @media(max-width:700px){.lgrid{grid-template-columns:repeat(2,1fr)}}
@@ -879,6 +889,22 @@ th.srt .arw{color:var(--green);font-size:9px}
 .mccard.hi{border-color:rgba(60,180,120,.4)}
 .mcmain{display:grid;grid-template-columns:290px 1fr;gap:11px;margin-top:11px;align-items:start}
 @media(max-width:1100px){.mcmain{grid-template-columns:1fr}.mccards{grid-template-columns:1fr 1fr}}
+/* Permanent key for the 0-10 cards — a number nobody can place is no better than a star. */
+.kpikey{display:flex;flex-wrap:wrap;align-items:center;gap:13px;margin-top:7px;font-size:10px;color:var(--ink3)}
+.kpikey .k{text-transform:uppercase;letter-spacing:.07em;font-weight:700;font-size:9px}
+.kpikey i{display:inline-block;width:7px;height:7px;border-radius:99px;margin-right:5px;vertical-align:middle}
+/* Regime read as a band the eye stops on, not body text under four competing cards. */
+.regband{margin:11px 0 0;padding:9px 13px;border-radius:8px;font-size:12px;line-height:1.5;border-left:3px solid var(--ink3);background:var(--panel)}
+.regband.ok{border-left-color:var(--green);background:var(--greensoft)}
+.regband.warn{border-left-color:var(--amber);background:var(--ambersoft)}
+.regband.bad{border-left-color:var(--red);background:var(--redsoft)}
+/* Opportunity-density funnel: the denominator behind the board. */
+.funnel{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:11px;padding:9px 13px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+.funnel .step{display:flex;align-items:baseline;gap:6px}
+.funnel .step b{font-size:15px;font-weight:800}
+.funnel .lb{font-size:10.5px;color:var(--ink3)}
+.funnel .arw{color:var(--ink3);font-size:12px}
+@media(max-width:760px){.mccards{grid-template-columns:1fr}.funnel .step{width:100%}.funnel .arw{display:none}}
 .mcpanel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
 .mcpanel>.hd{font-size:9.5px;color:var(--ink3);text-transform:uppercase;letter-spacing:.07em;font-weight:700;margin-bottom:8px}
 .pbrow{display:block;padding:7px 0;border-bottom:1px solid var(--line2);text-decoration:none;color:inherit;cursor:pointer}
@@ -1485,6 +1511,31 @@ def detail_drawer(c, i, tier):
     return _copilot(c, i, tier, log_form, deep)
 
 
+def _pattern_read(c):
+    """(pattern label, direction) for a card, or (None, None) when the chart was unreadable.
+
+    The shape lives on the entry-timing payload — `structure` there is the chart-pattern dict
+    from analysis.structure, NOT the candidate's own `structure` field, which is the strike
+    string ("100/95P"). Same word, two meanings, one of them a nested dict.
+    """
+    st = ((c.get("entry_timing") or {}).get("structure") or {})
+    pat = st.get("pattern") or st.get("phrase")
+    if not pat:
+        return None, None
+    from analysis.structure import get_pattern_direction
+    return pat, get_pattern_direction(pat)
+
+
+def _thesis_contradiction(c):
+    """The caution string when the chart points against the trade, else None."""
+    _, direction = _pattern_read(c)
+    if not direction:
+        return None
+    from analysis.structure import check_thesis_contradiction
+    strat = c.get("strat_type") or c.get("strategy")
+    return check_thesis_contradiction(direction, strat)
+
+
 def _copilot_why(c):
     """"Why VEGA likes this trade" as plain sentences a person can agree or disagree with.
 
@@ -1550,6 +1601,13 @@ def _copilot_why(c):
              f'consider a smaller size')
     if c.get("already_in_position"):
         warn(f'You already hold {esc(c["ticker"])} — this adds concentration, not diversification')
+    # Chart shape against trade direction. Reuses the concentration warning's mechanism
+    # because it is the same class of fact: nothing here fails a gate, but a bull put under a
+    # chart making lower highs is a conflict the operator should have to look at and dismiss
+    # deliberately rather than never see.
+    contra = _thesis_contradiction(c)
+    if contra:
+        warn(esc(contra))
     if not rows:
         ok('Passed the full qualifying gate set')
     return "".join(rows)
@@ -1571,9 +1629,23 @@ def _copilot(c, i, tier, log_form, deep):
         return (f'<div class="c"><span class="k">{k}</span>'
                 f'<span class="v num"{f" style=color:{col}" if col else ""}>{v}</span></div>')
 
+    # "Win probability" said nothing about WHOSE probability it was. The number has always
+    # been true_pop — VEGA's drift-removed estimate, not the market's — and on a system whose
+    # entire claim is that the market misprices probability, showing one of the two without
+    # naming it is the one ambiguity that cannot be afforded. Both are shown, and the gap
+    # between them IS the claim, so it is displayed rather than left to be worked out.
+    ip = c.get("implied_pop")
+    gap_pp = c.get("edge_pp")                       # already in percentage points
+    if gap_pp is None and tp is not None and ip is not None:
+        gap_pp = (float(tp) - float(ip)) * 100
+    gap_col = ("var(--green)" if gap_pp > 0 else "var(--red)") if gap_pp is not None else ""
+
     nums = ('<div class="copnums">'
             + num("Edge score", f'{sc:.0f}', "var(--green)" if sc >= 80 else "var(--amber)")
-            + num("Win probability", f'{tp*100:.0f}%' if tp is not None else "-")
+            + num("VEGA POP", f'{tp*100:.0f}%' if tp is not None else "-")
+            + num("Market POP", f'{ip*100:.0f}%' if ip is not None else "-")
+            + num("Edge (VEGA &minus; market)",
+                  f'{gap_pp:+.1f}pp' if gap_pp is not None else "-", gap_col)
             + num("Return on capital", f'{roi*100:.0f}%' if roi is not None else "-")
             + num("Credit", f'${c["credit_usd"]:.0f}' if c.get("credit_usd") is not None else "-",
                   "var(--green)")
@@ -1688,7 +1760,7 @@ def _copilot_action(c, log_form):
            f'exp {esc(c.get("exp") or "")}'
            + (f' &middot; {esc(c.get("dte"))} DTE' if c.get("dte") is not None else "")
            + (f' for ${cr:.2f} credit' if cr is not None else ""))
-    return ('<div class="copact"><div><div class="lab">Recommended action</div>'
+    return ('<div class="copact"><div><div class="lab">Recommended setup</div>'
             f'<div class="txt">{txt}</div></div>'
             f'<div class="btns">{log_form}</div></div>')
 
@@ -1936,7 +2008,7 @@ def board_table(trades, tier):
                f'<td class="num">{maxloss_c}</td>'
                f'</tr>'
                f'<tr class="vdetail" id="vd-{i}"><td colspan="8">{detail_drawer(c,i,tier)}</td></tr>')
-    order=[("score","Edge",""),("tpop","Win prob",""),("roc","ROC",""),
+    order=[("score","Edge",""),("tpop","VEGA POP",""),("roc","ROC",""),
            ("credit","Credit",""),("maxloss","Max loss","")]
     def sth(key,label,cls):
         c2=("%s srt"%cls) if cls else "srt"
@@ -1962,12 +2034,19 @@ def _mc_status_cards(board, trades, tier):
     n = len(trades)
     great = sum(1 for t in trades if (t.get("edge_score") or t.get("priority") or 0) >= 80)
     elite = sum(1 for t in trades if (t.get("edge_score") or 0) >= 90)
+    solid = sum(1 for t in trades if (t.get("edge_score") or t.get("priority") or 0) >= HIGH_EDGE)
     suppressed = (board.get("regime") or {}).get("trade_suppressed")
     good = n > 0 and (great or elite) and not suppressed
 
     # Headline and sub-line have to agree. Computed independently they contradicted each
     # other on 2026-08-05: a suppressed low-vol regime read "Stand Aside" over "High
     # conviction setup", because the sub only looked at whether an elite score existed.
+    #
+    # "Stand Aside" is reserved for the two cases that genuinely mean take no trade today —
+    # nothing qualified, or the regime forbids new risk. It must never appear over a board
+    # that is simultaneously recommending a setup, which is what made the word read as a
+    # contradiction rather than an instruction. Everything between that and a clear green
+    # light is graded, not binary: Selective (thin) → Cautious (workable) → Sell Premium.
     if suppressed:
         call, call_sub = "Stand Aside", "Regime suppresses new risk"
     elif n == 0:
@@ -1975,6 +2054,9 @@ def _mc_status_cards(board, trades, tier):
     elif good:
         call = "Sell Premium"
         call_sub = "High conviction setup" if elite else f"{n} qualified &middot; {great} great"
+    elif n >= 5 and solid:
+        call = "Cautious"
+        call_sub = f"{n} qualified &middot; {solid} above {HIGH_EDGE} &middot; none scoring 80+"
     else:
         call, call_sub = "Selective", f"{n} qualified &middot; none scoring 80+"
 
@@ -1986,14 +2068,23 @@ def _mc_status_cards(board, trades, tier):
                else esc(vix.get("label") or "-"))
     reg_col = "var(--amber)" if suppressed else "var(--green)"
 
-    stars = min(5, max(0, great + 1)) if n else 0
-    prem_lab = ("Excellent" if stars >= 5 else "Good" if stars >= 4 else
-                "Fair" if stars >= 3 else "Thin")
+    # Premium environment on the same 0-10 scale as everything else. Stars were decoration:
+    # min(5, great+1) meant a board with one 80+ setup and a board with four both printed
+    # four stars, and a star carries no unit the reader can check. The number is derived from
+    # the same count, but it can be compared to the legend and to yesterday.
+    prem = min(10.0, (great * 2.0) + (solid * 0.5) + (1.0 if n else 0.0)) if n else 0.0
+    prem_lab = ("Excellent" if prem >= 8 else "Good" if prem >= 6.5 else
+                "Fair" if prem >= 5 else "Thin")
+    # The VRP the label is asserting, so "Thin" has a number behind it rather than a mood.
+    vrps = [t.get("vrp") for t in trades if t.get("vrp") is not None]
+    best_vrp = max(vrps) if vrps else None
+    prem_sub = (f'VRP {best_vrp:+.1f}pp &middot; {prem_lab}' if best_vrp is not None
+                else esc(prem_lab))
 
     top = max((t.get("edge_score") or t.get("priority") or 0) for t in trades) if trades else 0
     edge_lab = ("Very high" if top >= 90 else "High" if top >= 80 else
                 "Moderate" if top >= 70 else "Low")
-    edge_col = "var(--green)" if top >= 80 else ("var(--amber)" if top >= 70 else "var(--ink2)")
+    edge_col = _band_color(top / 10.0)
 
     return (
         '<div class="mccards">'
@@ -2004,12 +2095,57 @@ def _mc_status_cards(board, trades, tier):
         f'<div class="big" style="font-size:15px;color:{reg_col}">{esc(flag)}</div>'
         f'<div class="sub">{vix_sub}</div></div>'
         f'<div class="mccard"><div class="lab">Premium environment</div>'
-        f'<div class="big" style="color:var(--amber);font-size:17px">{"&#9733;"*stars}{"&#9734;"*(5-stars)}</div>'
-        f'<div class="sub">{prem_lab}</div></div>'
+        f'<div class="big num" style="color:{_band_color(prem)}">{prem:.1f}</div>'
+        f'<div class="sub">{prem_sub}</div></div>'
         f'<div class="mccard"><div class="lab">Edge score</div>'
         f'<div class="big num" style="color:{edge_col}">{top:.0f}</div>'
         f'<div class="sub">{edge_lab}</div></div>'
-        '</div>')
+        '</div>'
+        + _kpi_legend())
+
+
+def _band_color(v):
+    """Shared 0-10 banding. One scale across every KPI card, so the legend decodes all of them."""
+    return ("var(--green)" if v >= 7 else "var(--amber)" if v >= 5 else "var(--red)")
+
+
+def _kpi_legend():
+    """Permanently visible key for the 0-10 cards. A number the reader cannot place is
+    no better than the stars it replaced, and a tooltip is not visible at the moment of
+    reading. Colour-matched to the bands it names."""
+    return ('<div class="kpikey"><span class="k">Score guide</span>'
+            '<span><i style="background:var(--red)"></i>0&ndash;4 Unfavorable</span>'
+            '<span><i style="background:var(--amber)"></i>5&ndash;6 Neutral</span>'
+            '<span><i style="background:var(--green)"></i>7&ndash;10 Favorable</span></div>')
+
+
+def _mc_density_bar(board, trades):
+    """The opportunity-density funnel (scan_summary from the engine).
+
+    Five setups on a board is uninterpretable without the denominator: it reads the same
+    whether they are the best five of two thousand or the only five a thin session could
+    build. This renders the engine's own counts and nothing else — when the artifact carries
+    no scan_summary (fast rescan, or a board written before the field existed) it renders
+    nothing at all rather than inventing a total from the row count.
+    """
+    s = board.get("scan_summary") or {}
+    scanned = s.get("total_scanned")
+    if not scanned:
+        return ""
+    qual = s.get("total_qualified", len(trades))
+    high = s.get("high_edge_count", 0)
+    exc = s.get("exceptional_count", 0)
+    tk = s.get("tickers_scanned")
+    tk_note = f" across {tk} tickers" if tk else ""
+    steps = [(f"{scanned:,}", f"structures scanned{tk_note}", "var(--ink3)"),
+             (f"{qual:,}", "qualified", "var(--ink)"),
+             (f"{high:,}", f"high edge (&ge;{HIGH_EDGE})", "var(--amber)"),
+             (f"{exc:,}", f"exceptional (&ge;{EXCEPTIONAL_EDGE})", "var(--green)")]
+    cells = '<span class="arw">&rarr;</span>'.join(
+        f'<span class="step"><b class="num" style="color:{col}">{val}</b>'
+        f'<span class="lb">{lab}</span></span>' for val, lab, col in steps)
+    return (f'<div class="funnel" title="Bull-put structures the engine enumerated this scan. '
+            f'Bear call and condor structures are not counted, so this is a floor.">{cells}</div>')
 
 
 def _mc_playbook(trades):
@@ -2169,9 +2305,14 @@ def view_today(board, s, tier):
                  'Option quotes are not being maintained, so the bid-ask widens and the '
                  'fillable credit cannot be measured. Credits below are modelled from the mid '
                  'and are for review, not execution. Re-check at the open before trading.</div>')
-    reg_note = (board.get("regime") or {}).get("regime_note")
-    reg_html = (f'<div class="lwhy" style="margin:11px 0 0">{esc(reg_note)}</div>'
-                if reg_note else "")
+    # The regime read decides whether to trade at all, so it gets a band the eye stops on
+    # rather than a line of body text below four cards competing for the same attention.
+    reg = board.get("regime") or {}
+    reg_note = reg.get("regime_note")
+    _tone = ("bad" if (reg.get("trade_suppressed") or not trades)
+             else "ok" if any((t.get("edge_score") or 0) >= EXCEPTIONAL_EDGE for t in trades)
+             else "warn")
+    reg_html = (f'<div class="regband {_tone}">{esc(reg_note)}</div>' if reg_note else "")
     return (
         '<div class="mcbar"><span class="ttl">Mission Control</span>'
         f'<span class="meta">Data as of {esc(fresh_label)}</span>'
@@ -2179,6 +2320,7 @@ def view_today(board, s, tier):
         '<div class="mcwrap">'
         + _mc_status_cards(board, trades, tier)
         + reg_html
+        + _mc_density_bar(board, trades)
         + prov
         + '<div class="mcmain">'
         + _mc_playbook(trades)
@@ -2623,6 +2765,21 @@ def _lottery_card(x):
     rsi=_f(x.get("rsi")); sup=_f(x.get("nearest_support")); trend=esc(x.get("trend") or "")
     prob=f"{delta*100:.0f}%" if delta is not None else "-"
     mult_txt=(f"{mult:.0f}x" if mult else "-")
+    # A multiple is a ratio, not an amount: "3x" reads the same on a $62 ticket and a $389
+    # one, and the question the buyer is actually asking is whether the payout is worth the
+    # effort. Lead with the dollars and keep the multiple as the explanation.
+    tgt_usd=(prem*mult) if (prem is not None and mult) else None
+    tgt_txt=(f"${tgt_usd:,.0f}" if tgt_usd is not None else mult_txt)
+    tgt_sub=(f"{mult:.0f}x if ${tgt_px:,.0f}" if (mult and tgt_px) else "-")
+    # IV rank replaces the conviction chip when it is known. Conviction was amber "HIGH" on
+    # nearly every card, and a badge that never varies is decoration; IV rank varies and it
+    # is the fact that decides whether the buyer is overpaying for the move they need.
+    ivr=_f(x.get("iv_rank"))
+    if ivr is not None:
+        chip_txt=f"IV rank {ivr:.0f}"
+        chip_cls=("cheap" if ivr <= 30 else "rich" if ivr >= 70 else "")
+    else:
+        chip_txt=esc(conv or "SPEC"); chip_cls=("hi" if conv=="HIGH" else "")
     # Prefer the generator's per-ticker signals (spec §5.5). Fall back to a small
     # tech summary only when signals are absent (older lottery_latest.json).
     signals=[s for s in (x.get("signals") or []) if s]
@@ -2638,11 +2795,13 @@ def _lottery_card(x):
         '<div class="lotto">'
         f'<div class="lh"><div><span class="tchip" title="Long call">CALL</span> <b class="tk">{tk}</b>'
         f'<span class="dim"> ${price:.2f}</span></div>'
-        f'<div class="conv {"hi" if conv=="HIGH" else ""}">{esc(conv or "SPEC")}</div></div>'
+        f'<div class="conv {chip_cls}" title="Where implied vol sits against its own past year. '
+        f'A call bought at a high IV rank needs a bigger move to overcome the premium paid.">'
+        f'{chip_txt}</div></div>'
         f'<div class="lgrid">'
         f'<div><div class="cap">Buy</div><div class="v">{strike:g} C</div><div class="dim">{esc(x.get("expiration"))} · {esc(dte)}d</div></div>'
         f'<div><div class="cap">Cost / max loss</div><div class="v neg">${(prem or 0):.0f}</div><div class="dim">${(prem_ps or 0):.2f}/sh</div></div>'
-        f'<div><div class="cap">Home-run</div><div class="v pos">{mult_txt}</div><div class="dim">if ${(tgt_px or 0):.0f}</div></div>'
+        f'<div><div class="cap">Target</div><div class="v pos">{tgt_txt}</div><div class="dim">{tgt_sub}</div></div>'
         f'<div><div class="cap">Breakeven move</div><div class="v">{(bemv or 0):+.1f}%</div><div class="dim">to ${(be or 0):.2f}</div></div>'
         f'<div><div class="cap">Prob ITM (Δ)</div><div class="v">{prob}</div><div class="dim">IV {(iv*100 if iv and iv<3 else iv) or 0:.0f}%</div></div>'
         f'</div>'
@@ -2660,14 +2819,14 @@ def view_lottery():
             'high-variance bet. Max loss is 100% of the premium paid. This is NOT the defined-risk premium-selling '
             'edge; it is a capped-cost home-run swing for specific momentum/reversal conditions. Size tiny.</div>')
     if not d or not (d.get("lottery_calls") or []):
-        return ('<h1>Lottery tickets</h1><p class="q">High-variance single-call swings, capped cost.</p>'
+        return ('<h1>Asymmetry plays</h1><p class="q">High-variance single-call swings. Capped cost.</p>'
                 + banner +
                 '<div class="empty">No lottery candidates right now. The lottery scanner (lottery_scanner.py) '
                 'runs separately and only surfaces setups in specific conditions (oversold-at-support bounce or '
                 'confirmed momentum breakout with catalyst). Run it on the tower to populate this view.</div>')
     asof=esc(d.get("timestamp") or "")
     cards="".join(_lottery_card(x) for x in d["lottery_calls"])
-    return ('<h1>Lottery tickets</h1><p class="q">High-variance single-call swings, capped cost &middot; as-of '
+    return ('<h1>Asymmetry plays</h1><p class="q">High-variance single-call swings. Capped cost &middot; as-of '
             + asof + '</p>' + banner + f'<div class="lottowrap">{cards}</div>')
 
 
@@ -3150,7 +3309,7 @@ def view_bitcoin():
         from analysis import btc_signal, btc_forecast as bf
         from analysis import predictions as pred
     except Exception as e:
-        return f'<h2>Bitcoin</h2><div class="empty">Crypto layer unavailable: {esc(str(e))}</div>'
+        return f'<h2>Crypto research</h2><div class="empty">Crypto layer unavailable: {esc(str(e))}</div>'
 
     intro = ('<p class="q">What is tradeable on the BTC proxies right now, and does Bitcoin\'s own '
              'options market justify it?</p>')
@@ -3264,7 +3423,7 @@ def view_bitcoin():
     # worth taking, which makes it context for the table rather than a substitute for it.
     tradeable = (f'<h2 style="margin-top:4px">Tradeable now — BTC proxies</h2>'
                  f'{_btc_candidates_block()}')
-    return (f'<h1>Bitcoin</h1>{intro}{tradeable}'
+    return (f'<h1>Crypto research</h1>{intro}{tradeable}'
             f'<h2 style="margin-top:22px">Why — what Bitcoin\'s own market is pricing</h2>'
             f'{head}{tiles}{xv}{fc_block}{foot}')
 
@@ -3279,7 +3438,7 @@ def _btc_card(label, value, sub, color=None):
 def nav(view):
     links = ""
     labels = {"today": "Today", "track": "Track Record", "open": "Open",
-              "bitcoin": "Bitcoin", "history": "History", "lottery": "Lottery"}
+              "bitcoin": "Research", "history": "History", "lottery": "Asymmetry"}
     for v in VIEWS:
         links += f'<a class="{"on" if v == view else ""}" href="/?view={v}">{labels[v]}</a>'
     is_open, _ = market_status()

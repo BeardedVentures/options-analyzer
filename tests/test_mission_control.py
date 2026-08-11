@@ -213,7 +213,9 @@ def test_every_row_gets_a_copilot_drawer():
     if rows:
         assert h.count("VEGA recommendation") == rows
         assert h.count("Why VEGA likes this trade") == rows
-        assert h.count("Recommended action") == rows
+        # "Setup", not "action": VEGA hands the operator a trade to construct, it does not
+        # issue an instruction. The distinction is the whole decision-support framing.
+        assert h.count("Recommended setup") == rows
 
 
 def test_deep_metrics_are_behind_progressive_disclosure():

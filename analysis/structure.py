@@ -54,6 +54,95 @@ HH_LL = "BROADENING"       # widening swings — unstable
 FLAT  = "FLAT"
 
 
+# ── Directional reading of a pattern ────────────────────────────────────────────
+BULLISH = "BULLISH"
+BEARISH = "BEARISH"
+NEUTRAL = "NEUTRAL"
+
+# One entry per label this module can actually emit — see the nine constants above.
+# Keying this on textbook pattern names ('cup and handle', 'ascending triangle',
+# 'evening star') would be a map over a vocabulary no detector produces: every lookup
+# would miss and every setup would read NEUTRAL, which is indistinguishable from working.
+# Nothing is added here until _classify can return it.
+PATTERN_DIRECTION: Dict[str, Optional[str]] = {
+    BULL_FLAG:        BULLISH,   # pause inside an advance — the advance is the thesis
+    DOUBLE_BOTTOM:    BULLISH,   # second trough held
+    UPTREND_EXTENDED: BULLISH,   # still advancing, though stretched
+    BEAR_FLAG:        BEARISH,   # pause inside a decline
+    DOUBLE_TOP:       BEARISH,   # second peak rejected
+    DOWNTREND:        BEARISH,
+    RANGE:            NEUTRAL,   # no directional structure by definition
+    PULLBACK:         NEUTRAL,   # a retracement with no clean shape reads either way
+    UNREADABLE:       None,      # not "neutral" — unknown. Absence is not a negative.
+}
+
+# Which way a strategy needs the underlying to go. Bull puts and long calls are hurt by a
+# fall, bear calls by a rise; a condor is hurt by either, so it contradicts nothing.
+STRATEGY_DIRECTION: Dict[str, str] = {
+    "bull_put_spread": BULLISH,
+    "bull_put":        BULLISH,
+    "bear_call_spread": BEARISH,
+    "bear_call":        BEARISH,
+    "iron_condor":     NEUTRAL,
+    "long_call":       BULLISH,
+    "lottery_call":    BULLISH,
+}
+
+
+def get_pattern_direction(pattern: Optional[str]) -> Optional[str]:
+    """BULLISH / BEARISH / NEUTRAL for a pattern label, or None when unknown.
+
+    Accepts either a label constant (`DOUBLE_BOTTOM`) or the human phrase this module
+    renders from it ("second trough of a double bottom") — the UI carries the phrase, the
+    candidate dict carries the label, and both call this.
+
+    Returns None rather than NEUTRAL for UNREADABLE and for anything unrecognised: a caller
+    deciding whether to raise a contradiction flag must be able to tell "the chart says
+    nothing directional" from "we could not read the chart". Collapsing those two would let
+    a data gap silently clear a check that exists to catch a real conflict.
+    """
+    if not pattern:
+        return None
+    key = str(pattern).strip().upper().replace(" ", "_").replace("-", "_")
+    if key in PATTERN_DIRECTION:
+        return PATTERN_DIRECTION[key]
+    # Phrase form: match on the pattern words _phrase() builds from, longest first so
+    # "double bottom" is not shadowed by a shorter substring of another label.
+    text = str(pattern).lower()
+    for label, words in sorted(_PATTERN_WORDS.items(),
+                               key=lambda kv: len(kv[1]), reverse=True):
+        stem = words.split(" ", 1)[-1]           # "a bull flag" → "bull flag"
+        if stem in text:
+            return PATTERN_DIRECTION.get(label)
+    if "downtrend" in text:                       # _phrase() renders this as "in a downtrend"
+        return BEARISH
+    return None
+
+
+def check_thesis_contradiction(pattern_direction: Optional[str],
+                               strategy: Optional[str]) -> Optional[str]:
+    """The caution string when the chart points against the trade, else None.
+
+    Fails OPEN: an unknown pattern, an unknown strategy, or a NEUTRAL on either side
+    produces no flag. A warning invented from missing data trains the operator to ignore
+    warnings, which costs more than the one it would have caught.
+    """
+    # Accepts the machine key ("bull_put_spread") and the display label the board carries
+    # ("Bull Put Spread") — the candidate dict holds one or the other depending on path.
+    key = str(strategy or "").strip().lower().replace(" ", "_").replace("-", "_")
+    strat_dir = STRATEGY_DIRECTION.get(key)
+    if pattern_direction not in (BULLISH, BEARISH):
+        return None
+    if strat_dir not in (BULLISH, BEARISH):
+        return None
+    if pattern_direction == strat_dir:
+        return None
+    chart = "bullish" if pattern_direction == BULLISH else "bearish"
+    need = "a fall" if strat_dir == BEARISH else "a rise"
+    return (f"Chart structure reads {chart}, but this trade is hurt by {need} "
+            f"— the setup and the pattern disagree.")
+
+
 def _cfg(name: str, default):
     return getattr(config, name, default)
 
