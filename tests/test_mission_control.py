@@ -334,14 +334,14 @@ def test_the_btc_board_reads_the_same_snapshot_the_robot_trades_from():
     """A board showing one engine's output while the desk opens from another is the two-engine
     divergence this codebase has fought four enforcement leaks over."""
     import inspect
-    src = inspect.getsource(vega_app._btc_candidates_block)
+    src = inspect.getsource(vega_app._tradeable_block)
     assert "_latest_candidates" in src
     assert "natural_credit" in src, "credit must be the fillable basis, not the mid"
 
 
 def test_the_btc_board_degrades_without_a_snapshot(monkeypatch):
     monkeypatch.setattr(vega_app, "_latest_candidates", lambda: (None, None))
-    assert "No candidate snapshot" in _txt(vega_app._btc_candidates_block())
+    assert "No candidate snapshot" in _txt(vega_app._tradeable_block("IBIT"))
 
 
 def test_a_modelled_after_hours_price_is_never_shown_as_fillable():

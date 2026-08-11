@@ -234,6 +234,24 @@ def _btc_cross_venue(ctx: Dict) -> Dict:
         return {"available": False, "reading": "unavailable", "note": str(e)[:120]}
 
 
+def _fetch_reference(sig: str):
+    """One reference value by its declared signal key, from whichever venue publishes it.
+
+    Both families are handled. Routing only the published indices here left ETHA — declared
+    enabled in the same commit, with a working Deribit feed — permanently `available: False`
+    in the scan path, reporting a transient-sounding outage for a number that was one call
+    away. A registry that silently covers half its own config is worse than one that covers
+    none, because the half it drops still looks configured.
+    """
+    sig = (sig or "").upper()
+    dvol_currency = {"BTC_DVOL": "BTC", "ETH_DVOL": "ETH"}.get(sig)
+    if dvol_currency:
+        from data import crypto
+        return crypto.get_dvol(currency=dvol_currency)
+    from data import vol_indices
+    return vol_indices.get_index(sig) if sig in vol_indices.SOURCES else None
+
+
 def _cross_venue_read(ctx: Dict) -> Dict:
     """Generalised cross-venue read for any underlying that DECLARES a reference.
 
@@ -264,11 +282,7 @@ def _cross_venue_read(ctx: Dict) -> Dict:
 
         sig = cv["ref_signal"]
         if sig not in ctx:
-            from data import vol_indices
-            # Only the published-index sources are fetchable here. A DVOL reference on a
-            # non-BTC-proxy name would need a crypto snapshot, and no such asset exists today —
-            # when one does it lands as None and reads as absence, not as a wrong number.
-            ctx[sig] = vol_indices.get_index(sig) if sig in vol_indices.SOURCES else None
+            ctx[sig] = _fetch_reference(sig)
 
         from analysis import cross_venue
         return cross_venue.evaluate(ticker, iv, ctx)

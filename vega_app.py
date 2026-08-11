@@ -3561,77 +3561,6 @@ def _gate_value_block() -> str:
             f'indicator, not a loss, and the sample is the top 3 candidates per ticker.</div>')
 
 
-def _btc_candidates_block() -> str:
-    """The spreads actually available on the BTC-proxy names, with their gate results.
-
-    This page was a readout: BTC spot, DVOL, realised vol, the cross-venue gap, and how the
-    daily direction claim is grading. Every number on it was true and none of it led anywhere —
-    the page about Bitcoin contained no Bitcoin trade you could take, while IBIT was passing all
-    eleven gates in the same scan the rest of the app was reading.
-
-    The volatility research below is the reason a trade here might be worth taking. It belongs
-    under the trades it justifies, not instead of them.
-    """
-    proxies = {t.upper() for t in getattr(config, "BTC_PROXY_TICKERS", {"IBIT"})}
-    try:
-        data, path = _latest_candidates()
-    except Exception as e:
-        return f'<div class="empty">Candidate snapshot unavailable: {esc(str(e))}</div>'
-    if not data:
-        return ('<div class="empty">No candidate snapshot yet — run a scan and the tradeable '
-                'BTC-proxy spreads will appear here.</div>')
-
-    cands = []
-    for row in data.get("rows") or []:
-        if str(row.get("ticker") or "").upper() not in proxies:
-            continue
-        for c in row.get("candidates") or []:
-            cands.append(c)
-    if not cands:
-        return (f'<div class="empty">Nothing tradeable on {esc(", ".join(sorted(proxies)))} in the '
-                f'latest scan — no spread in the delta band survived the chain filter.</div>')
-
-    cands.sort(key=lambda c: (c.get("gates_passed") or 0, c.get("score") or 0), reverse=True)
-    rows_html = ""
-    for c in cands[:6]:
-        gp, gt = c.get("gates_passed") or 0, c.get("gates_total") or 0
-        failed = [k for k, v in (c.get("gates") or {}).items() if not v]
-        ok = gp == gt and gt
-        gcls = "gpass" if ok else "gwarn"
-        why = ("passes every gate" if ok else "blocked by " + ", ".join(f.replace("_", " ")
-                                                                       for f in failed[:3]))
-        tp = c.get("true_pop")
-        # The edge claim itself. The table showed VEGA's POP but never the market's, so the
-        # one number that says WHY the spread is worth selling — the gap the whole engine
-        # exists to find — was the one column missing from the page listing the trades.
-        gap = c.get("pop_gap")
-        if gap is None and tp is not None and c.get("pop_implied") is not None:
-            gap = float(tp) - float(c["pop_implied"])
-        gtxt = f'{gap*100:+.1f}pp' if gap is not None else "—"
-        gcol = ("var(--green)" if gap > 0 else "var(--red)") if gap is not None else "var(--ink3)"
-        rows_html += (
-            f'<tr><td class="l"><b>{esc(c.get("ticker"))}</b> '
-            f'<span class="num">{c.get("short_strike"):g}/{c.get("long_strike"):g}</span> '
-            f'<span class="dim">{esc(str(c.get("expiration"))[:10])} · {c.get("dte")}d</span></td>'
-            f'<td class="num">${(c.get("natural_credit_usd") or 0):.0f}</td>'
-            f'<td class="num">{(c.get("natural_credit_to_width") or 0)*100:.0f}%</td>'
-            f'<td class="num">{abs(c.get("short_delta") or 0):.2f}</td>'
-            f'<td class="num">{f"{tp*100:.0f}%" if tp is not None else "—"}</td>'
-            f'<td class="num" style="color:{gcol}">{gtxt}</td>'
-            f'<td class="num">${(c.get("max_loss_usd") or 0):.0f}</td>'
-            f'<td class="{gcls}">{gp}/{gt}</td>'
-            f'<td class="l dim">{esc(why)}</td></tr>')
-
-    stamp = (data.get("meta") or {}).get("stamp") or ""
-    return (f'<table class="gtbl"><thead><tr><th class="l">Spread</th><th>Credit</th>'
-            f'<th>cr/w</th><th>&Delta;</th><th title="The drift-removed probability of profit VEGA computes">VEGA POP</th><th title="VEGA POP minus the market-implied POP (1-delta). Positive means VEGA sees the trade as more likely to work than the market is pricing.">Edge</th><th>Max risk</th><th>Gates</th>'
-            f'<th class="l">Reading</th></tr></thead><tbody>{rows_html}</tbody></table>'
-            f'<div class="dim" style="font-size:11px;margin-top:4px">'
-            f'Natural credit — sell the bid, buy the ask, which is what a fill actually pays. '
-            f'From the same snapshot the auto-trader opens from ({esc(stamp)}). '
-            f'Max risk is per contract; size it to your own budget.</div>')
-
-
 # Per-asset glyphs for the block headers. Absent is fine — the header just carries the ticker.
 _ASSET_ICONS = {"IBIT": "&#8383;", "ETHA": "&#926;", "SOLZ": "&#9678;",
                 "GLD": "&#9679;", "GDX": "&#9935;", "TLT": "&#8362;"}
@@ -3803,11 +3732,14 @@ def _asset_block(ticker, ctx):
     else:
         gap = x["gap_pp"]
         floor = x["noise_floor_pp"] or 0
-        # Colour on the READING, not the sign. A quality-check gap is not good or bad news,
-        # and painting it green because it happens to be negative would invite it to be read
-        # as an edge, which is the one thing it never is.
-        cls = {"etf_rich": "pos", "etf_cheap": "neg",
-               "quality_check": "dim", "aligned": "dim"}.get(x["reading"], "dim")
+        # Colour on the READING, not the sign — and only where the gap is a like-for-like
+        # comparison. GDX sits 10-15pp above GVZ permanently, because GVZ prices bullion and
+        # GDX is a levered equity claim on it; that spread is real information but it is not a
+        # seller's edge, and a green badge parked on it every single day beside a note saying
+        # "not a mispricing of either" is the badge people believe. Any derived reference —
+        # self-derived or cross-asset — renders neutral.
+        cls = ("dim" if x["derived_from"] else
+               {"etf_rich": "pos", "etf_cheap": "neg"}.get(x["reading"], "dim"))
         asof = (f' <span class="dim">as of {esc(x["ref_asof"])}</span>'
                 if x.get("ref_asof") else "")
         gap_html = (
@@ -3905,7 +3837,9 @@ def view_bitcoin():
         return f'<h2>Crypto research</h2><div class="empty">Crypto layer unavailable: {esc(str(e))}</div>'
 
     intro = ('<p class="q">What is tradeable on these names right now, and does the underlying '
-             'asset\'s own options market justify it?</p>')
+             'asset\'s own options market justify it? One block per asset that DECLARES a '
+             'volatility reference — crypto against Deribit\'s DVOL, gold against CBOE\'s '
+             'GVZ.</p>')
 
     # ── One block per declared asset, looped from config ──────────────────────
     # This page used to be BTC and nothing else: one snapshot, one proxy set, one hardcoded
@@ -3913,7 +3847,6 @@ def view_bitcoin():
     # config entry rather than a second copy of this view — and a copy is exactly where one
     # asset's noise floor silently becomes another's.
     ctx = _cross_venue_ctx()
-    head, tiles = "", ""
     xv = "".join(_asset_block(tk, ctx) for tk in tp.cross_venue_tickers())
 
     # ── The forecast ledger ──
@@ -3990,17 +3923,22 @@ def view_bitcoin():
                     f'<th class="l">Note</th></tr></thead><tbody>{crows}</tbody></table></div>')
 
     foot = ('<div class="foot">All data here is free and unauthenticated: Deribit publishes DVOL '
-            '(BTC 30-day implied vol) and its spot index; Coinbase serves daily candles. No broker '
-            'is connected and no crypto order can be placed from this system. CBOE\'s GVZ comes '
-            'from FRED. The cross-venue gap never enters the gates dict, so it cannot block or '
-            'force a trade whatever it reads. Noise floors are DECLARED per asset and never '
-            'shared — BTC\'s ordinary venue basis would be a large move in gold. A reference '
-            'older than three days is discarded rather than shown, because a gap is a '
-            'subtraction and will happily produce a confident number from a stale operand.</div>')
+            '(30-day implied vol) and a spot index per currency; Coinbase serves daily candles; '
+            'CBOE\'s GVZ comes from FRED. No broker is connected and no crypto order can be '
+            'placed from this system. The cross-venue gap never enters the gates dict, so it '
+            'cannot block or force a trade whatever it reads. Noise floors are DECLARED per '
+            'asset and never shared — BTC\'s ordinary venue basis would be a large move in '
+            'gold. A reference older than three days is discarded rather than shown, because a '
+            'gap is a subtraction and will happily produce a confident number from a stale '
+            'operand.</div>')
     # Trades and research per asset, interleaved by _asset_block: the vol read is the REASON a
     # spread on that name might be worth taking, so it belongs beside those spreads rather than
     # in a separate section the reader has to hold two pages of context to connect.
-    return f'<h1>Crypto research</h1>{intro}{head}{tiles}{xv}{fc_block}{foot}'
+    #
+    # Titled for what it now holds. "Crypto research" was accurate when the page was BTC and
+    # nothing else; with gold and rates blocks under it, a crypto-only heading over a GVZ card
+    # is the same category error as a shared noise floor.
+    return f'<h1>Research — cross-venue volatility</h1>{intro}{xv}{fc_block}{foot}'
 
 
 def _btc_card(label, value, sub, color=None):

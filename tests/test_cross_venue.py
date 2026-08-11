@@ -285,12 +285,92 @@ def test_trades_come_before_the_research_within_each_block():
     assert txt.index("Tradeable now") < txt.index("Cross-venue volatility")
 
 
-def test_the_render_loop_covers_every_declared_asset():
+def test_the_render_loop_covers_every_declared_asset(monkeypatch):
     """Adding an asset must stay a config change. A hardcoded list in the view is how the
-    second asset diverges from the first."""
+    second asset diverges from the first.
+
+    Offline: the unmocked view fetches Deribit, Coinbase, FRED and four option chains, which
+    makes a unit test depend on six third-party services being up.
+    """
     import inspect
     src = inspect.getsource(vega_app.view_bitcoin)
     assert "cross_venue_tickers" in src
-    html = vega_app.view_bitcoin()
+
+    monkeypatch.setattr(vega_app, "_cross_venue_ctx", lambda: {"BTC_DVOL": 35.9})
+    monkeypatch.setattr(vega_app, "_tradeable_block", lambda tk: "")
+    html = "".join(vega_app._asset_block(tk, {"BTC_DVOL": 35.9})
+                   for tk in tp.cross_venue_tickers())
     for tk in tp.cross_venue_tickers():
         assert tk in html, f"{tk} is declared but never rendered"
+
+
+def test_a_failed_iv_estimate_is_not_a_full_width_gap():
+    """`technicals.estimate_atm_iv` returns 0.0 as its "no honest estimate" sentinel, and both
+    callers pass its output straight in. Accepting it turned a failed reconstruction into a gap
+    equal to the whole reference — GDX read "+27.9pp ETF CHEAP" off an IV of zero, narrated
+    with complete confidence."""
+    out = cv.evaluate("GDX", 0.0, CTX)
+    assert out["available"] is False
+    assert out["gap_pp"] is None
+
+
+def test_a_non_positive_reference_is_refused_too():
+    assert cv.evaluate("IBIT", 0.32, {"BTC_DVOL": 0.0})["available"] is False
+    assert cv.evaluate("IBIT", 0.32, {"BTC_DVOL": -5})["available"] is False
+
+
+def test_a_derived_reference_never_gets_a_directional_badge():
+    """GDX sits 10-15pp above GVZ permanently, because GVZ prices bullion and GDX is a levered
+    equity claim on it. A green seller's-edge badge parked on that every day, beside a note
+    saying it is "not a mispricing of either", is the badge people believe."""
+    ctx = {"GVZ": {"value": 27.9, "asof": "2026-08-10", "age_days": 1}}
+    html = vega_app._asset_block("GDX", ctx)
+    if "Gap" in html:
+        seg = html[html.index("Gap"):html.index("Gap") + 400]
+        assert 'class="num pos"' not in seg and 'class="num neg"' not in seg
+
+
+def test_a_dead_source_is_cached_so_it_is_not_re_fetched(monkeypatch):
+    """A cached failure and a cache miss are different states. Returning None for both meant a
+    dead source was re-fetched on every call — the anti-hammer TTL applied only to the path
+    that did not need it."""
+    calls = []
+    monkeypatch.setattr(vi, "_fred", lambda s: calls.append(s) or None)
+    monkeypatch.setattr(vi, "_yahoo", lambda s: None)
+    for _ in range(3):
+        assert vi.get_index("GVZ") is None
+    assert len(calls) == 1, f"dead source fetched {len(calls)} times"
+
+
+def test_a_nan_close_is_refused(monkeypatch):
+    """NaN survives every comparison it meets: the age check passes it, abs(nan) < floor is
+    False so it never reads aligned, nan > 0 is False so it reads ETF_RICH, and the card
+    renders "nanpp"."""
+    from datetime import date
+    monkeypatch.setattr(vi, "_fred", lambda s: None)
+    monkeypatch.setattr(vi, "_yahoo", lambda s: {"value": float("nan"),
+                                                 "asof": date.today().isoformat(),
+                                                 "source": "Yahoo"})
+    # Asserted against get_index, not against _yahoo: the guard has to hold at the boundary
+    # every source converges on, or the next source added reopens the hole.
+    assert vi.get_index("GVZ") is None
+
+
+def test_a_non_positive_index_value_is_refused(monkeypatch):
+    from datetime import date
+    monkeypatch.setattr(vi, "_fred", lambda s: {"value": 0.0, "asof": date.today().isoformat(),
+                                                "source": "FRED"})
+    monkeypatch.setattr(vi, "_yahoo", lambda s: None)
+    assert vi.get_index("GVZ") is None
+
+
+def test_the_scan_path_fetches_a_dvol_reference_too(monkeypatch):
+    """ETHA is declared enabled with a working Deribit feed. Routing only the published indices
+    left it permanently unavailable in the scan, reporting a transient-sounding outage for a
+    number one call away — a registry that silently covers half its own config."""
+    from analysis import assessment as A
+    from data import crypto
+    monkeypatch.setattr(crypto, "get_dvol", lambda currency="BTC": 49.4)
+    assert A._fetch_reference("ETH_DVOL") == 49.4
+    out = A._cross_venue_read({"ticker": "ETHA", "atm_iv": 0.46})
+    assert out["available"] is True and out["ref_pp"] == pytest.approx(49.4)

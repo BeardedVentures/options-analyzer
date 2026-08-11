@@ -57,11 +57,17 @@ _CACHE: Dict[str, Dict] = {}
 _CACHE_TTL = 900          # 15 min — these indices print once a day; this is only anti-hammer
 
 
-def _cached(key: str) -> Optional[Dict]:
+# A cached failure and a cache miss are different states, and returning None for both meant a
+# dead source was re-fetched on every single call — the anti-hammer TTL applied only to the
+# path that did not need it.
+_MISS = object()
+
+
+def _cached(key: str):
     hit = _CACHE.get(key)
     if hit and (time.time() - hit["at"]) < _CACHE_TTL:
         return hit["value"]
-    return None
+    return _MISS
 
 
 def _store(key: str, value: Optional[Dict]) -> Optional[Dict]:
@@ -106,7 +112,13 @@ def _yahoo(symbol: str) -> Optional[Dict]:
         hist = yf.Ticker(symbol).history(period="1mo")
         if hist is None or not len(hist):
             return None
-        return {"value": round(float(hist["Close"].iloc[-1]), 2),
+        close = float(hist["Close"].iloc[-1])
+        # NaN survives every comparison it meets: the age check passes it, `abs(nan) < floor`
+        # is False so it never reads as aligned, `nan > 0` is False so it reads ETF_RICH, and
+        # the card renders "nanpp". A hole in the series must fail here, once, not propagate.
+        if close != close or close <= 0:
+            return None
+        return {"value": round(close, 2),
                 "asof": str(hist.index[-1])[:10], "source": "Yahoo"}
     except Exception as e:
         logger.debug("[vol_indices] Yahoo %s failed: %s", symbol, e)
@@ -142,13 +154,27 @@ def get_index(ref_signal: str, max_age_days: int = MAX_AGE_DAYS) -> Optional[Dic
     # which is precisely the code path that runs in production.
     key = f"idx_{sig}"
     got = _cached(key)
-    if got is None:
+    if got is _MISS:
+        got = None
         if src.get("fred"):
             got = _fred(src["fred"])
         if got is None and src.get("yahoo"):
             got = _yahoo(src["yahoo"])
-        _store(key, got)
+        _store(key, got)          # caches the failure too — see _MISS
     if not got:
+        return None
+
+    # Sanity at the boundary, where every source converges — not only inside each fetcher.
+    # A vol index is a positive real number; NaN is neither, and it survives every comparison
+    # downstream (the age check passes it, `abs(nan) < floor` is False so it never reads
+    # aligned, `nan > 0` is False so it reads ETF_RICH) to render as "nanpp".
+    val = got.get("value")
+    try:
+        val = float(val)
+    except (TypeError, ValueError):
+        return None
+    if val != val or val <= 0:
+        logger.info("[vol_indices] %s discarded: non-finite or non-positive value %r", sig, val)
         return None
 
     age = _age_days(got.get("asof") or "")

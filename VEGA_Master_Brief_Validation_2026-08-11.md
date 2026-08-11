@@ -5,7 +5,7 @@ Every claim in the brief was treated as a hypothesis and checked against the cod
 anything was built. That was the right call: **four of the brief's instructions were wrong**,
 and two of them would have made the system worse if executed as written.
 
-Test baseline confirmed before touching anything: **750 passed**. After this work: **814 passed**.
+Test baseline confirmed before touching anything: **750 passed**. After this work: **858 passed**.
 
 ---
 
@@ -72,6 +72,16 @@ again.
 | `analysis/technical_score.py` (P1-4) | does not exist — technicals are `data/technicals.py`, patterns are `analysis/structure.py` |
 | `vega_status.py` (P1-2, P1-3, A2-1) | a **read-only CLI health report**. It has no regime classifier and does not feed the dashboard. The Today's-call logic is `vega_app._mc_status_cards` |
 | `vega_candidates.py` for pop_gap (P1-1) | already done — `set_pop_gap()` exists and is tested |
+
+### 1.5a Two more ticker errors — verified live
+
+| Brief says | Reality (checked 2026-08-11) |
+|---|---|
+| `CRYPTO_TICKERS = ['IBIT','ETHA','SOLI']` | **`SOLI` is delisted** — Yahoo returns no price data at all. `SOLZ` is the Solana ETF that exists and has options. |
+| "SOL cross-venue data fetch — native DVOL not verified" | Verified: Deribit returns **HTTP 200 with zero data points** for `currency=SOL`. The endpoint exists, the index does not — the shape most easily mistaken for a working feed. |
+
+ETH DVOL, by contrast, is real and live (49.4 against BTC's 35.9), so **P3 was buildable as
+specified**.
 
 ### 1.5 P2-4's MOVE data path does not exist — verified live
 
@@ -175,15 +185,9 @@ page titles) — trivially reversible if you want Momentum/Crypto instead.
 
 ## 3. Deliberately not built
 
-**P2 / P3 / P4 — the cross-venue DECLARED architecture.** Deferred as a unit, for two reasons:
+**P2 / P3 / P4 — now built.** See §5.
 
-1. **P2-3 is blocked on data that does not exist for free** (§1.5). GVZ works; MOVE does not.
-2. Shipping P2's schema without P4's rendering would put config on disk that nothing reads.
-   This codebase has an explicit scar from exactly that — `_earnings_clear`'s docstring: *"A green
-   test suite over an unwired function is the same failure as a metric that cannot come out
-   non-zero."* Half-building it would repeat the mistake the brief's own P0-B was written to fix.
-
-Also not built, and flagged here rather than silently dropped:
+Not built, and flagged here rather than silently dropped:
 
 - **A2-7's "remove Today's Playbook — duplicates the table".** It does not duplicate it. The
   table is a sortable list; the playbook is role-based selection (safest / most aggressive /
@@ -207,3 +211,50 @@ depends on a 404.
 For the next brief: state the file:line the claim was verified against, or mark it explicitly as
 unverified. Per [vega-audit-docs-need-reverification], "code-validated" in a handoff header has
 not yet meant the code was read.
+
+---
+
+## 5. P2 / P3 / P4 — cross-venue architecture (built)
+
+Every source claim checked against the live feed before any config was written:
+
+| Signal | Source | Verdict |
+|---|---|---|
+| BTC DVOL | Deribit | ✅ 35.9 |
+| ETH DVOL | Deribit | ✅ 49.4 — **P3 is real** |
+| SOL DVOL | Deribit | ❌ HTTP 200, **zero data points** |
+| GVZ | FRED `GVZCLS` | ✅ current to the day |
+| MOVE | FRED | ❌ `BAMLMOVE` / `MOVE` / `ICEBOFAMOVE` all 404 |
+| MOVE | Yahoo `^MOVE` | ❌ HTTP 200, plausible 75.46, **stale since 2026-07-17** |
+
+The `^MOVE` case is the one worth remembering: reachable, plausible, and 25 days dead while
+`^GVZ` was current. Nothing in the response says so.
+
+**Shipped enabled:** IBIT (BTC DVOL), ETHA (ETH DVOL), GLD + GDX (GVZ).
+**Shipped declared-but-off, with the reason recorded:** TLT (no free MOVE feed), SOLZ (no SOL
+index). Those are not stubs — the renderer shows the reference, the venue, and why it is not in
+service. Leaving them undeclared would make an asset blocked on a licensed feed
+indistinguishable from one nobody had considered.
+
+**Nothing is shared between assets.** Per-asset noise floors (GLD 0.5 · IBIT 2.0 · ETHA 4.0 ·
+GDX 6.0), per-asset driver lists, per-asset independence. A shared floor reports gold noise as
+signal several times a week and hides every real move in GDX behind an unreachable bar.
+
+`data/vol_indices.py` exists rather than a two-line yfinance call because **every read is dated
+and a stale read is not returned** — absent, not flagged. Callers are gap calculations, and a
+subtraction will happily produce a confident number from a month-old operand.
+
+### Bugs caught in my own work before merge
+
+| Found by | Defect |
+|---|---|
+| rendering the page | Defaulting the currency to BTC for every non-ETH asset put **Bitcoin's spot, DVOL and variance premium on GLD's card** under gold's heading. Every value was individually true. |
+| reasoning about GDX | `bool(derived_from)` filed an 11pp **miner-beta spread as "the likelier number to be wrong is ours"** — GVZ is derived from GLD's options, not GDX's. |
+| review | `estimate_atm_iv` returns **0.0 as a sentinel**; accepting it made a failed reconstruction into a full-width gap (`+27.9pp ETF CHEAP` off an IV of zero). |
+| review | ETHA was **permanently unavailable in the scan path** — only published indices were routed, so a working Deribit feed was one call away and never made. |
+| review | GDX's structural gap got a **green seller's-edge badge every day**, beside a note saying it was not a mispricing. |
+| review | Failed fetches were **never cached**, so a dead source was re-hit on every call. |
+| review | A **NaN close** survived every downstream comparison and rendered as `nanpp`. |
+
+All fixed and pinned by regression tests. Two full-system runs: **858 passed**, all six views
+render, `vega_status.py` clean under `PYTHONUTF8=1`.

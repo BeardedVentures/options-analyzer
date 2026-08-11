@@ -33,7 +33,6 @@ from typing import Dict, Optional
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import config
 
 from analysis.ticker_profile import cross_venue as declared_cross_venue
 
@@ -45,10 +44,6 @@ ETF_RICH = "etf_rich"        # the ETF's surface is the expensive one — favour
 ETF_CHEAP = "etf_cheap"      # the reference is richer — the seller is writing the cheap side
 QUALITY = "quality_check"    # reference is derived from the ETF; a gap means one of us is wrong
 UNAVAILABLE = "unavailable"
-
-
-def _cfg(name, default):
-    return getattr(config, name, default)
 
 
 def ref_value(raw) -> Optional[float]:
@@ -111,8 +106,14 @@ def evaluate(ticker: str, proxy_atm_iv: Optional[float], ctx: Optional[Dict] = N
         return out
 
     ref_pp = ref_value(ctx.get(cv["ref_signal"]))
-    if ref_pp is None or proxy_atm_iv is None:
-        missing = cv["ref_name"] if ref_pp is None else f"{tk} ATM IV"
+    # A non-positive IV is not a reading. `technicals.estimate_atm_iv` returns 0.0 as its
+    # documented "no honest estimate" sentinel, and both callers pass its output straight in —
+    # so accepting 0.0 turned a failed IV reconstruction into a full-width gap equal to the
+    # reference itself (GDX: proxy 0.0, GVZ 27.9, "+27.9pp ETF CHEAP") narrated with complete
+    # confidence. A missing number and a zero must not take different paths here.
+    iv_ok = proxy_atm_iv is not None and float(proxy_atm_iv) > 0
+    if ref_pp is None or ref_pp <= 0 or not iv_ok:
+        missing = cv["ref_name"] if (ref_pp is None or ref_pp <= 0) else f"{tk} ATM IV"
         out["note"] = f"{missing} unavailable — no cross-venue read this cycle."
         return out
 
