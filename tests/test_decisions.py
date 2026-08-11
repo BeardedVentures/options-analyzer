@@ -165,3 +165,18 @@ def test_asymmetry_cards_offer_the_decisions_they_can_honour():
     h = vega_app._lottery_actions({"ticker": "SPY", "strike": 600.0, "premium_usd": 389.0})
     assert 'action="/watch"' in h and 'action="/reject"' in h
     assert "SPY" in h
+
+
+def test_the_pop_gap_mean_survives_rounding(ledger):
+    """pop_gap is a 0-1 fraction and edge_score is 0-100. Sharing one rounding rule rounded
+    every realistic gap (0.02-0.12) straight to 0.0 and silently deleted the single number
+    this ledger exists to produce."""
+    for g in (0.043, 0.061, 0.028):
+        dec.record(dec.REJECT, "AAA", _snap(true_pop=0.5 + g, pop_implied=0.5), ledger=ledger)
+    assert dec.summary(ledger=ledger)["reject_mean_pop_gap_pp"] == pytest.approx(4.4, abs=0.05)
+
+
+def test_the_gap_mean_carries_its_unit_in_its_name(ledger):
+    """So the next reader cannot re-scale a value that is already in percentage points."""
+    dec.record(dec.REJECT, "AAA", _snap(), ledger=ledger)
+    assert "reject_mean_pop_gap_pp" in dec.summary(ledger=ledger)

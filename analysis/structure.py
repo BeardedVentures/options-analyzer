@@ -106,16 +106,27 @@ def get_pattern_direction(pattern: Optional[str]) -> Optional[str]:
     key = str(pattern).strip().upper().replace(" ", "_").replace("-", "_")
     if key in PATTERN_DIRECTION:
         return PATTERN_DIRECTION[key]
-    # Phrase form: match on the pattern words _phrase() builds from, longest first so
-    # "double bottom" is not shadowed by a shorter substring of another label.
     text = str(pattern).lower()
-    for label, words in sorted(_PATTERN_WORDS.items(),
-                               key=lambda kv: len(kv[1]), reverse=True):
-        stem = words.split(" ", 1)[-1]           # "a bull flag" → "bull flag"
+    # _phrase() does NOT render every label as "<stage> <pattern words>" — five of them get a
+    # bespoke sentence, and two of those contain another label's stem. "extended, no pullback
+    # yet" is UPTREND_EXTENDED and contains "pullback", so a plain stem sweep read the most
+    # stretched bullish chart VEGA can print as NEUTRAL and the contradiction check then
+    # failed open on exactly the phrase path this function documents supporting. The bespoke
+    # renderings are matched first and explicitly.
+    for needle, label in (("no pullback yet", UPTREND_EXTENDED),
+                          ("second peak", DOUBLE_TOP),
+                          ("second trough", DOUBLE_BOTTOM),
+                          ("downtrend", DOWNTREND),
+                          ("range-bound", RANGE),
+                          ("no clear pattern", UNREADABLE)):
+        if needle in text:
+            return PATTERN_DIRECTION.get(label)
+    # Generic form, longest STEM first so "bull flag" is not shadowed by a shorter one.
+    stems = sorted(((label, words.split(" ", 1)[-1]) for label, words in _PATTERN_WORDS.items()),
+                   key=lambda kv: len(kv[1]), reverse=True)
+    for label, stem in stems:
         if stem in text:
             return PATTERN_DIRECTION.get(label)
-    if "downtrend" in text:                       # _phrase() renders this as "in a downtrend"
-        return BEARISH
     return None
 
 

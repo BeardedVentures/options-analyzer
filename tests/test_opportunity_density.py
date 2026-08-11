@@ -221,25 +221,38 @@ def test_the_defended_level_is_the_one_that_has_to_hold():
     """The shelter is both the reason to take the trade and its single point of failure.
     Showing only the first half is how a defended level starts reading as a guarantee.
 
-    A bull put is threatened from below, so the level named is the nearest support; a bear
-    call is threatened from above, so it is the nearest resistance."""
-    sup = [{"price": 117.21}, {"price": 110.0}]
-    res = [{"price": 130.0}, {"price": 141.0}]
+    A bull put is threatened from below, so the level named is a support above the short
+    strike; a bear call is threatened from above, so it is a resistance below its short."""
+    sup = [{"price": 117.21, "touches": 4, "strength": 90.0}]
+    res = [{"price": 130.0, "touches": 4, "strength": 90.0}]
     assert vega_app._defended_level(
-        {"strat_type": "bull_put", "support_levels": sup, "resistance_levels": res}) == 117.21
+        {"strat_type": "bull_put", "short": 112.0, "price": 125.0,
+         "support_levels": sup, "resistance_levels": res}) == 117.21
     assert vega_app._defended_level(
-        {"strat_type": "bear_call", "support_levels": sup, "resistance_levels": res}) == 130.0
+        {"strat_type": "bear_call", "short": 136.0, "price": 125.0,
+         "support_levels": sup, "resistance_levels": res}) == 130.0
 
 
 def test_no_level_is_invented_when_none_was_detected():
-    assert vega_app._defended_level({"strat_type": "bull_put", "support_levels": []}) is None
+    assert vega_app._defended_level(
+        {"strat_type": "bull_put", "short": 112.0, "support_levels": []}) is None
+
+
+def test_no_level_is_named_when_none_shelters_the_strike():
+    """A support BELOW the short strike shelters nothing — the strike is already in open air,
+    and naming that level as the thing that has to hold would invert the geometry."""
+    assert vega_app._defended_level(
+        {"strat_type": "bull_put", "short": 120.0, "price": 125.0,
+         "support_levels": [{"price": 110.0, "touches": 4, "strength": 90.0}],
+         "resistance_levels": []}) is None
 
 
 def test_a_condor_names_no_single_level():
     """It has two, and naming one would say the other does not matter."""
     assert vega_app._defended_level(
-        {"strat_type": "iron_condor", "support_levels": [{"price": 117.21}],
-         "resistance_levels": [{"price": 130.0}]}) is None
+        {"strat_type": "iron_condor", "short": 112.0,
+         "support_levels": [{"price": 117.21, "touches": 4, "strength": 90.0}],
+         "resistance_levels": [{"price": 130.0, "touches": 4, "strength": 90.0}]}) is None
 
 
 def test_buckets_with_nothing_in_them_are_not_rendered():
@@ -312,3 +325,50 @@ def test_presets_drive_the_same_input_the_typed_box_does():
     h = vega_app.render("today")
     assert "setRisk" in h and "fmaxloss" in h
     assert "presetOff" in h
+
+
+# ── Review regressions (2026-08-11) ───────────────────────────────────────────────────────────
+# Six defects found reviewing this branch. Each is pinned by the behaviour that was wrong, not
+# by the shape of the fix, so a future rewrite has to keep the property rather than the code.
+
+def test_the_risk_line_names_the_same_level_the_shelter_line_does():
+    """strike_cushion returns the highest-STRENGTH level clearing the buffer, not the nearest.
+    Computing the risk line's level independently printed "under $238.00 support" directly
+    above "a decisive break of $245.00" — two numbers for one level, the risk line false."""
+    c = {"strat_type": "bull_put", "short": 230.0, "price": 250.0, "resistance_levels": [],
+         "support_levels": [{"price": 238.0, "touches": 2, "strength": 40.0},
+                            {"price": 245.0, "touches": 5, "strength": 95.0}]}
+    note = vega_app._shelter_note(c)
+    lvl = vega_app._defended_level(c)
+    assert lvl is not None and f"{lvl:,.2f}" in note
+
+
+def test_a_higher_ranked_peer_is_never_told_it_ranks_lower():
+    """Comparing against the OPEN card rather than the top pick rendered the #1 row inside the
+    #2 drawer as "1 | AAPL | Edge 92 | Technical 2 pts behind PEP" — rank, score and
+    annotation contradicting each other on one line."""
+    vega_app._COPILOT_PEERS = list(enumerate([
+        {"ticker": "AAPL", "edge_score": 92, "strat_type": "bull_put",
+         "component_breakdown": {"vrp": 30, "technical": 20}},
+        {"ticker": "PEP", "edge_score": 60, "strat_type": "bull_put",
+         "component_breakdown": {"vrp": 12, "technical": 18}}]))
+    t = _txt(vega_app._copilot_other_ideas(1))
+    assert "AAPL" in t and "behind PEP" not in t
+
+
+def test_an_extended_uptrend_is_not_read_as_a_pullback():
+    """_phrase renders UPTREND_EXTENDED as "extended, no pullback yet", which contains
+    PULLBACK's stem. A plain stem sweep read the most stretched bullish chart VEGA can print
+    as NEUTRAL, and the contradiction check then failed open on the phrase path."""
+    assert S.get_pattern_direction("extended, no pullback yet") == S.BULLISH
+    assert S.check_thesis_contradiction(
+        S.get_pattern_direction("extended, no pullback yet"), "bear_call") is not None
+    # the genuine pullback phrase still reads as one
+    assert S.get_pattern_direction("midway through a pullback") == S.NEUTRAL
+
+
+def test_the_phone_overrides_come_after_the_rules_they_override():
+    """Equal specificity means document order decides. The block sat above .copnums and
+    .copgrid, which redefine grid-template-columns, so every column override in it was dead."""
+    css = vega_app.CSS
+    assert css.index("/* ── Phone") > max(css.index(".copnums{"), css.index(".copgrid{"))

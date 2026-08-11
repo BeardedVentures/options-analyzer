@@ -929,30 +929,6 @@ th.srt .arw{color:var(--green);font-size:9px}
 .funnel .lb{font-size:10.5px;color:var(--ink3)}
 .funnel .arw{color:var(--ink3);font-size:12px}
 @media(max-width:760px){.mccards{grid-template-columns:1fr}.funnel .step{width:100%}.funnel .arw{display:none}}
-/* ── Phone (A5-2) ───────────────────────────────────────────────────────────────────────────
-   The SpreadSignal audience arrives from a YouTube link on a phone, and every layout above
-   assumes a desk. Breakpoints only — no separate mobile document, because two documents drift
-   and the second one is always the stale one. The dark theme carries over unchanged; what has
-   to give is density: multi-column grids collapse to one, the wide board scrolls inside its
-   own box instead of pushing the page sideways, and the nav wraps rather than truncating. */
-@media(max-width:620px){
-  .wrap{padding:0 12px 48px}
-  .topnav{padding:8px 12px;flex-wrap:wrap;gap:6px}
-  .nav{flex-wrap:wrap}
-  .nav a{padding:6px 10px;font-size:12px}
-  .rside{width:100%;justify-content:flex-start;font-size:10.5px}
-  h1{font-size:20px}
-  /* The board keeps every column and scrolls within itself — dropping columns on a phone
-     hides the one the reader came to check, and which one that is cannot be known here. */
-  .board{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  .board table,.gtbl{min-width:560px}
-  .lgrid{grid-template-columns:1fr 1fr}
-  .lottowrap{grid-template-columns:1fr}
-  .copnums,.copgrid{grid-template-columns:1fr 1fr}
-  .mccard .big{font-size:17px}
-  .expbar .go{margin-left:0;flex-basis:100%}
-  .kpikey{gap:8px;font-size:9.5px}
-}
 .mcpanel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
 .mcpanel>.hd{font-size:9.5px;color:var(--ink3);text-transform:uppercase;letter-spacing:.07em;font-weight:700;margin-bottom:8px}
 .pbrow{display:block;padding:7px 0;border-bottom:1px solid var(--line2);text-decoration:none;color:inherit;cursor:pointer}
@@ -1024,6 +1000,30 @@ th.srt .arw{color:var(--green);font-size:9px}
 .copmore>summary:hover{color:var(--ink2)}
 .copdeep{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;padding-top:10px}
 @media(max-width:1100px){.copdeep{grid-template-columns:1fr}}
+/* ── Phone (A5-2) ───────────────────────────────────────────────────────────────────────────
+   The SpreadSignal audience arrives from a YouTube link on a phone, and every layout above
+   assumes a desk. Breakpoints only — no separate mobile document, because two documents drift
+   and the second one is always the stale one. The dark theme carries over unchanged; what has
+   to give is density: multi-column grids collapse to one, the wide board scrolls inside its
+   own box instead of pushing the page sideways, and the nav wraps rather than truncating. */
+@media(max-width:620px){
+  .wrap{padding:0 12px 48px}
+  .topnav{padding:8px 12px;flex-wrap:wrap;gap:6px}
+  .nav{flex-wrap:wrap}
+  .nav a{padding:6px 10px;font-size:12px}
+  .rside{width:100%;justify-content:flex-start;font-size:10.5px}
+  h1{font-size:20px}
+  /* The board keeps every column and scrolls within itself — dropping columns on a phone
+     hides the one the reader came to check, and which one that is cannot be known here. */
+  .board{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .board table,.gtbl{min-width:560px}
+  .lgrid{grid-template-columns:1fr 1fr}
+  .lottowrap{grid-template-columns:1fr}
+  .copnums,.copgrid{grid-template-columns:1fr 1fr}
+  .mccard .big{font-size:17px}
+  .expbar .go{margin-left:0;flex-basis:100%}
+  .kpikey{gap:8px;font-size:9.5px}
+}
 """
 
 
@@ -1766,19 +1766,36 @@ def _copilot_why(c):
 def _defended_level(c):
     """The price the shelter note is asserting — the one that has to hold.
 
+    Reads the level from `strike_cushion`, the SAME selector _shelter_note uses, because the
+    two sentences sit next to each other and are about the same level. Picking the nearest
+    price independently looked equivalent and was not: strike_cushion returns the
+    highest-STRENGTH level clearing the buffer, not the closest one, so the card printed
+    "under $238.00 support" directly above "a decisive break of $245.00 puts the short strike
+    in open air". Two numbers for one level, and the risk line was the false one.
+
     Returns None when no level was found, so the failure mode is a missing sentence rather
     than an invented price.
     """
-    strat = str(c.get("strat_type") or c.get("strategy") or "").lower()
-    below = [_f(l.get("price")) for l in (c.get("support_levels") or [])
-             if _f(l.get("price")) is not None]
-    above = [_f(l.get("price")) for l in (c.get("resistance_levels") or [])
-             if _f(l.get("price")) is not None]
-    if "bear_call" in strat or "bear call" in strat:
-        return min(above) if above else None
-    if "condor" in strat:
-        return None                      # two levels, and naming one would mislead
-    return max(below) if below else None
+    try:
+        from analysis.levels import strike_cushion
+    except Exception:
+        return None
+    strat = c.get("strat_type") or "bull_put"
+    if strat == "iron_condor":
+        return None                      # two wings, and naming one would say the other is safe
+    if strat == "bear_call":
+        levels, side = c.get("resistance_levels"), "call"
+    else:
+        levels, side = c.get("support_levels"), "put"
+    strike = c.get("short")
+    if not strike or not levels:
+        return None
+    try:
+        cush = strike_cushion(float(strike), levels, side,
+                              min_buffer_pct=float(getattr(config, "LEVEL_MIN_BUFFER_PCT", 0.005)))
+    except Exception:
+        return None
+    return _f(cush.get("level")) if cush else None
 
 
 def _copilot(c, i, tier, log_form, deep):
@@ -1858,11 +1875,16 @@ def _copilot_other_ideas(i):
     if not peers:
         return ('<div class="copcard"><div class="hd">Other top ideas</div>'
                 '<div class="dim" style="font-size:11.5px">No other qualified setups today.</div></div>')
-    lead = _COPILOT_PEERS[i][1] if i < len(_COPILOT_PEERS) else {}
+    # Compare against the TOP pick, not the card being viewed. Using the open card as the
+    # reference made the annotation contradict the two numbers beside it: in the #2 drawer,
+    # the #1 row rendered as "1 | AAPL | Edge 92 | Technical 2 pts behind PEP" — higher rank,
+    # higher score, and a line claiming it trails. A row that outranks the lead gets no
+    # annotation at all, because "ranks lower" is not true of it.
+    lead = _COPILOT_PEERS[0][1] if _COPILOT_PEERS else {}
     rows = ""
     for j, p in peers:
         sc = (p.get("edge_score") or p.get("priority") or 0)
-        why = _ranks_lower_because(p, lead)
+        why = "" if j == 0 else _ranks_lower_because(p, lead)
         rows += (f'<a class="copidea" onclick="event.stopPropagation();vopen({j})">'
                  f'<span class="r num">{j+1}</span><span class="t">{esc(p["ticker"])}</span>'
                  f'<span class="s">{esc(_strat_label(p))}</span>'
@@ -3685,8 +3707,16 @@ def view_bitcoin():
         learning = ""
         if n_res < _DIRECTION_LEARNING_MIN:
             pending = [r for r in claims if r.get("status") not in ("resolved", "unresolvable")]
-            due = sorted(str(r.get("resolves_on") or "") for r in pending if r.get("resolves_on"))
-            when = f" — first resolutions expected {esc(due[0][:10])}" if due else ""
+            # Only dates still ahead. predictions._defer keeps a claim open past its due date
+            # when the horizon cannot be graded yet, so the earliest resolves_on is routinely
+            # in the past — and "first resolutions expected 2026-08-04" printed on the 11th
+            # reads as a broken promise rather than as a deferral.
+            today = datetime.now().strftime("%Y-%m-%d")
+            due = sorted(str(r.get("resolves_on") or "")[:10] for r in pending
+                         if r.get("resolves_on"))
+            ahead = [d for d in due if d >= today]
+            when = (f" — first resolutions expected {esc(ahead[0])}" if ahead
+                    else " — earliest claims are past their horizon, awaiting a gradeable close")
             learning = ('<div class="warn" style="margin:8px 0">'
                         'VEGA is building its directional track record. '
                         f'<b>{len(pending)}</b> claim(s) in flight{when}. '

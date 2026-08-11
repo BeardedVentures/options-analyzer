@@ -77,7 +77,9 @@ def record(decision: str, ticker: str, snapshot: Optional[Dict] = None,
     """
     if decision not in VALID:
         raise ValueError(f"decision must be one of {VALID}, got {decision!r}")
-    ticker = (ticker or "").strip().upper()
+    # Capped, not just stripped: this arrives from an HTML form field, and an append-only
+    # ledger is exactly the wrong place to discover that an unbounded string reached it.
+    ticker = (ticker or "").strip().upper()[:16]
     if not ticker:
         raise ValueError("ticker is required")
 
@@ -156,17 +158,23 @@ def summary(records: Optional[Sequence[Dict]] = None,
     """
     rows = list(records) if records is not None else load(ledger)
 
-    def _mean(vals):
+    def _mean(vals, places=1):
         vals = [v for v in vals if isinstance(v, (int, float))]
-        return round(sum(vals) / len(vals), 1) if vals else None
+        return round(sum(vals) / len(vals), places) if vals else None
 
     watched = [r for r in rows if r.get("decision") == WATCH]
     rejected = [r for r in rows if r.get("decision") == REJECT]
+    # pop_gap is a 0-1 fraction and edge_score is 0-100; sharing one rounding rounded every
+    # realistic gap (0.02-0.12) straight to 0.0 and silently deleted the single number this
+    # ledger exists to produce. Reported in percentage points, named so, so the unit travels
+    # with the value and the next reader cannot re-scale it by accident.
+    gap_pp = _mean((r.get("pop_gap") or 0) * 100 for r in rejected
+                   if isinstance(r.get("pop_gap"), (int, float)))
     return {
         "total": len(rows),
         "watch_count": len(watched),
         "reject_count": len(rejected),
         "watch_mean_edge": _mean(r.get("edge_score") for r in watched),
         "reject_mean_edge": _mean(r.get("edge_score") for r in rejected),
-        "reject_mean_pop_gap": _mean(r.get("pop_gap") for r in rejected),
+        "reject_mean_pop_gap_pp": gap_pp,
     }
