@@ -5,7 +5,7 @@ Every claim in the brief was treated as a hypothesis and checked against the cod
 anything was built. That was the right call: **four of the brief's instructions were wrong**,
 and two of them would have made the system worse if executed as written.
 
-Test baseline confirmed before touching anything: **750 passed**. After this work: **779 passed**.
+Test baseline confirmed before touching anything: **750 passed**. After this work: **814 passed**.
 
 ---
 
@@ -132,8 +132,35 @@ exactly the kind that invites inflation:
 | A2-4 | `Win prob` → **VEGA POP**, with **Market POP** and **Edge (VEGA − market)** beside it |
 | A2-6 | regime note → full-width coloured band (`.regband`) |
 | A2-12 | `Recommended action` → **Recommended setup** (Decision 3) |
+| A2-5 | edge-score decomposition on the card; `#1 of 27 qualified` rank context |
+| A2-7 | open-risk exposure bar moved above the opportunity table |
+| A2-8 | Why split into **Why it works / What can break it / What VEGA doesn't like**; model-confidence badge moved under the evidence it grades |
+| A2-9 | secondary ideas name the component they lost on |
+| A2-10 | max-risk **preset bands** (`<$100 / <$500 / <$1K / <$5K / Any`) beside the typed box |
+| A2-11 | **WATCH / REJECT** with a gradeable decision ledger (see below) |
+| A2-13 | exposure summary bar, hidden below two open positions |
+| A3-3 | **Edge** column on the crypto Tradeable-now table |
+| A3-4 | directional-claims **learning-period** banner below 5 resolutions |
 | A4-2 | `HOME RUN 3x` → **TARGET $1,167** with the multiple as subtitle |
 | A4-3 | non-varying `HIGH` conviction chip → **IV rank chip** (green ≤30 / amber / red ≥70) |
+| A4-4 | direction tag: **momentum vs counter-trend**, not a fixed `BULLISH` |
+| A4-5 | WATCH / REJECT on the asymmetry cards |
+| A5-2 | phone breakpoints — breakpoints only, no separate mobile document |
+
+### The decision ledger (A2-11) — `analysis/decisions.py`
+
+The paper ledger is a censored sample: it holds trades that were **taken** and knows nothing
+about the ones waved through. WATCH and REJECT write to `logs/vega_decisions.jsonl` with the
+**full entry state** (strikes, expiry, credit, delta, `true_pop`, `pop_implied`, `pop_gap`,
+`edge_score`) — because a row saying "rejected WMT on the 11th" cannot be graded against
+anything once the chain moves. `pop_gap` is derived in the recorder rather than trusted from
+the form, so the one number the ledger exists to grade can't go missing.
+
+`summary()` compares mean edge score on each side of the operator's judgement. If rejects
+score no lower than watches the overrides are noise; if they score *higher*, something is
+wrong with either the score or the operator — worth catching early.
+
+Both POST routes verified end-to-end against a live server, not just at module level.
 
 **Tab renames change display labels only.** Route keys (`?view=lottery`, `?view=bitcoin`) are
 untouched, so bookmarks and POST targets keep working.
@@ -158,12 +185,13 @@ page titles) — trivially reversible if you want Momentum/Crypto instead.
 
 Also not built, and flagged here rather than silently dropped:
 
-- **A2-11 three-button set (PAPER TRADE / WATCH / REJECT).** Not cosmetic — WATCH and REJECT are
-  new persisted state plus POST routes plus a ledger schema. Real feature work, not a UI item.
-- **A2-5 edge decomposition, A2-9 "why it ranks lower", A2-13 exposure bar.** Straightforward;
-  ran out of session before them.
-- **A5-1 progressive disclosure, A5-2 mobile, A5-3 calibration table, A5-4 nav restructure.** The
-  brief already defers these.
+- **A2-7's "remove Today's Playbook — duplicates the table".** It does not duplicate it. The
+  table is a sortable list; the playbook is role-based selection (safest / most aggressive /
+  best EV), a different access path with its own tests. Kept.
+- **A3-2 cross-venue simplification.** Depends on the P4 multi-asset refactor to be worth doing
+  once rather than twice.
+- **A5-1 progressive disclosure, A5-3 calibration table, A5-4 nav restructure.** The brief
+  already defers these; A5-3 is gated on resolved Brier predictions (~2026-08-23).
 
 ---
 

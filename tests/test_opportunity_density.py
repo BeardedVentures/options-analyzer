@@ -290,3 +290,25 @@ def test_exposure_bar_appears_once_the_book_is_not_obvious():
 @pytest.mark.parametrize("n", [0, 1])
 def test_exposure_bar_hidden_when_the_badges_already_say_it(n):
     assert vega_app._exposure_bar({"book": {"open_positions": n}}) == ""
+
+
+# ── Risk presets (A2-10) ──────────────────────────────────────────────────────────────────────
+
+def test_risk_presets_offer_bands_a_small_account_can_use():
+    h = vega_app._risk_presets()
+    for band in ("$100", "$500", "$1K", "$5K", "Any"):
+        assert band in h, f"missing band {band}"
+
+
+def test_any_is_offered_because_the_operator_sets_the_risk():
+    """Same decision-support framing as "Recommended setup": VEGA finds the opportunity, the
+    operator decides what they can carry."""
+    assert "Any" in vega_app._risk_presets()
+
+
+def test_presets_drive_the_same_input_the_typed_box_does():
+    """Two controls with two sources of truth eventually disagree about what the board is
+    showing, and the board is the thing being trusted."""
+    h = vega_app.render("today")
+    assert "setRisk" in h and "fmaxloss" in h
+    assert "presetOff" in h

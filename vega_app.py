@@ -75,6 +75,8 @@ IVR_MIN = getattr(config, "MIN_IV_RANK", 45)
 # Defined once so the bar, the cards and the engine's scan_summary cannot drift apart.
 HIGH_EDGE = getattr(config, "HIGH_EDGE_SCORE", 65)
 EXCEPTIONAL_EDGE = getattr(config, "EXCEPTIONAL_EDGE_SCORE", 80)
+# Below this many resolved directional claims the grid is a horizon, not a record, and says so.
+_DIRECTION_LEARNING_MIN = 5
 
 # Component max points for the score composition panel (mirrors edge_calculator).
 # The first six sum to a 100-point base; skew (0-15) and post-earnings (0-5) are
@@ -566,7 +568,11 @@ function sortBoard(th,key){var tbl=th.closest('table'),tb=tbl.tBodies[0];var dir
 function clearGroups(){document.querySelectorAll('tr.grouphead').forEach(function(g){g.remove();});var b=document.getElementById('grpbtn');if(b)b.classList.remove('active');}
 function groupByTicker(){var btn=document.getElementById('grpbtn');var tbl=document.querySelector('.board table');if(!tbl)return;var tb=tbl.tBodies[0];clearGroups();if(btn&&btn.getAttribute('data-on')==='1'){btn.setAttribute('data-on','0');btn.classList.remove('active');return;}var mains=[].slice.call(tb.querySelectorAll('tr.vmain'));mains.sort(function(a,b){var r=(a.getAttribute('data-ticker')||'').localeCompare(b.getAttribute('data-ticker')||'');if(r!==0)return r;return parseFloat(b.getAttribute('data-score'))-parseFloat(a.getAttribute('data-score'));});var ncols=tbl.querySelectorAll('thead .col th').length||12;var last=null;mains.forEach(function(m){var tk=m.getAttribute('data-ticker');if(tk!==last){var hr=document.createElement('tr');hr.className='grouphead';hr.innerHTML='<td class="l" colspan="'+ncols+'">'+tk+'</td>';tb.appendChild(hr);last=tk;}tb.appendChild(m);var d=document.getElementById('vd-'+m.getAttribute('data-i'));if(d)tb.appendChild(d);});if(btn){btn.setAttribute('data-on','1');btn.classList.add('active');}}
 function filterBoard(){var el=document.getElementById('fmaxloss');var v=el?parseFloat(el.value):NaN;var n=0,shown=0;document.querySelectorAll('tr.vmain').forEach(function(m){n++;var ml=parseFloat(m.getAttribute('data-maxloss'));var hide=!isNaN(v)&&ml>v;m.style.display=hide?'none':'';var d=document.getElementById('vd-'+m.getAttribute('data-i'));if(d){d.style.display=hide?'none':'';if(hide){m.classList.remove('open');d.classList.remove('open');}}if(!hide)shown++;});var fc=document.getElementById('fcount');if(fc)fc.textContent=isNaN(v)?'':(shown+' of '+n+' within budget');}
-function clearFilter(){var e=document.getElementById('fmaxloss');if(e){e.value='';filterBoard();}}
+function clearFilter(){var e=document.getElementById('fmaxloss');if(e){e.value='';}presetOff();filterBoard();}
+function presetOff(){document.querySelectorAll('.rpre button').forEach(function(b){b.classList.remove('on');});}
+/* Presets write the same input the typed box does — one filter, one source of truth,
+   so the two controls can never disagree about what the board is showing. */
+function setRisk(btn,v){var e=document.getElementById('fmaxloss');if(e){e.value=(v===''?'':v);}presetOff();btn.classList.add('on');filterBoard();}
 </script>"""
 
 
@@ -842,6 +848,11 @@ button:disabled{opacity:.75;cursor:default}
 /* Reject is destructive of an opportunity, not of data — muted, never the loudest button. */
 .ghostbtn.danger{color:var(--red)}
 .ghostbtn.danger:hover{background:var(--redsoft)}
+/* Budget bands — the first question a small account asks, answered in one click. */
+.rpre{display:inline-flex;gap:4px;flex-wrap:wrap}
+.rpre button{background:var(--panel3);color:var(--ink3);border:1px solid transparent;border-radius:6px;padding:4px 9px;font-size:10.5px;font-weight:700;cursor:pointer}
+.rpre button:hover{color:var(--ink)}
+.rpre button.on{background:var(--greensoft);color:var(--green);border-color:rgba(0,201,122,.35)}
 .ghostbtn:hover{color:var(--ink)}
 th.srt{cursor:pointer;user-select:none}th.srt:hover{color:var(--ink)}
 th.srt .arw{color:var(--green);font-size:9px}
@@ -2055,6 +2066,26 @@ def _beta_flags(c):
     return out
 
 
+def _risk_presets():
+    """One-click budget bands beside the typed max-loss box.
+
+    Typing a number requires already knowing which number, which quietly makes the most
+    important control on the board a power-user feature: for a small account the first
+    question is not "which setup is best" but "which of these can I even take". The bands
+    answer it in one click.
+
+    "Any" is deliberately present and deliberately last. It states that VEGA finds the
+    opportunity and the operator sets the risk — the same decision-support framing as
+    "Recommended setup" rather than "Recommended action".
+    """
+    bands = [("100", "&lt; $100"), ("500", "&lt; $500"), ("1000", "&lt; $1K"),
+             ("5000", "&lt; $5K"), ("", "Any")]
+    btns = "".join(
+        f'<button type="button" onclick="setRisk(this,\'{v}\')">{lbl}</button>'
+        for v, lbl in bands)
+    return f'<span class="rpre">{btns}</span>'
+
+
 def _exposure_bar(board):
     """What is already at risk, stated BEFORE the reader picks up something new.
 
@@ -2229,8 +2260,8 @@ def board_table(trades, tier):
           + sth("ticker","Ticker","l") + sth("strat","Strategy","l")
           + "".join(sth(*o) for o in order) + "</tr></thead>")
     toolbar=("<div class=\"btoolbar\"><span class=\"flab\">Max loss &le; $</span>"
-             "<input id=\"fmaxloss\" type=\"number\" class=\"n\" placeholder=\"any\" oninput=\"filterBoard()\">"
-             "<button type=\"button\" class=\"ghostbtn\" onclick=\"clearFilter()\">Clear</button>"
+             "<input id=\"fmaxloss\" type=\"number\" class=\"n\" placeholder=\"any\" oninput=\"presetOff();filterBoard()\">"
+             + _risk_presets() +
              "<button type=\"button\" id=\"grpbtn\" class=\"ghostbtn\" data-on=\"0\" onclick=\"groupByTicker()\">Group by ticker</button>"
              "<span class=\"dim\" id=\"fcount\" style=\"margin-left:auto\"></span>"
              "<span class=\"rgkey\" title=\"Numbers are tinted by where they sit vs the desired trading range\">"
@@ -3647,8 +3678,22 @@ def view_bitcoin():
         bar = int(min(n_res / max(min_n, 1), 1.0) * 100)
         verdict = (d["verdict"] if d else
                    f"Nothing resolved yet — the first claims mature on their 14-day horizon.")
+        # Below a handful of resolutions the table of awaiting rows is not a track record and
+        # should not be laid out like one. Say what is being built and when the first answer
+        # arrives, so an empty column reads as a horizon rather than as a failure — and so
+        # nobody mistakes four pending claims for evidence.
+        learning = ""
+        if n_res < _DIRECTION_LEARNING_MIN:
+            pending = [r for r in claims if r.get("status") not in ("resolved", "unresolvable")]
+            due = sorted(str(r.get("resolves_on") or "") for r in pending if r.get("resolves_on"))
+            when = f" — first resolutions expected {esc(due[0][:10])}" if due else ""
+            learning = ('<div class="warn" style="margin:8px 0">'
+                        'VEGA is building its directional track record. '
+                        f'<b>{len(pending)}</b> claim(s) in flight{when}. '
+                        'Nothing here is a hit rate yet.</div>')
         grade_line = (f'<div class="kv"><span class="k">Grading progress</span>'
                       f'<b>{n_res}/{min_n} resolved</b></div>'
+                      f'{learning}'
                       f'<div class="sc"><div class="row"><div class="bar">'
                       f'<i class="{"low" if bar < 50 else ""}" style="width:{bar}%"></i></div></div></div>'
                       f'<div class="dim" style="margin-top:6px">{esc(verdict)}</div>')
