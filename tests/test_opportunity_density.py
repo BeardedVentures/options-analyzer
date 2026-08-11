@@ -185,3 +185,108 @@ def test_the_check_fails_open_on_anything_it_cannot_read(pat, strat):
     """A warning invented from missing data teaches the operator to dismiss warnings, which
     costs more than the one it would have caught."""
     assert S.check_thesis_contradiction(pat, strat) is None
+
+
+# ── Three-bucket Why (A2-8) ───────────────────────────────────────────────────────────────────
+
+def _why(**over):
+    c = {"ticker": "AAA", "strat_type": "bull_put", "iv_rank": 76.0, "vrp": 10.7,
+         "edge_pp": 12.0, "roi": 0.30, "true_pop_conf": "HIGH",
+         "support_levels": [{"price": 117.21, "touches": 3, "strength": 60.0}],
+         "resistance_levels": [], "entry_timing": {}, "news_sentiment": "NEUTRAL"}
+    c.update(over)
+    return vega_app._copilot_why(c)
+
+
+def test_why_splits_into_three_labelled_buckets():
+    t = _txt(_why(already_in_position=True))
+    for head in ("Why it works", "What can break it", "What VEGA doesn't like"):
+        assert head in t, f"missing bucket: {head}"
+
+
+def test_a_reservation_is_not_filed_as_a_market_risk():
+    """Concentration is a reason to pass, not a risk you price and accept. Merging the two
+    lets a real objection read as ordinary trade risk."""
+    h = _why(already_in_position=True)
+    dislikes = h.split("What VEGA doesn't like")[1]
+    assert "concentration" in dislikes
+
+
+def test_selling_premium_always_names_vol_expansion_as_a_risk():
+    """Short vol by construction — the risk is standing, not conditional on a flag."""
+    assert "Volatility expanding" in _txt(_why(iv_rank=76.0))
+
+
+def test_the_defended_level_is_the_one_that_has_to_hold():
+    """The shelter is both the reason to take the trade and its single point of failure.
+    Showing only the first half is how a defended level starts reading as a guarantee.
+
+    A bull put is threatened from below, so the level named is the nearest support; a bear
+    call is threatened from above, so it is the nearest resistance."""
+    sup = [{"price": 117.21}, {"price": 110.0}]
+    res = [{"price": 130.0}, {"price": 141.0}]
+    assert vega_app._defended_level(
+        {"strat_type": "bull_put", "support_levels": sup, "resistance_levels": res}) == 117.21
+    assert vega_app._defended_level(
+        {"strat_type": "bear_call", "support_levels": sup, "resistance_levels": res}) == 130.0
+
+
+def test_no_level_is_invented_when_none_was_detected():
+    assert vega_app._defended_level({"strat_type": "bull_put", "support_levels": []}) is None
+
+
+def test_a_condor_names_no_single_level():
+    """It has two, and naming one would say the other does not matter."""
+    assert vega_app._defended_level(
+        {"strat_type": "iron_condor", "support_levels": [{"price": 117.21}],
+         "resistance_levels": [{"price": 130.0}]}) is None
+
+
+def test_buckets_with_nothing_in_them_are_not_rendered():
+    t = _txt(_why(iv_rank=76.0, edge_pp=12.0, already_in_position=False))
+    assert "What VEGA doesn't like" not in t
+
+
+def test_model_confidence_sits_with_the_evidence_it_grades():
+    h = _why()
+    assert "Model confidence" in h
+    assert h.index("Why it works") < h.index("Model confidence")
+
+
+# ── Edge decomposition + rank context (A2-5, A2-9) ────────────────────────────────────────────
+
+def test_edge_decomposition_names_the_largest_contributors():
+    h = vega_app._edge_decomposition({"component_breakdown": {"vrp": 26, "true_pop_edge": 18,
+                                                              "technical": 14, "news": 5}})
+    assert "VRP" in h and "26" in h
+
+
+def test_no_decomposition_is_invented_when_the_breakdown_is_absent():
+    """The fast scan has no component breakdown. Reconstructing one from the score would be
+    a composition the engine never computed."""
+    assert vega_app._edge_decomposition({}) == ""
+    assert vega_app._edge_decomposition({"component_breakdown": {}}) == ""
+
+
+def test_a_secondary_idea_says_which_component_it_lost_on():
+    lead = {"ticker": "WMT", "component_breakdown": {"vrp": 30, "true_pop_edge": 25}}
+    peer = {"ticker": "PEP", "component_breakdown": {"vrp": 12, "true_pop_edge": 24}}
+    assert "VRP" in vega_app._ranks_lower_because(peer, lead)
+
+
+def test_ranks_lower_is_silent_without_both_breakdowns():
+    assert vega_app._ranks_lower_because({"ticker": "PEP"}, {"ticker": "WMT"}) == ""
+
+
+# ── Exposure bar (A2-13) ──────────────────────────────────────────────────────────────────────
+
+def test_exposure_bar_appears_once_the_book_is_not_obvious():
+    h = vega_app._exposure_bar({"book": {"open_positions": 2, "current_book_risk_usd": 132,
+                                         "open_tickers": ["WMT", "TSLA"]}})
+    assert "2 open positions" in h and "132" in h and "WMT" in h
+    assert 'href="/?view=open"' in h
+
+
+@pytest.mark.parametrize("n", [0, 1])
+def test_exposure_bar_hidden_when_the_badges_already_say_it(n):
+    assert vega_app._exposure_bar({"book": {"open_positions": n}}) == ""

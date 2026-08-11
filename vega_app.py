@@ -898,6 +898,10 @@ th.srt .arw{color:var(--green);font-size:9px}
 .regband.ok{border-left-color:var(--green);background:var(--greensoft)}
 .regband.warn{border-left-color:var(--amber);background:var(--ambersoft)}
 .regband.bad{border-left-color:var(--red);background:var(--redsoft)}
+/* Risk already committed, above the list of ways to commit more. */
+.expbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:11px;padding:8px 13px;border-radius:8px;background:var(--ambersoft);border:1px solid rgba(240,180,41,.25);font-size:11.5px;color:var(--ink2);text-decoration:none}
+.expbar .go{margin-left:auto;color:var(--amber);font-weight:700;font-size:10.5px}
+.expbar:hover{border-color:var(--amber)}
 /* Opportunity-density funnel: the denominator behind the board. */
 .funnel{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:11px;padding:9px 13px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
 .funnel .step{display:flex;align-items:baseline;gap:6px}
@@ -905,6 +909,30 @@ th.srt .arw{color:var(--green);font-size:9px}
 .funnel .lb{font-size:10.5px;color:var(--ink3)}
 .funnel .arw{color:var(--ink3);font-size:12px}
 @media(max-width:760px){.mccards{grid-template-columns:1fr}.funnel .step{width:100%}.funnel .arw{display:none}}
+/* ── Phone (A5-2) ───────────────────────────────────────────────────────────────────────────
+   The SpreadSignal audience arrives from a YouTube link on a phone, and every layout above
+   assumes a desk. Breakpoints only — no separate mobile document, because two documents drift
+   and the second one is always the stale one. The dark theme carries over unchanged; what has
+   to give is density: multi-column grids collapse to one, the wide board scrolls inside its
+   own box instead of pushing the page sideways, and the nav wraps rather than truncating. */
+@media(max-width:620px){
+  .wrap{padding:0 12px 48px}
+  .topnav{padding:8px 12px;flex-wrap:wrap;gap:6px}
+  .nav{flex-wrap:wrap}
+  .nav a{padding:6px 10px;font-size:12px}
+  .rside{width:100%;justify-content:flex-start;font-size:10.5px}
+  h1{font-size:20px}
+  /* The board keeps every column and scrolls within itself — dropping columns on a phone
+     hides the one the reader came to check, and which one that is cannot be known here. */
+  .board{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .board table,.gtbl{min-width:560px}
+  .lgrid{grid-template-columns:1fr 1fr}
+  .lottowrap{grid-template-columns:1fr}
+  .copnums,.copgrid{grid-template-columns:1fr 1fr}
+  .mccard .big{font-size:17px}
+  .expbar .go{margin-left:0;flex-basis:100%}
+  .kpikey{gap:8px;font-size:9.5px}
+}
 .mcpanel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
 .mcpanel>.hd{font-size:9.5px;color:var(--ink3);text-transform:uppercase;letter-spacing:.07em;font-weight:700;margin-bottom:8px}
 .pbrow{display:block;padding:7px 0;border-bottom:1px solid var(--line2);text-decoration:none;color:inherit;cursor:pointer}
@@ -940,7 +968,18 @@ th.srt .arw{color:var(--green);font-size:9px}
 .copwhy .row{display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:11.5px;color:var(--ink2);line-height:1.45}
 .copwhy .row .tick{color:var(--green);flex-shrink:0;font-weight:800}
 .copwhy .row.warn .tick{color:var(--amber)}
-.copidea{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line2);font-size:11.5px;cursor:pointer;text-decoration:none;color:inherit}
+/* Three buckets: evidence, market risk, VEGA's own reservations. The last two are different
+   decisions — one is priced and accepted, the other is a reason to pass. */
+.whyblk{margin-top:9px}
+.whyblk:first-child{margin-top:0}
+.whyblk .bh{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3);padding-bottom:2px;border-bottom:1px solid var(--line);margin-bottom:3px}
+.whyblk.risk .bh{color:var(--amber)}
+.confbadge{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-top:5px}
+/* What the headline edge score is made of, where the score is shown. */
+.edgedecomp{margin-top:7px;padding-top:6px;border-top:1px solid var(--line);font-size:10px;color:var(--ink3);line-height:1.5}
+.copidea{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line2);font-size:11.5px;cursor:pointer;text-decoration:none;color:inherit;flex-wrap:wrap}
+/* Why this one ranks lower — a leaderboard with reasons teaches the weighting. */
+.copidea .wl{flex-basis:100%;font-size:10px;color:var(--ink3);padding-left:2px}
 .copidea:last-of-type{border-bottom:none}
 .copidea:hover{background:rgba(255,255,255,.03)}
 .copidea .r{color:var(--ink3);width:14px;flex-shrink:0}
@@ -1511,6 +1550,30 @@ def detail_drawer(c, i, tier):
     return _copilot(c, i, tier, log_form, deep)
 
 
+def _edge_decomposition(c):
+    """What the headline edge score is made of, on one line.
+
+    A bare "78" cannot be argued with: the reader has no way to tell whether it came from a
+    rich premium, a probability gap, or the chart. The full composition panel already exists
+    behind "Full analysis", but a number the reader has to click to understand is a number
+    they take on faith at the moment they are deciding. This surfaces the three or four
+    largest contributors where the score is shown, and stays silent when the breakdown is
+    absent (fast scan) rather than reconstructing one from the score.
+    """
+    bd = c.get("component_breakdown") or {}
+    if not bd:
+        return ""
+    labels = dict((k, lbl) for k, lbl, _ in EDGE_COMPONENTS)
+    labels.update((k, lbl) for k, lbl, _ in EDGE_BONUSES)
+    got = [(labels.get(k, k.replace("_", " ").title()), v)
+           for k, v in bd.items() if isinstance(v, (int, float)) and v > 0]
+    if not got:
+        return ""
+    got.sort(key=lambda kv: kv[1], reverse=True)
+    parts = " &middot; ".join(f'+{v:g} {esc(lbl)}' for lbl, v in got[:4])
+    return f'<div class="edgedecomp">{parts}</div>'
+
+
 def _pattern_read(c):
     """(pattern label, direction) for a card, or (None, None) when the chart was unreadable.
 
@@ -1537,26 +1600,38 @@ def _thesis_contradiction(c):
 
 
 def _copilot_why(c):
-    """"Why VEGA likes this trade" as plain sentences a person can agree or disagree with.
+    """The case for the trade, split into the three questions a reader actually asks.
 
     The old drawer led with a payoff diagram and a 14-row metric table, which asks the reader
     to assemble the case themselves. The engine already HAS the case — it just never stated
-    it. Reasons are ordered by how much they should move conviction, and anything advisory is
-    marked so a warning never masquerades as a green tick.
+    it. But stating it as one undifferentiated stream had its own failure: IV rank, VRP, POP,
+    resistance, timing, news and concentration all arrived at the same visual weight, so the
+    reader had to sort supporting evidence from risk from VEGA's own reservations while
+    reading. Three labelled buckets do that sorting once, here:
+
+      WHY IT WORKS          the evidence for the trade
+      WHAT CAN BREAK IT     what the MARKET would have to do to hurt it
+      WHAT VEGA DOESN'T LIKE  what is wrong with the setup or your book regardless
+
+    The split matters because the last two are different decisions. A market risk is priced
+    and accepted; a reservation about concentration or a chart that disagrees is a reason to
+    pass. Merging them lets a real objection read as ordinary trade risk.
     """
-    rows = []
+    works, breaks, dislikes = [], [], []
 
-    def ok(txt):
-        rows.append(f'<div class="row"><span class="tick">&#10003;</span><span>{txt}</span></div>')
+    def _row(bucket, glyph, cls, txt):
+        bucket.append(f'<div class="row {cls}"><span class="tick">{glyph}</span>'
+                      f'<span>{txt}</span></div>')
 
-    def warn(txt):
-        rows.append(f'<div class="row warn"><span class="tick">&#9888;</span><span>{txt}</span></div>')
+    def ok(txt):       _row(works, "&#10003;", "", txt)
+    def risk(txt):     _row(breaks, "&#9888;", "warn", txt)
+    def dislike(txt):  _row(dislikes, "&#9888;", "warn", txt)
 
     ivr = c.get("iv_rank")
     if ivr is not None and ivr >= 50:
         ok(f'IV rank {ivr:.0f} — options are priced rich relative to the past year')
     elif ivr is not None:
-        warn(f'IV rank {ivr:.0f} — premium is not especially rich here')
+        dislike(f'IV rank {ivr:.0f} — premium is not especially rich here')
 
     vrp = c.get("vrp")
     if vrp is not None and vrp > 0:
@@ -1565,9 +1640,9 @@ def _copilot_why(c):
 
     edge = c.get("edge_pp")
     if edge is not None and edge > 0:
-        ok(f'Probability of profit beats what the market is pricing by {edge:.1f}pp')
+        ok(f'VEGA POP beats what the market is pricing by {edge:.1f}pp')
     elif edge is not None:
-        warn(f'Probability of profit trails the market\'s own pricing by {abs(edge):.1f}pp')
+        dislike(f'VEGA POP trails the market\'s own pricing by {abs(edge):.1f}pp')
 
     # The structural read — this is the part no other retail screener has.
     sh = _shelter_note(c)
@@ -1578,6 +1653,13 @@ def _copilot_why(c):
         lead = ("Short strike sits " if sh[:5] in ("under", "over ") else "")
         ok(f'{(lead + sh) if lead else sh[:1].upper() + sh[1:]} — the market has to break a '
            f'level it has defended before the position is threatened')
+        # Same level, stated as the thing that would go wrong. The shelter is the reason to
+        # take the trade AND the single point of failure, and only ever showing the first
+        # half is how a defended level starts reading as a guarantee.
+        lvl = _defended_level(c)
+        if lvl is not None:
+            risk(f'That level failing — a decisive break of ${lvl:,.2f} puts the short strike '
+                 f'in open air')
 
     et = c.get("entry_timing") or {}
     if et:
@@ -1586,7 +1668,7 @@ def _copilot_why(c):
             if head:
                 ok(f'Entry timing: {head.lower()}')
         else:
-            warn(f'Entry timing: {et.get("readiness", "").title()} — '
+            risk(f'Entry timing: {et.get("readiness", "").title()} — '
                  f'{(et.get("headline") or "").lower()}. Premium may improve if deferred')
 
     roi = c.get("roi")
@@ -1595,22 +1677,66 @@ def _copilot_why(c):
 
     if (c.get("news_sentiment") or "").upper() in ("NEUTRAL", "POSITIVE", "CLEAR"):
         ok('No blocking news against the thesis')
+
+    # Selling premium is short vol by construction, so an IV expansion is the standing risk on
+    # every one of these trades and it belongs on the list whether or not anything flagged it.
+    if ivr is not None and ivr >= 50:
+        risk(f'Volatility expanding — you are short vol at IV rank {ivr:.0f}, and a spike '
+             f'marks the position against you before any move in the underlying')
+
     env = c.get("env") or {}
     if env.get("band") in ("warm", "hot"):
-        warn(f'Environment is {env["band"]} ({env.get("heat", 0)}/100) — '
+        risk(f'Environment is {env["band"]} ({env.get("heat", 0)}/100) — '
              f'consider a smaller size')
+
     if c.get("already_in_position"):
-        warn(f'You already hold {esc(c["ticker"])} — this adds concentration, not diversification')
-    # Chart shape against trade direction. Reuses the concentration warning's mechanism
-    # because it is the same class of fact: nothing here fails a gate, but a bull put under a
-    # chart making lower highs is a conflict the operator should have to look at and dismiss
-    # deliberately rather than never see.
+        dislike(f'You already hold {esc(c["ticker"])} — this adds concentration, not diversification')
+    # Chart shape against trade direction. A reservation, not a market risk: the conflict is
+    # already true at entry rather than something the market might later do.
     contra = _thesis_contradiction(c)
     if contra:
-        warn(esc(contra))
-    if not rows:
+        dislike(esc(contra))
+
+    if not works:
         ok('Passed the full qualifying gate set')
-    return "".join(rows)
+
+    conf = (c.get("true_pop_conf") or "").upper()
+    conf_badge = ""
+    if conf:
+        ccol = ("var(--green)" if conf == "HIGH" else
+                "var(--red)" if conf == "LOW" else "var(--amber)")
+        # Directly under the evidence it qualifies. At the foot of the card it read as a
+        # footnote to the whole section, when what it actually grades is the POP claim above.
+        conf_badge = (f'<div class="confbadge" style="color:{ccol}">'
+                      f'Model confidence: {conf.title()}</div>')
+
+    def section(title, rows, cls=""):
+        if not rows:
+            return ""
+        return (f'<div class="whyblk {cls}"><div class="bh">{title}</div>'
+                + "".join(rows) + '</div>')
+
+    return (section("Why it works", works) + conf_badge
+            + section("What can break it", breaks, "risk")
+            + section("What VEGA doesn't like", dislikes, "risk"))
+
+
+def _defended_level(c):
+    """The price the shelter note is asserting — the one that has to hold.
+
+    Returns None when no level was found, so the failure mode is a missing sentence rather
+    than an invented price.
+    """
+    strat = str(c.get("strat_type") or c.get("strategy") or "").lower()
+    below = [_f(l.get("price")) for l in (c.get("support_levels") or [])
+             if _f(l.get("price")) is not None]
+    above = [_f(l.get("price")) for l in (c.get("resistance_levels") or [])
+             if _f(l.get("price")) is not None]
+    if "bear_call" in strat or "bear call" in strat:
+        return min(above) if above else None
+    if "condor" in strat:
+        return None                      # two levels, and naming one would mislead
+    return max(below) if below else None
 
 
 def _copilot(c, i, tier, log_form, deep):
@@ -1623,7 +1749,13 @@ def _copilot(c, i, tier, log_form, deep):
     tp = c.get("true_pop")
     roi = c.get("roi")
     ml = c.get("max_loss_usd")
-    rank_note = "Best overall opportunity" if i == 0 else f"Ranked #{i+1} on today's board"
+    # "Best overall opportunity" says nothing about the field it won. #1 of 27 is a different
+    # claim from #1 of 2, and the reader cannot tell which they are looking at without the
+    # denominator — the same gap the density funnel closes for the board as a whole.
+    n_board = len(_COPILOT_PEERS) or 0
+    of_n = f" of {n_board} qualified" if n_board > 1 else ""
+    rank_note = (f"Top pick{of_n} today" if i == 0
+                 else f"Ranked #{i+1}{of_n} on today's board")
 
     def num(k, v, col=""):
         return (f'<div class="c"><span class="k">{k}</span>'
@@ -1656,7 +1788,7 @@ def _copilot(c, i, tier, log_form, deep):
            '<div class="who">VEGA recommendation</div>'
            f'<div class="nm">{esc(c["ticker"])} <span>{esc(_strat_label(c))}</span></div>'
            f'<div class="copbadge">{rank_note}</div>'
-           f'{nums}</div>')
+           f'{nums}{_edge_decomposition(c)}</div>')
 
     why = ('<div class="copcard copwhy"><div class="hd">Why VEGA likes this trade</div>'
            f'{_copilot_why(c)}</div>')
@@ -1684,14 +1816,42 @@ def _copilot_other_ideas(i):
     if not peers:
         return ('<div class="copcard"><div class="hd">Other top ideas</div>'
                 '<div class="dim" style="font-size:11.5px">No other qualified setups today.</div></div>')
+    lead = _COPILOT_PEERS[i][1] if i < len(_COPILOT_PEERS) else {}
     rows = ""
     for j, p in peers:
         sc = (p.get("edge_score") or p.get("priority") or 0)
+        why = _ranks_lower_because(p, lead)
         rows += (f'<a class="copidea" onclick="event.stopPropagation();vopen({j})">'
                  f'<span class="r num">{j+1}</span><span class="t">{esc(p["ticker"])}</span>'
                  f'<span class="s">{esc(_strat_label(p))}</span>'
-                 f'<span class="e num">Edge {sc:.0f}</span></a>')
+                 f'<span class="e num">Edge {sc:.0f}</span>'
+                 + (f'<span class="wl">{why}</span>' if why else "")
+                 + '</a>')
     return f'<div class="copcard"><div class="hd">Other top ideas</div>{rows}</div>'
+
+
+def _ranks_lower_because(p, lead):
+    """One clause naming the largest component where this setup lost to the top pick.
+
+    A ranked list with no reasons is a leaderboard; a ranked list WITH reasons teaches the
+    reader how VEGA weighs things, which is the only way they ever learn to disagree with it
+    usefully. Derived from the score composition both cards already carry — nothing new is
+    computed, and when either breakdown is missing the line is simply omitted.
+    """
+    pb, lb = (p.get("component_breakdown") or {}), (lead.get("component_breakdown") or {})
+    if not pb or not lb or p is lead:
+        return ""
+    labels = dict((k, lbl) for k, lbl, _ in EDGE_COMPONENTS)
+    labels.update((k, lbl) for k, lbl, _ in EDGE_BONUSES)
+    deficits = [(labels.get(k, k.replace("_", " ")), lb.get(k, 0) - pb.get(k, 0))
+                for k in set(lb) | set(pb)
+                if isinstance(lb.get(k, 0), (int, float))
+                and isinstance(pb.get(k, 0), (int, float))]
+    deficits = [d for d in deficits if d[1] > 0]
+    if not deficits:
+        return "Ranks lower on the composite, not on any single component"
+    lbl, gap = max(deficits, key=lambda kv: kv[1])
+    return f'{esc(lbl)} {gap:g} pts behind {esc(lead.get("ticker") or "the top pick")}'
 
 
 def _copilot_snapshot(c):
@@ -1862,6 +2022,27 @@ def _beta_flags(c):
     if sk:
         out += f'<span class="bflag skew" title="IV-skew component — richer downside insurance being sold">SKEW +{sk:.0f}</span>'
     return out
+
+
+def _exposure_bar(board):
+    """What is already at risk, stated BEFORE the reader picks up something new.
+
+    The same facts are in the book-health footer, but the footer sits under everything the
+    page is trying to sell — by the time it is read the decision is made. Risk that is
+    already committed belongs above the list of ways to commit more. Hidden below two open
+    positions, where the answer is obvious from the IN POSITION badges alone.
+    """
+    bk = board.get("book") or {}
+    n = bk.get("open_positions") or 0
+    if n < 2:
+        return ""
+    risk = bk.get("current_book_risk_usd") or 0
+    tks = bk.get("open_tickers") or []
+    hold = (" &middot; " + ", ".join(esc(t) for t in tks)) if tks else ""
+    return (f'<a class="expbar" href="/?view=open">'
+            f'<b>{n} open positions</b> &middot; max remaining loss '
+            f'<b class="num">${risk:,.0f}</b>{hold}'
+            f'<span class="go">Open tab &rarr;</span></a>')
 
 
 def book_footer(board):
@@ -2321,6 +2502,7 @@ def view_today(board, s, tier):
         + _mc_status_cards(board, trades, tier)
         + reg_html
         + _mc_density_bar(board, trades)
+        + _exposure_bar(board)
         + prov
         + '<div class="mcmain">'
         + _mc_playbook(trades)
@@ -3273,6 +3455,14 @@ def _btc_candidates_block() -> str:
         why = ("passes every gate" if ok else "blocked by " + ", ".join(f.replace("_", " ")
                                                                        for f in failed[:3]))
         tp = c.get("true_pop")
+        # The edge claim itself. The table showed VEGA's POP but never the market's, so the
+        # one number that says WHY the spread is worth selling — the gap the whole engine
+        # exists to find — was the one column missing from the page listing the trades.
+        gap = c.get("pop_gap")
+        if gap is None and tp is not None and c.get("pop_implied") is not None:
+            gap = float(tp) - float(c["pop_implied"])
+        gtxt = f'{gap*100:+.1f}pp' if gap is not None else "—"
+        gcol = ("var(--green)" if gap > 0 else "var(--red)") if gap is not None else "var(--ink3)"
         rows_html += (
             f'<tr><td class="l"><b>{esc(c.get("ticker"))}</b> '
             f'<span class="num">{c.get("short_strike"):g}/{c.get("long_strike"):g}</span> '
@@ -3281,13 +3471,14 @@ def _btc_candidates_block() -> str:
             f'<td class="num">{(c.get("natural_credit_to_width") or 0)*100:.0f}%</td>'
             f'<td class="num">{abs(c.get("short_delta") or 0):.2f}</td>'
             f'<td class="num">{f"{tp*100:.0f}%" if tp is not None else "—"}</td>'
+            f'<td class="num" style="color:{gcol}">{gtxt}</td>'
             f'<td class="num">${(c.get("max_loss_usd") or 0):.0f}</td>'
             f'<td class="{gcls}">{gp}/{gt}</td>'
             f'<td class="l dim">{esc(why)}</td></tr>')
 
     stamp = (data.get("meta") or {}).get("stamp") or ""
     return (f'<table class="gtbl"><thead><tr><th class="l">Spread</th><th>Credit</th>'
-            f'<th>cr/w</th><th>&Delta;</th><th>True POP</th><th>Max risk</th><th>Gates</th>'
+            f'<th>cr/w</th><th>&Delta;</th><th title="The drift-removed probability of profit VEGA computes">VEGA POP</th><th title="VEGA POP minus the market-implied POP (1-delta). Positive means VEGA sees the trade as more likely to work than the market is pricing.">Edge</th><th>Max risk</th><th>Gates</th>'
             f'<th class="l">Reading</th></tr></thead><tbody>{rows_html}</tbody></table>'
             f'<div class="dim" style="font-size:11px;margin-top:4px">'
             f'Natural credit — sell the bid, buy the ask, which is what a fill actually pays. '
