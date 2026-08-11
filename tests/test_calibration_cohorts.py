@@ -86,3 +86,19 @@ def test_an_empty_ledger_reports_no_cohort_rather_than_a_fake_one(ledger):
     s = C.summary(ledger([]))
     assert s["calibration_gap_pp"] is None
     assert s["calibration_cohort"] is None
+
+
+def test_the_summary_reports_how_much_of_the_ledger_is_analysable(ledger):
+    """Zero eligible means every calibration number on the page is drawn from trades the
+    system itself calls broken-thermometer readings. That has to be visible."""
+    s = C.summary(ledger([_r(0.75, "win", "2026-07-10"), _r(0.75, "loss", "2026-09-10")]))
+    assert "calibration_eligible_n" in s
+    assert "calibration_lead_eligible" in s
+
+
+def test_a_cohort_lookup_failure_does_not_silently_re_pool(monkeypatch):
+    """A swallowed import returning one shared bucket is indistinguishable from a healthy
+    single-regime ledger, and it suppresses the multi-cohort warning."""
+    import analysis.outcome_logger as ol
+    monkeypatch.setattr(ol, "cohort", lambda r: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert C._cohort_of({}) == "cohort-unavailable"

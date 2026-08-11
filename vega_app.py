@@ -3110,7 +3110,7 @@ def _lottery_card(x):
         f'<div><div class="cap">Breakeven move</div><div class="v">{(bemv or 0):+.1f}%</div><div class="dim">to ${(be or 0):.2f}</div></div>'
         f'<div><div class="cap">Vol edge</div><div class="v {vecls}">{vetxt}</div>'
         f'<div class="dim">{vesub}</div></div>'
-        f'<div><div class="cap">Chance of winning</div><div class="v">{prob}</div>'
+        f'<div><div class="cap">Chance past strike</div><div class="v">{prob}</div>'
         f'<div class="dim" title="Delta — the market\'s own estimate">&Delta; {(delta or 0):.2f} &middot; IV {(iv*100 if iv and iv<3 else iv) or 0:.0f}%</div></div>'
         f'</div>'
         f'<div class="lwhy">{dir_tag}<b>Why {tk}:</b> '
@@ -3367,7 +3367,7 @@ def view_track():
         # pooling them reported -56.8pp, which describes the fill model rather than the POP
         # model — the same number vega_status has refused to pool since the cohorts existed.
         + _tile("Calibration gap", (f'{cg:+.0f}pp' if cg is not None else '—'),
-                (f'{esc(str(s.get("calibration_cohort") or "")[:34])} · n={s.get("calibration_cohort_n")}'
+                (f'{str(s.get("calibration_cohort") or "")[:34]} · n={s.get("calibration_cohort_n")}'
                  + (f' · {s.get("calibration_cohorts_present")} cohorts in ledger'
                     if (s.get("calibration_cohorts_present") or 0) > 1 else ''))
                 if cg is not None else 'realized − predicted POP', cg_cls)
@@ -3396,8 +3396,16 @@ def view_track():
     cal = (f'<h3 style="margin-top:20px">Calibration — predicted POP vs realized hit-rate</h3>'
            f'<table class="gtbl"><thead><tr><th class="l">Predicted POP band</th><th>n</th>'
            f'<th>Predicted</th><th>Realized</th><th>Gap</th></tr></thead><tbody>{crows}</tbody></table>'
-           f'<div class="dim" style="font-size:11px;margin-top:4px">Grows meaningful past ~30 closed trades — '
-           f'currently {c["closed"]} closed. This is the signal that flips Gate&nbsp;1 from provisional to validated.</div>')
+           f'<div class="dim" style="font-size:11px;margin-top:4px">Rows describe ONE cohort — '
+           f'{esc(str(s.get("calibration_cohort") or "—"))}, n={s.get("calibration_cohort_n") or 0} of '
+           f'{c["closed"]} closed. Grows meaningful past ~30 trades <b>within a cohort</b>; '
+           f'pooling regimes that were selected or filled differently measures the fill model, '
+           f'not the forecast.'
+           + ('' if s.get("calibration_lead_eligible") else
+              ' <b>No cohort here passes analysis_eligible</b> — every trade in this table was '
+              'selected or filled on a basis the desk could not execute, so this is not yet '
+              'evidence about the model.')
+           + '</div>')
 
     # Per-position CLV table (worst → best; worst are the catalyst suspects)
     prows = ""

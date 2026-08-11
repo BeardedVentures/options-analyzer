@@ -67,3 +67,27 @@ def test_the_scan_ranks_by_edge_and_keeps_unmeasurable_cards_last():
     cards.sort(key=lambda c: (c.get("vol_edge_pp") is not None, c.get("vol_edge_pp") or -999),
                reverse=True)
     assert [c["ticker"] for c in cards] == ["C", "A", "B"]
+
+
+# ── Review regressions ────────────────────────────────────────────────────────────────────────
+
+def test_a_genuine_zero_edge_is_not_treated_as_missing():
+    """`or -999` mapped a real 0.0pp edge to the sentinel, sorting it below -8.0pp — an
+    inversion hitting exactly the cards on the decision boundary."""
+    import lottery_scanner as L
+    cards = [{"ticker": "Z", "vol_edge_pp": 0.0}, {"ticker": "N", "vol_edge_pp": None},
+             {"ticker": "B", "vol_edge_pp": -8.0}, {"ticker": "G", "vol_edge_pp": 12.0}]
+    cards.sort(key=L._vol_edge_sort_key, reverse=True)
+    assert [c["ticker"] for c in cards] == ["G", "Z", "B", "N"]
+
+
+def test_the_realised_window_matches_the_horizon_the_option_prices():
+    """A hardcoded 60-day lookback against ~35-day implied ranks a name that spiked two months
+    ago and has since gone quiet straight to the top — the mismatch VRP_HV_WINDOW exists to
+    prevent."""
+    import inspect
+    import config
+    import lottery_scanner as L
+    assert "VRP_HV_WINDOW" in inspect.getsource(L.vol_edge)
+    s = _series(0.40 / math.sqrt(252), n=int(config.VRP_HV_WINDOW) + 5)
+    assert L.vol_edge(s, 0.20) is not None, "the default window must fit its own minimum history"

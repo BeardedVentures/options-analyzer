@@ -31,7 +31,7 @@ sys.path.insert(0, str(BASE))
 import strategies
 
 
-def vol_edge(px_close, iv, window: int = 60):
+def vol_edge(px_close, iv, window: int = None):
     """The edge a BUYER of options has: realized vol above implied.
 
     This tab had no edge metric at all. It ranked nothing, scored nothing, and labelled every
@@ -54,8 +54,15 @@ def vol_edge(px_close, iv, window: int = 60):
     side is unavailable — absence, not a zero that would rank as neutral.
     """
     import math
+    import config
     if iv is None or iv <= 0:
         return None
+    # Match the realised window to the horizon the option actually prices. A hardcoded 60 days
+    # against ~35-day implied ranks a name that spiked two months ago and has since gone quiet
+    # straight to the top — the same lookback/horizon mismatch config.VRP_HV_WINDOW exists to
+    # prevent ("HV lookback days — set equal to PREFERRED_DTE_TARGET").
+    if window is None:
+        window = int(getattr(config, "VRP_HV_WINDOW", 35))
     closes = [float(c) for c in px_close if c and float(c) > 0]
     if len(closes) < window + 1:
         return None
@@ -140,12 +147,23 @@ def _build_call(ticker, price, tech, news, chain_calls, budget, dte_lo=25, dte_h
         "iv_rank": tech.get("iv_rank"),
         "breakeven": round(be, 2), "breakeven_move_pct": round(be_move, 1),
         "target_multiple": tgt_mult, "target_price": round(tgt_price, 2),
-        "realized_vol_30d": tech.get("realized_vol") or tech.get("realized_vol_30d"),
+        "realized_vol_30d": tech.get("rv_30d") or tech.get("rv_20d"),
         "vol_edge_pp": tech.get("_vol_edge_pp"),
         "conviction": conv, "setup": setup, "catalyst": catalyst, "signals": signals,
         "news_sentiment": sent, "rsi": rsi, "trend": trend, "nearest_support": support,
         "criteria": ev["criteria"], "news_check": ev["news_check"],
     }
+
+
+def _vol_edge_sort_key(c):
+    """Rank key for the Momentum board: measured edge first, unmeasurable last.
+
+    Split into (has_value, value) so a genuine 0.0pp edge keeps its place. Collapsing None to
+    a sentinel put 0.0 below -8.0pp, which inverts the ordering for exactly the cards sitting
+    on the decision boundary.
+    """
+    v = c.get("vol_edge_pp")
+    return (v is not None, v if v is not None else 0.0)
 
 
 def scan_live(budget):
@@ -178,8 +196,9 @@ def scan_live(budget):
     # watchlist's, so the top card was whichever ticker config happened to list first.
     # Cards with no measurable edge sort last rather than being dropped — the setup may still
     # be worth a look, it just cannot claim the options are cheap.
-    calls.sort(key=lambda c: (c.get("vol_edge_pp") is not None, c.get("vol_edge_pp") or -999),
-               reverse=True)
+    # `or -999` mapped a genuine 0.0pp edge to -999 and sorted it below -8.0pp. The
+    # None-vs-value split is the first key; the value itself must be used as-is.
+    calls.sort(key=_vol_edge_sort_key, reverse=True)
     return calls
 
 

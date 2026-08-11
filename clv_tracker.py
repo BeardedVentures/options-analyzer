@@ -34,6 +34,7 @@ CLI:
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import sys
@@ -148,12 +149,16 @@ def clv_for_record(r: Dict) -> Optional[Dict]:
         theta_exp = entry * (remaining / dte0)
 
     clv = theta_exp - mark
+    # A tie at zero is the maximum win, not a miss. At expiry the baseline is 0 by
+    # construction, so a spread that expired worthless — the whole credit captured — scored
+    # clv == 0 and failed a strict `> 0` test. Nothing beats capturing everything available.
+    beat = clv > 0 or (mark <= 0.0 and entry > 0)
     adverse = mark > entry * (1 + ADVERSE_MOVE_FRAC)
     return {
         "id": r.get("id"), "ticker": r.get("ticker"), "strategy": r.get("strategy"),
         "status": r.get("status"), "entry": entry, "mark": mark,
         "theta_expected": theta_exp, "clv": clv, "days": days,
-        "beat": clv > 0, "adverse": adverse,
+        "beat": beat, "adverse": adverse,
         "news_verdict": ((r.get("news_check") or {}).get("verdict")
                          if isinstance(r.get("news_check"), dict) else r.get("news_verdict")),
         "news_catalyst": bool(r.get("news_catalyst")),
@@ -184,8 +189,12 @@ def _cohort_of(r: Dict) -> str:
     try:
         from analysis import outcome_logger as ol
         return ol.cohort(r)
-    except Exception:                                    # pragma: no cover - defensive
-        return "unknown"
+    except Exception as e:                               # pragma: no cover - defensive
+        # Distinct sentinel per record is wrong (it would fragment), but a silent single
+        # bucket is worse: it re-pools every regime and suppresses the multi-cohort warning
+        # while looking exactly like a clean ledger. Name the failure so it reads as one.
+        logging.getLogger(__name__).warning("[clv] cohort lookup failed: %s", e)
+        return "cohort-unavailable"
 
 
 def calibration_curve(rows: List[Dict], bins=((0, .7), (.7, .8), (.8, .9), (.9, 1.01)),
@@ -308,7 +317,20 @@ def summary(path: Optional[Path] = None) -> Dict:
                           "gap_pp": (lambda g: g * 100 if g is not None else None)(_gap(cur)),
                           "curve": cur})
 
-    lead = by_cohort[0] if by_cohort else None
+    # Prefer a cohort the system considers analysable. Picking purely by size drew the
+    # cockpit's calibration verdict from 41 records that analysis_eligible() rejects as
+    # broken-thermometer readings — selected on a mid basis the desk could not execute.
+    try:
+        from analysis import outcome_logger as _ol
+        _eligible = {c["cohort"] for c in by_cohort
+                     if any(_ol.analysis_eligible(r) for r in closed_rows
+                            if _cohort_of(r) == c["cohort"])}
+    except Exception:                                    # pragma: no cover - defensive
+        _eligible = set()
+    _ranked = ([c for c in by_cohort if c["cohort"] in _eligible]
+               or by_cohort)
+    lead = _ranked[0] if _ranked else None
+    eligible_n = sum(c["n"] for c in by_cohort if c["cohort"] in _eligible)
     curve = lead["curve"] if lead else calibration_curve(rows)
     cal_gap = (lead["gap_pp"] / 100) if (lead and lead["gap_pp"] is not None) else None
 
@@ -326,6 +348,10 @@ def summary(path: Optional[Path] = None) -> Dict:
         "calibration_cohort": (lead or {}).get("cohort"),
         "calibration_cohort_n": (lead or {}).get("n"),
         "calibration_cohorts_present": len(cohorts),
+        # How much of the ledger is analysable at all. Zero here means every calibration
+        # number on the page is drawn from trades the system itself calls unusable.
+        "calibration_eligible_n": eligible_n,
+        "calibration_lead_eligible": bool(lead and lead["cohort"] in _eligible),
         "calibration_by_cohort": by_cohort,
         "edge_retention": edge_retention(rows),
         "freshness": fresh,
@@ -353,8 +379,22 @@ def _print_human(s: Dict) -> None:
     else:
         print("CLV: no scorable positions yet (need current_mark + theta on open records).")
     cg = s["calibration_gap_pp"]
-    print(f"Calibration gap    : {cg:+.0f}pp (realized − predicted POP)" if cg is not None
-          else "Calibration gap    : — (need closed win/loss records)")
+    # Name the cohort. This figure moved from pooled to cohort-scoped, and an unlabelled
+    # number that silently changed meaning is worse than the pooled one it replaced.
+    if cg is None:
+        print("Calibration gap    : — (need closed win/loss records)")
+    else:
+        _ch = s.get("calibration_cohort") or "?"
+        _n = s.get("calibration_cohort_n") or 0
+        _tot = s.get("counts", {}).get("closed") or 0
+        print(f"Calibration gap    : {cg:+.0f}pp (realized − predicted POP)")
+        print(f"  cohort           : {_ch}  n={_n} of {_tot} closed")
+        if (s.get("calibration_cohorts_present") or 1) > 1:
+            print(f"  NOT POOLED       : {s['calibration_cohorts_present']} cohorts in the ledger; "
+                  f"{_tot - _n} closed trades are excluded from this figure.")
+        if not s.get("calibration_lead_eligible"):
+            print("  WARNING          : no cohort passes analysis_eligible — every trade here was "
+                  "selected or filled on a basis the desk could not execute.")
     er = s["edge_retention"]
     if er["avg_realized_net_pl"] is not None:
         print(f"Edge retention     : avg realized net P/L ${er['avg_realized_net_pl']:+.2f}/ct "
