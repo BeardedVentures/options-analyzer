@@ -95,8 +95,13 @@ VIXCLS     HTTP 200   (control)
 ```
 
 GVZ is genuinely free and usable. MOVE is licensed by ICE and is not on FRED — FRED's `BAML*`
-series are credit spreads, not the volatility index. **P2-3 (TLT cross-venue) has no free data
-source**, which under [vega-no-paid-data-until-free-maxed] means it does not get built.
+series are credit spreads, not the volatility index. Yahoo's `^MOVE` answers, but its last print
+is **2026-07-17**, 25 days stale, while `^GVZ` was current to the day.
+
+So **P2-3 (TLT cross-venue) has no free data source** under
+[vega-no-paid-data-until-free-maxed]. TLT ships fully declared with the switch off and the
+reason recorded (§5) rather than omitted — "blocked on a licensed feed" and "nobody thought
+about it" must not look the same in config.
 
 ### 1.6 A2-1's premise is half right
 
