@@ -285,6 +285,21 @@ def select_bull_put_pair(
     # several viable short strikes this evaluates all of them and keeps the best-ROC spread,
     # which can materially shift the selected structure.
     valid_pairs: List[Tuple[Dict, Dict, Dict, float]] = []
+    # Every pair considered and why it was dropped. valid_pairs holds only the survivors, and
+    # the counterfactual question — did this gate avoid anything? — is entirely about the ones
+    # that did not survive.
+    considered: List[Dict] = []
+
+    def _seen(sp, lp, w, m, drop=None):
+        considered.append({
+            "short_strike": sp.get("strike"), "long_strike": lp.get("strike"),
+            "expiration": sp.get("expiration"), "dte": sp.get("dte"),
+            "short_delta": sp.get("delta"), "width": w,
+            "natural_credit_per_share": (m or {}).get("natural_credit_per_share"),
+            "natural_credit_to_width": (m or {}).get("natural_credit_to_width"),
+            "fill_basis": (m or {}).get("fill_basis"),
+            "dropped_for": drop, "selected": False,
+        })
     for _, short_put in short_candidates:
         long_candidates = [
             opt for opt in options
@@ -336,12 +351,14 @@ def select_bull_put_pair(
             if nat_ps <= 0:
                 # ~25% of pairs price this way: at natural prices they are DEBIT spreads.
                 _bump("natural_credit_non_positive")
+                _seen(short_put, long_put, spread_width, nat, "natural_credit_non_positive")
                 continue
             # Price-scaled floor, one definition (config.min_credit_usd_for). See the comment
             # on MIN_CREDIT_USD: a flat dollar floor is 20x stricter on a $37 underlying than
             # on a $773 one, which kept IBIT out of the book entirely.
             if nat["natural_credit_usd"] < config.min_credit_usd_for(current_price):
                 _bump("credit_below_min_usd")
+                _seen(short_put, long_put, spread_width, nat, "credit_below_min_usd")
                 continue
 
             # Universal credit-to-width quality gate — applies to ALL spreads regardless of
@@ -350,6 +367,7 @@ def select_bull_put_pair(
             min_ctw = getattr(config, "MIN_CREDIT_TO_WIDTH_PCT", 0.25)
             if spread_width > 0 and (credit_per_share / spread_width) < min_ctw:
                 _bump("credit_to_width_below_min")
+                _seen(short_put, long_put, spread_width, nat, "credit_to_width_below_min")
                 continue
 
             if spread_width < min_spread_width:
@@ -368,9 +386,22 @@ def select_bull_put_pair(
             # differently. Natural credit-to-width is the fillable version of the same idea.
             roc_rank = nat["natural_credit_to_width"]
             metrics = {**metrics, **nat}
+            _seen(short_put, long_put, spread_width, nat, None)
             valid_pairs.append((short_put, long_put, metrics, float(roc_rank or 0.0)))
 
     if diagnostics is not None:
+        # BEFORE the early return below. A ticker where nothing survived is exactly the case
+        # this record exists for, and returning first meant the counterfactual ledger only ever
+        # saw tickers that produced a trade.
+        if valid_pairs:
+            _win = valid_pairs[0]
+            for c in considered:
+                if (c["short_strike"] == _win[0].get("strike")
+                        and c["long_strike"] == _win[1].get("strike")
+                        and c["expiration"] == _win[0].get("expiration")):
+                    c["selected"] = True
+                    break
+        diagnostics["enumerated"] = considered
         diagnostics["short_candidates_count"] = len(short_candidates)
         diagnostics["valid_pairs_count"] = len(valid_pairs)
         diagnostics["top_reasons"] = sorted(diag_counts.items(), key=lambda x: x[1], reverse=True)[:6]
@@ -379,6 +410,13 @@ def select_bull_put_pair(
         return None
 
     valid_pairs.sort(key=lambda p: p[3], reverse=True)
+
+    # THE WHOLE ENUMERATION, not just the winner. analysis/counterfactuals.py answers "did the
+    # gates avoid anything?" by resolving spreads the system passed over, and its only source
+    # was the vega_candidates snapshot. Once that scan retires, the winner-only record here
+    # would leave nothing to compare the winner against — and the 639 resolved spreads behind
+    # the Gate value panel would stop growing without anything failing.
+
 
     # ── Structural tie-break: prefer a short strike sheltered by a real support level ──
     best_roc = valid_pairs[0][3]
@@ -849,6 +887,11 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         # Where the credit came from: a live book, or a model of one. The board
         # marks the difference rather than letting an after-hours read pass for
         # an executable price.
+        # Every pair the sweep considered on this ticker, winner flagged. The
+        # counterfactual ledger compares the spreads that were passed over against
+        # the one that was taken, so it needs the losers from QUALIFIED tickers too
+        # — a record of rejected tickers alone cannot price a gate.
+        "enumerated": pair_diag.get("enumerated") or [],
         "fill_basis": metrics.get("fill_basis"),
         "quotes_live": metrics.get("quotes_live"),
         "observed_natural_per_share": metrics.get("observed_natural_per_share"),

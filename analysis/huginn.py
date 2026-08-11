@@ -115,11 +115,20 @@ def check_wolves(trade: Dict, data: Dict) -> Dict:
     price = data.get("current_price")
 
     # Gap through the short strike by more than 1.5 ATR — an event, not a trend.
+    #
+    # SIGNED BY WHICH SIDE WAS SOLD. This tested `price < strike` and a DOWNWARD gap only,
+    # which is the danger for a bull put and the opposite of the danger for a bear call: a
+    # short call is threatened by price gapping UP through the strike. Left unsigned, this
+    # wolf would sit silent through exactly the event it exists to catch on every call-side
+    # position — and the board is now mostly bear calls.
     atr = _atr(highs, lows, closes) if closes else None
     if ks and atr and len(closes) >= 2 and price is not None:
-        gap = closes[-2] - price
+        short_is_call = "call" in (trade.get("strategy") or "").lower() or \
+                        "condor" in (trade.get("strategy") or "").lower()
+        gap = (price - closes[-2]) if short_is_call else (closes[-2] - price)
+        through = (price > float(ks)) if short_is_call else (price < float(ks))
         mult = float(_cfg("WOLF_GAP_ATR_MULT", 1.5))
-        if price < float(ks) and gap > mult * atr:
+        if through and gap > mult * atr:
             out["gap_event"] = True
             out["detail"].append(
                 f"Gapped {gap:.2f} ({gap/atr:.1f} ATR) through the {ks:g} strike overnight.")

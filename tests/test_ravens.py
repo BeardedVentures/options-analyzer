@@ -495,3 +495,29 @@ def test_earnings_check_degrades_to_silence_not_to_a_close():
     while ALREADY OPEN must not realise a loss on no evidence."""
     import auto_paper_cycle as apc
     assert apc._earnings_check({"ticker": "___NOT_A_TICKER___"}, "2026-09-18") == {}
+
+
+def test_the_gap_wolf_is_signed_by_which_side_was_sold():
+    """A short PUT is threatened by price gapping down through the strike; a short CALL by
+    price gapping up. Unsigned, this wolf sat silent through exactly the event it exists to
+    catch on every call-side position — and the board is now mostly bear calls.
+
+    Flat series so the gap is unambiguous: _series() trends upward, and mutating its last bar
+    to 120 is a gap DOWN from a ~132 prior close, not the up-gap this means to test.
+    """
+    def _flat(last):
+        closes = [100.0] * 219 + [last]
+        return {"closes": closes, "highs": [c + 1 for c in closes],
+                "lows": [c - 1 for c in closes], "volumes": [100000] * 220,
+                "current_price": last, "current_delta": -0.20, "mark": 1.0,
+                "dte_remaining": 30, "as_of": "2026-08-06T16:00:00",
+                "news_sentiment": None, "earnings_check": {}}
+
+    up, down = _flat(120.0), _flat(80.0)      # short strike is 100 in _trade()
+    put = _trade(strategy="bull_put_spread")
+    call = _trade(strategy="Bear Call Spread")
+
+    assert H.check_wolves(put, down)["gap_event"] is True
+    assert H.check_wolves(put, up)["gap_event"] is False
+    assert H.check_wolves(call, up)["gap_event"] is True
+    assert H.check_wolves(call, down)["gap_event"] is False

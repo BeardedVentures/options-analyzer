@@ -131,3 +131,35 @@ def test_stop_overshoot_is_recorded_at_actual_mark(monkeypatch):
     assert closed is True
     assert cap["exit_price"] == pytest.approx(overshoot)
     assert cap["exit_price"] > ENTRY * config.STOP_LOSS_MULTIPLIER
+
+
+# ── What the desk can actually manage (2026-08-10) ────────────────────────────────────────────
+
+def test_the_desk_refuses_structures_it_cannot_mark():
+    """A trade the desk cannot mark is one it cannot close or learn from, so opening it is
+    worse than skipping it: the position looks managed and is not.
+
+    get_options_chain returns PUTS ONLY, so a bear call's strikes were never found in the
+    reprice index — every mark skipped, forever. Condors are refused outright: the ledger
+    records two strikes and a condor has four."""
+    import auto_paper_cycle as apc
+    assert apc.is_manageable({"strategy": "bull_put_spread"}) is True
+    assert apc.is_manageable({"strategy": "Bear Call Spread"}) is True
+    assert apc.is_manageable({"strategy": "Iron Condor"}) is False
+    assert apc.is_manageable({}) is True          # legacy rows predate the field
+
+
+def test_strategy_labels_are_normalised_before_comparison():
+    """main.py emits 'bull_put_spread' from one path and 'Bear Call Spread' from another —
+    same concept, two spellings, and a comparison against either literal misses the other."""
+    import auto_paper_cycle as apc
+    assert apc._strategy_key({"strategy": "Bear Call Spread"}) == "bear_call_spread"
+    assert apc._is_call_side({"strategy": "Bear Call Spread"}) is True
+    assert apc._is_call_side({"strategy": "bull_put_spread"}) is False
+
+
+def test_the_reprice_loop_fetches_the_call_chain_when_it_holds_calls():
+    import inspect
+    import auto_paper_cycle as apc
+    src = inspect.getsource(apc._reprice_and_close_open)
+    assert "get_call_options_chain" in src and "_is_call_side" in src

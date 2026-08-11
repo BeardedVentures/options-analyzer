@@ -579,6 +579,36 @@ def _auto_open_from_candidates(cand_data: Dict, source_file: str) -> int:
     return opened
 
 
+# Structures the paper desk can actually MANAGE, not merely open. A trade it cannot mark is a
+# trade it cannot close or learn from, so opening one is worse than skipping it: the position
+# looks managed and is not.
+#
+# Iron condors are absent deliberately. The ledger records short_strike and long_strike — two
+# legs — and a condor has four. It cannot be represented, let alone marked, and inventing a
+# representation here would put un-markable positions into the record the whole learning loop
+# depends on.
+MANAGEABLE_STRATEGIES = ("bull_put", "bear_call")
+
+
+def _strategy_key(record: Dict) -> str:
+    """Normalise the strategy label. main.py emits 'bull_put_spread' from one path and
+    'Bear Call Spread' from another — same concept, two spellings, and a comparison against
+    either literal silently misses the other."""
+    return str(record.get("strategy") or "").strip().lower().replace(" ", "_")
+
+
+def _is_call_side(record: Dict) -> bool:
+    return "call" in _strategy_key(record) or "condor" in _strategy_key(record)
+
+
+def is_manageable(record: Dict) -> bool:
+    """Can the desk mark, manage and close this structure? If not, it must never open it."""
+    k = _strategy_key(record)
+    if not k:
+        return True                      # legacy rows predate the field and are all bull puts
+    return any(k.startswith(s) for s in MANAGEABLE_STRATEGIES)
+
+
 def _earnings_check(position: Dict, exp) -> Dict:
     """Does an earnings print now fall inside this position's remaining life?
 
@@ -794,11 +824,20 @@ def _reprice_and_close_open() -> Tuple[int, int]:
     marked = 0
     closed = 0
     for ticker, positions in by_ticker.items():
+        # BOTH sides of the chain. get_options_chain returns PUTS ONLY, so a bear call's
+        # strikes were never found in the index below: the position would be opened and then
+        # skipped on every mark forever — never re-marked, never closed, never learned from.
+        # That is worse than refusing to open it, because it looks like it is being managed.
         try:
-            chain = fetcher.get_options_chain(ticker, 0, 200)  # wide window to find held strikes
+            chain = list(fetcher.get_options_chain(ticker, 0, 200))  # wide window
         except Exception as exc:
             _log(f"Reprice: chain fetch failed for {ticker}: {exc}")
             continue
+        if any(_is_call_side(r) for r in positions):
+            try:
+                chain += list(fetcher.get_call_options_chain(ticker, 0, 200))
+            except Exception as exc:
+                _log(f"Reprice: call chain fetch failed for {ticker}: {exc}")
         _level_breach_alerts(ticker, positions)
         idx = {(round(float(o["strike"]), 2), o["expiration"]): o for o in chain}
         for r in positions:
