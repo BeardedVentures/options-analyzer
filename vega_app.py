@@ -1852,7 +1852,7 @@ def _copilot(c, i, tier, log_form, deep):
             + num("Edge score", f'{sc:.0f}', "var(--green)" if sc >= 80 else "var(--amber)")
             + num("VEGA POP", f'{tp*100:.0f}%' if tp is not None else "-")
             + num("Market POP", f'{ip*100:.0f}%' if ip is not None else "-")
-            + num("Edge (VEGA &minus; market)",
+            + num("VRP edge (VEGA &minus; market)",
                   f'{gap_pp:+.1f}pp' if gap_pp is not None else "-", gap_col)
             + num("Return on capital", f'{roi*100:.0f}%' if roi is not None else "-")
             + num("Credit", f'${c["credit_usd"]:.0f}' if c.get("credit_usd") is not None else "-",
@@ -3057,6 +3057,17 @@ def _lottery_card(x):
     # IV rank replaces the conviction chip when it is known. Conviction was amber "HIGH" on
     # nearly every card, and a badge that never varies is decoration; IV rank varies and it
     # is the fact that decides whether the buyer is overpaying for the move they need.
+    # The buyer's edge: realized vol minus implied. Positive means the stock has been moving
+    # more than its options are priced for, which is the only thing on this card that says the
+    # option is CHEAP rather than that the chart looks good.
+    ve = _f(x.get("vol_edge_pp"))
+    if ve is None:
+        vetxt, vecls, vesub = "—", "", "not measurable"
+    else:
+        vetxt = f"{ve:+.1f}pp"
+        vecls = "pos" if ve > 0 else "neg"
+        vesub = ("realised above implied — moving more than priced" if ve > 0
+                 else "realised below implied — paying up for the move")
     ivr=_f(x.get("iv_rank"))
     if ivr is not None:
         chip_txt=f"IV rank {ivr:.0f}"
@@ -3087,7 +3098,10 @@ def _lottery_card(x):
         f'<div><div class="cap">Cost / max loss</div><div class="v neg">${(prem or 0):.0f}</div><div class="dim">${(prem_ps or 0):.2f}/sh</div></div>'
         f'<div><div class="cap">Target</div><div class="v pos">{tgt_txt}</div><div class="dim">{tgt_sub}</div></div>'
         f'<div><div class="cap">Breakeven move</div><div class="v">{(bemv or 0):+.1f}%</div><div class="dim">to ${(be or 0):.2f}</div></div>'
-        f'<div><div class="cap">Prob ITM (Δ)</div><div class="v">{prob}</div><div class="dim">IV {(iv*100 if iv and iv<3 else iv) or 0:.0f}%</div></div>'
+        f'<div><div class="cap">Vol edge</div><div class="v {vecls}">{vetxt}</div>'
+        f'<div class="dim">{vesub}</div></div>'
+        f'<div><div class="cap">Chance of winning</div><div class="v">{prob}</div>'
+        f'<div class="dim" title="Delta — the market\'s own estimate">&Delta; {(delta or 0):.2f} &middot; IV {(iv*100 if iv and iv<3 else iv) or 0:.0f}%</div></div>'
         f'</div>'
         f'<div class="lwhy">{dir_tag}<b>Why {tk}:</b> '
         f'{(" · ".join(esc(sg) for sg in signals)) if signals else (setup or "-")}'
@@ -3147,14 +3161,14 @@ def view_lottery():
             'high-variance bet. Max loss is 100% of the premium paid. This is NOT the defined-risk premium-selling '
             'edge; it is a capped-cost home-run swing for specific momentum/reversal conditions. Size tiny.</div>')
     if not d or not (d.get("lottery_calls") or []):
-        return ('<h1>Asymmetry plays</h1><p class="q">High-variance single-call swings. Capped cost.</p>'
+        return ('<h1>Momentum plays</h1><p class="q">High-variance single calls on names moving more than their options are priced for. Capped cost.</p>'
                 + banner +
                 '<div class="empty">No lottery candidates right now. The lottery scanner (lottery_scanner.py) '
                 'runs separately and only surfaces setups in specific conditions (oversold-at-support bounce or '
                 'confirmed momentum breakout with catalyst). Run it on the tower to populate this view.</div>')
     asof=esc(d.get("timestamp") or "")
     cards="".join(_lottery_card(x) for x in d["lottery_calls"])
-    return ('<h1>Asymmetry plays</h1><p class="q">High-variance single-call swings. Capped cost &middot; as-of '
+    return ('<h1>Momentum plays</h1><p class="q">High-variance single calls, ranked by vol edge &middot; as-of '
             + asof + '</p>' + banner + f'<div class="lottowrap">{cards}</div>')
 
 
@@ -3618,7 +3632,7 @@ def _tradeable_block(ticker):
     return (f'<table class="gtbl"><thead><tr><th class="l">Spread</th><th>Credit</th>'
             f'<th>&Delta;</th>'
             f'<th title="The drift-removed probability of profit VEGA computes">VEGA POP</th>'
-            f'<th title="VEGA POP minus the market-implied POP (1-delta).">Edge</th>'
+            f'<th title="VEGA POP minus the market-implied POP (1-delta). A VARIANCE read, not a directional one: negative means the stock has been moving more than its options price, so BOTH sides of a spread are worse than delta suggests and the mirror trade is not the fix. Positive means premium here is genuinely rich.">VRP edge</th>'
             f'<th>Max risk</th><th>Gates</th>'
             f'<th class="l">Reading</th></tr></thead><tbody>{rows_html}</tbody></table>')
 
@@ -3951,7 +3965,7 @@ def _btc_card(label, value, sub, color=None):
 def nav(view):
     links = ""
     labels = {"today": "Today", "track": "Track Record", "open": "Open",
-              "bitcoin": "Research", "history": "History", "lottery": "Asymmetry"}
+              "bitcoin": "Research", "history": "History", "lottery": "Momentum"}
     for v in VIEWS:
         links += f'<a class="{"on" if v == view else ""}" href="/?view={v}">{labels[v]}</a>'
     is_open, _ = market_status()

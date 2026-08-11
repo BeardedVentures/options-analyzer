@@ -31,6 +31,45 @@ sys.path.insert(0, str(BASE))
 import strategies
 
 
+def vol_edge(px_close, iv, window: int = 60):
+    """The edge a BUYER of options has: realized vol above implied.
+
+    This tab had no edge metric at all. It ranked nothing, scored nothing, and labelled every
+    card HIGH conviction — 19 of 19 in the 2026-08-11 scan — so the badge carried no
+    information and the ordering was the watchlist's.
+
+    The premium-selling side of VEGA is built on one number: implied vol above realized means
+    the options are expensive and worth writing. Buying a call is the SAME test with the sign
+    flipped. If a stock delivers more movement than its options are priced for, the buyer is
+    getting the move cheap; if it delivers less, the buyer is overpaying for it however good
+    the chart looks.
+
+    That number was already computable here and simply never computed. Measured on
+    2026-08-11: AMD realized 61.7 against 53.5 implied, PLTR 64.8 against 47.7, COIN 76.5
+    against 60.7 — the names where buying is actually favoured — while the tab was surfacing
+    JPM, FCX, BA and GDX at IV rank 0, cheap by percentile and never checked against what
+    those stocks do.
+
+    Returns vol points (realized minus implied). Positive favours the buyer. None when either
+    side is unavailable — absence, not a zero that would rank as neutral.
+    """
+    import math
+    if iv is None or iv <= 0:
+        return None
+    closes = [float(c) for c in px_close if c and float(c) > 0]
+    if len(closes) < window + 1:
+        return None
+    rets = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
+    rets = rets[-window:]
+    if len(rets) < 2:
+        return None
+    mean = sum(rets) / len(rets)
+    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+    rv = math.sqrt(var) * math.sqrt(252) * 100
+    ivp = iv * 100 if iv < 3 else iv
+    return round(rv - ivp, 1)
+
+
 def _build_call(ticker, price, tech, news, chain_calls, budget, dte_lo=25, dte_hi=45):
     """Pick a ~0.30-delta call in the DTE window under budget; classify the setup."""
     rsi = tech.get("rsi"); sma20 = tech.get("sma20"); sma50 = tech.get("sma50")
@@ -101,6 +140,8 @@ def _build_call(ticker, price, tech, news, chain_calls, budget, dte_lo=25, dte_h
         "iv_rank": tech.get("iv_rank"),
         "breakeven": round(be, 2), "breakeven_move_pct": round(be_move, 1),
         "target_multiple": tgt_mult, "target_price": round(tgt_price, 2),
+        "realized_vol_30d": tech.get("realized_vol") or tech.get("realized_vol_30d"),
+        "vol_edge_pp": tech.get("_vol_edge_pp"),
         "conviction": conv, "setup": setup, "catalyst": catalyst, "signals": signals,
         "news_sentiment": sent, "rsi": rsi, "trend": trend, "nearest_support": support,
         "criteria": ev["criteria"], "news_check": ev["news_check"],
@@ -123,13 +164,22 @@ def scan_live(budget):
             # forever. _build_call needs rsi/sma/support and returns None without them, so the
             # live scanner could never emit a single call. Call the real functions instead.
             chain = fetcher.get_call_options_chain(tk, 25, 45)
-            tech = technicals.calculate_all(px, tk, current_iv=technicals.estimate_atm_iv(chain, price))
+            _iv = technicals.estimate_atm_iv(chain, price)
+            tech = technicals.calculate_all(px, tk, current_iv=_iv)
+            # The buyer's edge, attached before the card is built so it can be shown and ranked.
+            tech["_vol_edge_pp"] = vol_edge(list(px["Close"].values), _iv)
             nws = newsmod.get_ticker_sentiment(tk)
             row = _build_call(tk, price, tech, nws, chain, budget)
             if row:
                 calls.append(row)
         except Exception as e:
             print(f"  {tk}: skipped ({e})")
+    # Rank by the buyer's edge, richest first. Unranked before this: the order was the
+    # watchlist's, so the top card was whichever ticker config happened to list first.
+    # Cards with no measurable edge sort last rather than being dropped — the setup may still
+    # be worth a look, it just cannot claim the options are cheap.
+    calls.sort(key=lambda c: (c.get("vol_edge_pp") is not None, c.get("vol_edge_pp") or -999),
+               reverse=True)
     return calls
 
 

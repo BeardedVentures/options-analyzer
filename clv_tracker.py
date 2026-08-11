@@ -96,9 +96,31 @@ def load_ledger(path: Optional[Path] = None) -> List[Dict]:
 def clv_for_record(r: Dict) -> Optional[Dict]:
     """CLV for one open/closed record. Returns None if it lacks the fields to score.
 
-    Prefers an explicitly-logged `theta_expected_mark` (written by the grader at re-mark
-    time, the most accurate). Falls back to a live proxy: entry credit minus |theta|·days,
-    using whatever mark and timestamps the record carries.
+    Prefers an explicitly-logged `theta_expected_mark`. Otherwise builds the no-edge baseline
+    from TIME REMAINING, not from the short leg's theta.
+
+    The old proxy was `entry - |short_theta| * days`, and it made the whole metric
+    unwinnable. `short_theta` is the SHORT LEG's decay; a credit spread's net decay is the
+    short leg's minus the long leg's, several times smaller, because the long leg is decaying
+    in your favour at the same time. Charging the position the short leg's full theta
+    overstated decay by roughly 3-10x: measured on the live ledger, META's short-leg theta
+    alone would have consumed its entire $1.71 credit in 3.5 days against a 16-day hold. The
+    result then clamped at zero, so 16% of records carried a baseline of exactly 0.00 — and
+    once the baseline is zero, CLV = -mark, which is negative for every positive mark. A 9.3%
+    beat rate over 75 records was measuring the formula, not the trades.
+
+    The replacement is the null model the docstring at the top of this file already describes:
+    what the spread is worth from the clock alone. With no price move and no vol change, a
+    credit spread bleeds toward zero over its life, so the zero-edge mark is the entry credit
+    scaled by the fraction of the original term still outstanding:
+
+        theta_expected = entry * (dte_remaining / dte_at_entry)
+
+    Assumption-light, uses only fields every record already carries, and — the property that
+    matters — it can come out either way. It is an approximation: real decay is convex and
+    accelerates near expiry, so this baseline is slightly generous early in a hold and
+    slightly harsh late. That is a known bias in a known direction, which is a different thing
+    from a number that cannot be positive.
     """
     entry = _f(r.get("modeled_credit_per_share"))
     if entry is None:
@@ -113,13 +135,17 @@ def clv_for_record(r: Dict) -> Optional[Dict]:
     theta_exp = _f(r.get("theta_expected_mark"))
     days = None
     if theta_exp is None:
-        theta = _f(r.get("short_theta"))
+        dte0 = _f(r.get("dte"))
         opened = _parse_ts(r.get("opened_at") or r.get("filled_at") or r.get("scan_ts"))
         marked = _parse_ts(r.get("marked_at") or r.get("closed_at") or r.get("opened_at"))
-        if theta is None or not opened or not marked:
+        if not dte0 or dte0 <= 0 or not opened or not marked:
+            # No term to scale against. Excluded from the scorecard rather than scored on a
+            # baseline that would have to be invented — an ungradeable trade must not become
+            # a graded one just because the grader had a fallback.
             return None
         days = max(0, (marked - opened).days)
-        theta_exp = max(0.0, entry - abs(theta) * days)
+        remaining = max(0.0, dte0 - days)
+        theta_exp = entry * (remaining / dte0)
 
     clv = theta_exp - mark
     adverse = mark > entry * (1 + ADVERSE_MOVE_FRAC)

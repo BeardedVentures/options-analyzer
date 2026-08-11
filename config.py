@@ -272,8 +272,26 @@ MIN_SPREAD_WIDTH_SPY_LIKE = 1.0   # Minimum spread width for SPY-like tickers (f
 MIN_SPREAD_WIDTH_OTHER = 1.0      # Allow 1-point width on non-index symbols
 ALLOW_NARROW_SPREAD_EXCEPTION = True
 NARROW_SPREAD_MIN_CREDIT_TO_WIDTH = 0.20  # H2 fix: was 0.30 — a 0.20Δ spread pays ~13–20% of width
-MIN_OPTION_VOLUME = 100
-MIN_OPTION_OPEN_INTEREST = 500
+# Leg liquidity floor. A leg passes on EITHER test (volume OR open interest), so these are
+# not "and" conditions — see select_bull_put_pair.
+#
+# Lowered 100/500 -> 25/100 on 2026-08-11, after measuring what the old floor actually did.
+# It was the single largest filter in the system: 1,037 of ~1,530 leg rejections in the
+# 2026-08-11 scan, and 28 of 56 tickers produced NO valid spread at all. Measured against live
+# 25-45 DTE chains it passed only 20% of legs on mega-caps — MU 20%, UNH 24%, WMT 25%, and
+# AMGN exactly ZERO — because open interest concentrates in front-month and round strikes
+# while the median leg in this DTE window carries OI of 21-38. The board was not reading a
+# thin market; it was reading a filter calibrated for a different part of the chain.
+#
+# Loosening it is affordable because THIS SYSTEM ALREADY MEASURES FILLABILITY DIRECTLY.
+# _quote_is_tradeable rejects any leg with a crossed book, a missing side, or a bid-ask wider
+# than MAX_QUOTE_SPREAD_PCT, and every credit is gated and ranked on the NATURAL basis (sell
+# the bid, buy the ask). Open interest is a proxy for exactly the thing those two already
+# check, so a heavy OI floor stacked on top was double-counting the same risk and paying for
+# it in coverage. 25/100 still excludes genuinely dead strikes; the quote test remains the
+# binding constraint, which is the right place for it.
+MIN_OPTION_VOLUME = 25
+MIN_OPTION_OPEN_INTEREST = 100
 # H2 fix: hard floor lowered 0.25 → 0.15. A 0.20-delta short strike structurally collects
 # ~13–20% of width in normal vol (Cboe/industry), so a 25% floor was mutually exclusive with
 # the 0.20Δ strike target and silently rejected most valid index spreads. 0.15 is the true floor;
