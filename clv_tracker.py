@@ -174,8 +174,34 @@ def clv_records(rows: List[Dict]) -> List[Dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Calibration — predicted POP vs realized hit-rate (reliability curve)
 # ─────────────────────────────────────────────────────────────────────────────
-def calibration_curve(rows: List[Dict], bins=((0, .7), (.7, .8), (.8, .9), (.9, 1.01))) -> List[Dict]:
+def _cohort_of(r: Dict) -> str:
+    """The comparability key for one record, via outcome_logger.
+
+    Read through that module rather than off a raw field: it derives the key from
+    fill_model | gate_basis | close_logic, and history is deliberately not rewritten so older
+    trades carry no field of their own.
+    """
+    try:
+        from analysis import outcome_logger as ol
+        return ol.cohort(r)
+    except Exception:                                    # pragma: no cover - defensive
+        return "unknown"
+
+
+def calibration_curve(rows: List[Dict], bins=((0, .7), (.7, .8), (.8, .9), (.9, 1.01)),
+                      cohort: Optional[str] = None) -> List[Dict]:
+    """Predicted vs realized win rate by POP bucket, for ONE cohort at a time.
+
+    `cohort=None` pools everything, which is what this did unconditionally and what makes the
+    pooled number meaningless on the current ledger: mid-fill trades won 13 of 18 and
+    natural-fill trades won 0 of 46, so pooling them reports a 56.8pp calibration miss that
+    describes the fill model rather than the POP model. vega_status has refused to pool these
+    since the cohorts were defined — "Cohorts are not comparable" — and this function was the
+    one place still doing it, feeding the number straight onto the cockpit's Track Record tab.
+    """
     closed = [r for r in rows if r.get("status") == "closed" and r.get("outcome") in ("win", "loss")]
+    if cohort is not None:
+        closed = [r for r in closed if _cohort_of(r) == cohort]
     curve = []
     for lo, hi in bins:
         b = [r for r in closed if lo <= (_f(r.get("modeled_pop")) or -1) < hi]
@@ -261,9 +287,30 @@ def summary(path: Optional[Path] = None) -> Dict:
         return {"n": len(rs), "beat_rate": beat / len(rs),
                 "avg_clv": sum(r["clv"] for r in rs) / len(rs)}
 
-    curve = calibration_curve(rows)
-    graded = [c for c in curve if c["n"]]
-    cal_gap = (sum(c["gap"] * c["n"] for c in graded) / sum(c["n"] for c in graded)) if graded else None
+    # Calibration, per cohort. The headline number reports the LARGEST cohort alone and says
+    # which one it is, because a single figure spanning incompatible selection and close rules
+    # is not a model verdict — it is an average of two different systems.
+    closed_rows = [r for r in rows if r.get("status") == "closed"
+                   and r.get("outcome") in ("win", "loss")]
+    cohorts: Dict[str, int] = {}
+    for r in closed_rows:
+        k = _cohort_of(r)
+        cohorts[k] = cohorts.get(k, 0) + 1
+
+    def _gap(cur):
+        g = [c for c in cur if c["n"]]
+        return (sum(c["gap"] * c["n"] for c in g) / sum(c["n"] for c in g)) if g else None
+
+    by_cohort = []
+    for name, n in sorted(cohorts.items(), key=lambda kv: -kv[1]):
+        cur = calibration_curve(rows, cohort=name)
+        by_cohort.append({"cohort": name, "n": n,
+                          "gap_pp": (lambda g: g * 100 if g is not None else None)(_gap(cur)),
+                          "curve": cur})
+
+    lead = by_cohort[0] if by_cohort else None
+    curve = lead["curve"] if lead else calibration_curve(rows)
+    cal_gap = (lead["gap_pp"] / 100) if (lead and lead["gap_pp"] is not None) else None
 
     return {
         "counts": {"total": len(rows),
@@ -274,6 +321,12 @@ def summary(path: Optional[Path] = None) -> Dict:
         "clv_ex_catalyst": clv_stats(ex),
         "calibration_gap_pp": (cal_gap * 100) if cal_gap is not None else None,
         "calibration_curve": curve,
+        # Which cohort the headline gap describes, and whether anything was left out of it.
+        # Without these two the number reads as "the model", when it is one regime of several.
+        "calibration_cohort": (lead or {}).get("cohort"),
+        "calibration_cohort_n": (lead or {}).get("n"),
+        "calibration_cohorts_present": len(cohorts),
+        "calibration_by_cohort": by_cohort,
         "edge_retention": edge_retention(rows),
         "freshness": fresh,
         "news": news_split(recs),

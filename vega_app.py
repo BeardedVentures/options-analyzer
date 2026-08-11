@@ -2350,18 +2350,28 @@ def _mc_status_cards(board, trades, tier):
                else esc(vix.get("label") or "-"))
     reg_col = "var(--amber)" if suppressed else "var(--green)"
 
-    # Premium environment on the same 0-10 scale as everything else. Stars were decoration:
-    # min(5, great+1) meant a board with one 80+ setup and a board with four both printed
-    # four stars, and a star carries no unit the reader can check. The number is derived from
-    # the same count, but it can be compared to the legend and to yesterday.
-    prem = min(10.0, (great * 2.0) + (solid * 0.5) + (1.0 if n else 0.0)) if n else 0.0
-    prem_lab = ("Excellent" if prem >= 8 else "Good" if prem >= 6.5 else
-                "Fair" if prem >= 5 else "Thin")
-    # The VRP the label is asserting, so "Thin" has a number behind it rather than a mood.
+    # Premium environment, scored from the thing the card is named after.
+    #
+    # Stars came first (decoration: min(5, great+1) printed four stars for a board with one
+    # 80+ setup and for a board with four). Replacing them with a number off the SAME count
+    # fixed the unit and left the meaning wrong: the score counted high-EDGE setups while the
+    # sub-line quoted VRP, so the live board read "1.5 · VRP +7.5pp · Thin" — a healthy
+    # variance premium sitting next to a score calling it thin, because the two halves were
+    # measuring different things. One card, one question: how rich is premium right now.
+    #
+    # VRP is that question. Bands line up with the legend the row already carries (0-4
+    # unfavorable / 5-6 neutral / 7-10 favorable), so the number decodes against the key
+    # printed beneath it instead of against nothing.
     vrps = [t.get("vrp") for t in trades if t.get("vrp") is not None]
     best_vrp = max(vrps) if vrps else None
+    if best_vrp is None:
+        prem, prem_lab = 0.0, "No read"
+    else:
+        prem = max(0.0, min(10.0, 5.0 + best_vrp * 0.6))   # 0pp→5.0, +5pp→8.0, −5pp→2.0
+        prem_lab = ("Excellent" if prem >= 8 else "Good" if prem >= 7 else
+                    "Fair" if prem >= 5 else "Thin" if prem >= 3 else "Negative")
     prem_sub = (f'VRP {best_vrp:+.1f}pp &middot; {prem_lab}' if best_vrp is not None
-                else esc(prem_lab))
+                else "No VRP on the board")
 
     top = max((t.get("edge_score") or t.get("priority") or 0) for t in trades) if trades else 0
     edge_lab = ("Very high" if top >= 90 else "High" if top >= 80 else
@@ -3353,8 +3363,14 @@ def view_track():
     tiles = (
         _tile("CLV beat-rate", pct(clv["beat_rate"]), f'{clv["n"]} positions scored vs theta', beat_cls)
         + _tile("Avg CLV / share", money(clv["avg_clv"]), '+ = beating time decay', beat_cls)
+        # Named cohort, not a pooled figure. The ledger holds three incompatible regimes and
+        # pooling them reported -56.8pp, which describes the fill model rather than the POP
+        # model — the same number vega_status has refused to pool since the cohorts existed.
         + _tile("Calibration gap", (f'{cg:+.0f}pp' if cg is not None else '—'),
-                'realized − predicted POP', cg_cls)
+                (f'{esc(str(s.get("calibration_cohort") or "")[:34])} · n={s.get("calibration_cohort_n")}'
+                 + (f' · {s.get("calibration_cohorts_present")} cohorts in ledger'
+                    if (s.get("calibration_cohorts_present") or 0) > 1 else ''))
+                if cg is not None else 'realized − predicted POP', cg_cls)
         + _tile("Realized net P/L", (f'${er["total_realized_net_pl"]:+.0f}' if er["n_closed"] else '—'),
                 f'{er["n_closed"]} closed · avg ${er["avg_realized_net_pl"]:+.2f}/ct' if er["avg_realized_net_pl"] is not None else 'no closes yet')
         + _tile("Ledger", f'{c["total"]}', f'{c["modeled"]} modeled · {c["open"]} open · {c["closed"]} closed')
