@@ -551,7 +551,22 @@ def load_board():
                 trades.append(_adapt_legacy(row, c))
     trades.sort(key=lambda x: (x["priority"] or 0), reverse=True)
     asof = ((data or {}).get("meta") or {}).get("stamp")
-    return {"source": "legacy", "trades": trades, "asof": asof, "context": {}, "regime": {},
+    # The market read survives the fallback. Whether any SPREAD qualified is a different
+    # question from what VIX did, and this branch was discarding both — so on a session where
+    # the engine qualified nothing, Market Snapshot rendered blank and the regime banner
+    # vanished, as though the cockpit had lost its data feed rather than found no trade.
+    # The engine artifact still holds market_context and regime in exactly that case.
+    ctx, reg, sums = {}, {}, {}
+    if SCAN_LATEST.exists():
+        try:
+            _d = json.loads(SCAN_LATEST.read_text(encoding="utf-8"))
+            ctx = _d.get("market_context") or {}
+            reg = _d.get("regime") or {}
+            sums = _d.get("scan_summary") or {}
+        except Exception:
+            pass
+    return {"source": "legacy", "trades": trades, "asof": asof, "context": ctx, "regime": reg,
+            "scan_summary": sums,
             "note": "Fast local scan (yfinance). No edge scores — treat as provisional until the full engine runs."}
 
 
@@ -1981,9 +1996,17 @@ def _copilot_impact(c):
                    "var(--red)")
             + cell("Credit received", f'${cr:.0f}' if cr is not None else "-", "Up front",
                    "var(--green)")
-            + cell("Expected value", f'${evv:+.0f}' if evv is not None else "-", "Per contract",
-                   "var(--green)" if (evv or 0) > 0 else "var(--red)")
-            + cell("Confidence", conf, "True-POP model", ccol)
+            # A blank cell reads as "we computed this and got nothing". Both of these depend on
+            # true_pop, which the fast yfinance rescan does not produce at all — so on a
+            # provisional board half this card was empty with no indication that the gap was
+            # structural rather than a failure. Say which it is.
+            + cell("Expected value", f'${evv:+.0f}' if evv is not None else "—",
+                   "Per contract" if evv is not None else "needs the full engine",
+                   ("var(--green)" if (evv or 0) > 0 else "var(--red)") if evv is not None
+                   else "var(--ink3)")
+            + cell("Confidence", conf if conf and conf != "-" else "—",
+                   "True-POP model" if (conf and conf != "-") else "no true-POP on this board",
+                   ccol if (conf and conf != "-") else "var(--ink3)")
             + '</div></div>')
 
 
@@ -3627,14 +3650,39 @@ def _tradeable_block(ticker):
                 f'{esc(ticker)} in the latest scan — no spread in the delta band survived the '
                 f'chain filter.</div>')
 
-    cands.sort(key=lambda c: (c.get("gates_passed") or 0, c.get("score") or 0), reverse=True)
+    def _gap_of(c):
+        g = c.get("pop_gap")
+        if g is None and c.get("true_pop") is not None and c.get("pop_implied") is not None:
+            g = float(c["true_pop"]) - float(c["pop_implied"])
+        return g
+
+    # Gates first, then EDGE — not the raw ranking score. Sorting on gates alone put a spread
+    # VEGA rates worse than the market at the top of a table headed "Tradeable now", which is
+    # the contradiction this page was reporting.
+    cands.sort(key=lambda c: ((c.get("gates_passed") or 0) == (c.get("gates_total") or 0),
+                              (_gap_of(c) if _gap_of(c) is not None else -9),
+                              c.get("score") or 0), reverse=True)
     rows_html = ""
     for c in cands[:5]:
         gp, gt = c.get("gates_passed") or 0, c.get("gates_total") or 0
         failed = [k for k, v in (c.get("gates") or {}).items() if not v]
         ok = gp == gt and gt
-        why = ("passes every gate" if ok
-               else "blocked by " + ", ".join(f.replace("_", " ") for f in failed[:3]))
+        # "Passes every gate" and a negative edge are both true at once, and the table said
+        # only the flattering half. None of the eleven gates tests the edge: `pop` checks the
+        # ABSOLUTE probability against a floor, never true_pop minus what the market implies.
+        # So a spread can clear the whole contract while VEGA's own model says it is LESS
+        # likely to work than the price assumes — which is the one fact that should stop you.
+        _tp, _ip = c.get("true_pop"), c.get("pop_implied")
+        _gap = c.get("pop_gap")
+        if _gap is None and _tp is not None and _ip is not None:
+            _gap = float(_tp) - float(_ip)
+        if ok and _gap is not None and _gap < 0:
+            why = (f"passes all {gt} gates, but VEGA POP is {abs(_gap)*100:.1f}pp BELOW the "
+                   f"market's — no gate tests this")
+        elif ok:
+            why = "passes every gate"
+        else:
+            why = "blocked by " + ", ".join(f.replace("_", " ") for f in failed[:3])
         tp_ = c.get("true_pop")
         gap = c.get("pop_gap")
         if gap is None and tp_ is not None and c.get("pop_implied") is not None:
