@@ -462,6 +462,7 @@ def _adapt_engine(t: dict) -> dict:
         "vol_state": t.get("vol_state"), "vrp_shift_pp": _f(t.get("vrp_shift_pp")),
         "vrp_trailing_pp": _f(t.get("vrp_trailing_pp")),
         "rv_forecast_pp": _f(t.get("rv_forecast_pp")),
+        "implied_band": t.get("implied_band"),
         "sector_proxy": t.get("sector_proxy"), "sector_vol_state": t.get("sector_vol_state"),
         "news_sentiment": t.get("news_sentiment"), "fundamentals_score": t.get("fundamentals_score"),
         "trend": t.get("trend"), "rsi": _f(t.get("rsi")),
@@ -2027,6 +2028,41 @@ def _price_band(c, confidence=None):
         return None
 
 
+def _market_band_rows(b, mkt):
+    """The market's own range beside VEGA's, and the disagreement between them.
+
+    The market band is read off option DELTAS, not modelled: an option's delta is roughly the
+    risk-neutral probability it finishes in the money, so the strike of a 10-delta put IS the
+    price the market gives a 10% chance of being below. That band already contains skew, fat
+    tails and event risk — everything a single ATM vol plugged into a lognormal cannot say —
+    and it is ASYMMETRIC, which a symmetric band actively contradicts.
+
+    The comparison is the whole point. A narrower VEGA band means the market is paying for
+    more movement than the engine expects, which IS the premium-selling thesis, stated as a
+    picture the reader can check rather than a score they have to trust.
+    """
+    if not mkt:
+        return ""
+    try:
+        from analysis import price_projection as pp
+        cmp_ = pp.compare_bands(b, mkt)
+    except Exception:
+        cmp_ = None
+    rows = (f'<div class="pbrow"><span class="k">Market expects</span>'
+            f'<b class="num">${mkt["low"]:,.2f} &ndash; ${mkt["high"]:,.2f}</b>'
+            f'<span class="dim">{mkt["low_pct"]:+.1f}% / {mkt["high_pct"]:+.1f}% '
+            f'&middot; read off {mkt["low_delta"]:.2f}&Delta; put and {mkt["high_delta"]:.2f}&Delta; '
+            f'call, so it carries the skew</span></div>')
+    if cmp_:
+        cls = "pos" if cmp_["favours_seller"] else "neg"
+        rows += (f'<div class="pbrow"><span class="k">Disagreement</span>'
+                 f'<b class="num {cls}">{cmp_["width_ratio"]:.2f}&times;</b>'
+                 f'<span class="dim">{esc(cmp_["verdict"])} &middot; '
+                 f'downside {cmp_["downside_gap_pct"]:+.1f}%, upside {cmp_["upside_gap_pct"]:+.1f}%'
+                 f'</span></div>')
+    return rows
+
+
 def _price_band_html(c):
     """Where the engine thinks the stock will be, and where the short strike sits in it.
 
@@ -2038,6 +2074,7 @@ def _price_band_html(c):
     b = _price_band(c)
     if not b:
         return ""
+    mkt = c.get("implied_band") or None
     cov = b.get("measured_coverage")
     cov_txt = (f"held-out coverage {cov:.0%}" if cov else "coverage untested at this level")
     sp = b.get("strike") or {}
@@ -2055,6 +2092,7 @@ def _price_band_html(c):
         f'<b class="num">${b["low"]:,.2f} &ndash; ${b["high"]:,.2f}</b>'
         f'<span class="dim">{b["low_pct"]:+.1f}% / {b["high_pct"]:+.1f}% from ${b["spot"]:,.2f}</span></div>'
         f'{strike_row}'
+        f'{_market_band_rows(b, mkt)}'
         f'<div class="pbnote">Zero drift, lognormal, sigma from the same forecast the edge '
         f'score uses ({b["vol_pp"]:.1f}% annualised). One-sigma move &asymp; '
         f'${b["one_sigma_usd"]:,.2f}. Direction is not predicted &mdash; the band is symmetric '

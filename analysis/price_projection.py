@@ -185,3 +185,114 @@ def for_candidate(spot, dte, vol_forecast: Optional[Dict],
     if band and short_strike is not None:
         band["strike"] = strike_position(band, short_strike, side)
     return band
+
+
+# ── The market's own band, read off the chain ─────────────────────────────────
+# This is how a desk actually answers "where does the market think it will be", and it needs
+# no volatility model at all.
+#
+# An option's delta is approximately the risk-neutral probability it finishes in the money. So
+# the strike of a 10-delta put IS the price the market gives a 10% chance of being below, and
+# the strike of a 10-delta call IS the price it gives a 10% chance of being above. Reading the
+# two strikes off the chain gives an 80% window that already contains everything the market
+# prices — skew, fat tails, event risk, supply and demand at individual strikes — none of
+# which a single ATM IV plugged into a lognormal can express.
+#
+# It is also ASYMMETRIC, and that asymmetry is real information. Equity puts trade at higher
+# implied vol than equidistant calls (the volatility skew VEGA already measures in
+# analysis.vol_surface), so the market's downside edge sits further from spot than its upside
+# edge. A symmetric band quietly asserts the opposite of what the chain is saying.
+
+def implied_band_from_chain(puts, calls, spot, confidence: float = None) -> Optional[Dict]:
+    """The market's expected range, read from option deltas rather than modelled.
+
+    Requires both sides of the book: the downside edge comes from the put chain and the upside
+    from the calls, and taking both from one side would mirror an asymmetry the market does
+    not actually price.
+    """
+    conf = DEFAULT_CONFIDENCE if confidence is None else float(confidence)
+    try:
+        spot = float(spot)
+    except (TypeError, ValueError):
+        return None
+    if not puts or not calls or spot <= 0:
+        return None
+    tail = (1.0 - conf) / 2.0            # 80% window -> 10% in each tail
+
+    def _nearest(chain, target_delta, want_below):
+        best, best_gap = None, None
+        for o in chain:
+            d = o.get("delta")
+            k = o.get("strike")
+            if d is None or not k:
+                continue
+            d = abs(float(d))
+            if want_below and float(k) >= spot:      # puts: strikes under spot
+                continue
+            if not want_below and float(k) <= spot:  # calls: strikes over spot
+                continue
+            gap = abs(d - target_delta)
+            if best_gap is None or gap < best_gap:
+                best, best_gap = o, gap
+        # A chain that does not reach the tail cannot answer the question. Returning the
+        # closest available strike anyway would silently report a 25% tail as a 10% one.
+        if best is None or best_gap is None or best_gap > target_delta * 0.6:
+            return None
+        return best
+
+    p = _nearest(puts, tail, True)
+    c = _nearest(calls, tail, False)
+    if not p or not c:
+        return None
+    low, high = float(p["strike"]), float(c["strike"])
+    mid = (low + high) / 2.0
+    return {
+        "source": "chain",
+        "spot": round(spot, 2),
+        "confidence": conf,
+        "low": round(low, 2),
+        "high": round(high, 2),
+        "low_pct": round((low / spot - 1) * 100, 1),
+        "high_pct": round((high / spot - 1) * 100, 1),
+        "low_delta": round(abs(float(p["delta"])), 3),
+        "high_delta": round(abs(float(c["delta"])), 3),
+        "low_iv_pp": round(float(p.get("iv") or 0) * 100, 1) or None,
+        "high_iv_pp": round(float(c.get("iv") or 0) * 100, 1) or None,
+        # How lopsided the market's own range is. Positive = the downside edge sits further
+        # from spot than the upside one, which is the normal equity shape.
+        "skew_pct": round(((spot - low) - (high - spot)) / spot * 100, 2),
+        "center_offset_pct": round((mid / spot - 1) * 100, 2),
+    }
+
+
+def compare_bands(forecast_band: Optional[Dict],
+                  implied_band: Optional[Dict]) -> Optional[Dict]:
+    """VEGA's range against the market's — the edge, drawn rather than scored.
+
+    If VEGA's band is NARROWER than the market's, the market is paying for a move larger than
+    the engine expects, and selling premium is the right side of that disagreement. Wider, and
+    the engine is being paid for less risk than it thinks it is taking. This is the same claim
+    the VRP number makes; a reader who cannot check a number against a picture is taking it on
+    faith.
+    """
+    if not forecast_band or not implied_band:
+        return None
+    f_w = forecast_band["high"] - forecast_band["low"]
+    i_w = implied_band["high"] - implied_band["low"]
+    if f_w <= 0 or i_w <= 0:
+        return None
+    ratio = f_w / i_w
+    return {
+        "forecast_width": round(f_w, 2),
+        "implied_width": round(i_w, 2),
+        "width_ratio": round(ratio, 3),
+        # Each side separately: the put side is the one a bull put actually cares about.
+        "downside_gap_pct": round((forecast_band["low"] - implied_band["low"]) /
+                                  implied_band["spot"] * 100, 2),
+        "upside_gap_pct": round((implied_band["high"] - forecast_band["high"]) /
+                                implied_band["spot"] * 100, 2),
+        "verdict": ("market pays for more move than VEGA expects" if ratio < 0.95
+                    else "VEGA expects more move than the market is pricing" if ratio > 1.05
+                    else "VEGA and the market agree on the range"),
+        "favours_seller": ratio < 0.95,
+    }

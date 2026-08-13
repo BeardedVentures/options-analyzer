@@ -604,6 +604,15 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
                     # the bull-put engine path; the strategy is known statically.
                     vol_surface["skew"] = get_skew_depth(
                         options, _calls, current_price, strategy="bull_put_spread")
+                    # The MARKET's own expected range, read off option deltas rather than
+                    # modelled. Computed here because both sides of the book are already in
+                    # hand; doing it at render time would mean re-fetching two chains per card.
+                    try:
+                        from analysis import price_projection as _pp
+                        vol_surface["implied_band"] = _pp.implied_band_from_chain(
+                            options, _calls, current_price)
+                    except Exception as _e:
+                        logger.debug("[projection] implied band failed for %s: %s", ticker, _e)
         except Exception as e:
             logger.warning("[vol_surface] read failed for %s: %s", ticker, e)
 
@@ -888,6 +897,9 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         # time from a different window is how a page ends up telling the reader two
         # incompatible stories about how far the stock can travel.
         "rv_forecast_pp": tech.get("rv_forecast_pp"),
+        # The market's band travels with the trade so the cockpit can show it beside VEGA's
+        # without re-reading the chain.
+        "implied_band": (vol_surface.get("implied_band") if isinstance(vol_surface, dict) else None),
         "vol_state": tech.get("vol_state"),
         "vrp_trailing_pp": tech.get("vrp_trailing_pp"),
         "vrp_shift_pp": tech.get("vrp_shift_pp"),
