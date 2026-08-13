@@ -8,7 +8,7 @@ between X and Y.
 
 METHOD, AND WHY THIS ONE
 
-    band = spot * exp( +/- z * sigma_forecast * sqrt(dte / 252) )
+    band = spot * exp( +/- z * sigma_forecast * sqrt(trading_days(dte) / 252) )
 
 Lognormal, zero drift, sigma from analysis.vol_forecast. Three choices, each tested rather
 than assumed:
@@ -23,7 +23,7 @@ than assumed:
 2. FORECAST SIGMA, NOT TRAILING. Same correction as the VRP work: the window covers the NEXT
    dte days, so it must be built from forecast realised vol, not the trailing window.
 
-3. LOGNORMAL RATHER THAN EMPIRICAL QUANTILES. Both were coverage-tested on 14,800 held-out
+3. LOGNORMAL RATHER THAN EMPIRICAL QUANTILES. Both were coverage-tested on ~14,900 held-out
    observations across 20 names and 8 years — does a claimed X% window actually contain the
    price X% of the time?
 
@@ -32,6 +32,10 @@ than assumed:
          68%          68.4%                70.7%                72.6%
          80%          79.5%                81.5%                83.0%
          90%          87.9%                89.7%                92.0%
+
+   Re-validated on a 35-CALENDAR-day horizon after the units fix below: 51.6 / 70.3 / 81.4 /
+   89.8. Before that fix the same windows covered 60.5 / 78.9 / 88.0 / 94.0 — an "80%" band
+   that was really a 88% one.
 
    Lognormal+forecast tracks the target within ~1.7pp at every level and errs slightly WIDE,
    which is the correct direction for something a person sizes risk against. Empirical
@@ -57,6 +61,18 @@ import config
 logger = logging.getLogger(__name__)
 
 TRADING_DAYS = 252.0
+CALENDAR_DAYS = 365.0
+
+# Realised vol is annualised off DAILY BARS (x sqrt(252)), so its horizon must be counted in
+# TRADING days. `dte` everywhere in this codebase is CALENDAR days — fetcher computes it as
+# (expiry_date - today).days. Feeding a calendar count straight into a trading-day formula
+# stretched every band by sqrt(365/252) = 1.204, i.e. 20% too wide at every confidence level,
+# which silently turned an "80%" window into roughly a 90% one. The coverage table below was
+# measured on 35 TRADING-day windows, so the formula was right and only the units feeding it
+# were wrong.
+def trading_days(calendar_days: float) -> float:
+    """Calendar days to trading days. Markets are open ~252 of 365 days."""
+    return float(calendar_days) * TRADING_DAYS / CALENDAR_DAYS
 
 # Coverage-tested levels. Keys are the claim; values are what the held-out sample actually
 # delivered, kept here so the UI can show the measured number rather than the promised one.
@@ -98,13 +114,14 @@ def project(spot: Optional[float], dte: Optional[int], forecast_vol_pp: Optional
     if spot <= 0 or dte <= 0 or vol <= 0:
         return None
 
-    sigma_h = (vol / 100.0) * math.sqrt(dte / TRADING_DAYS)
+    sigma_h = (vol / 100.0) * math.sqrt(trading_days(dte) / TRADING_DAYS)
     z = _z_for(conf)
     low = spot * math.exp(-z * sigma_h)
     high = spot * math.exp(z * sigma_h)
     return {
         "spot": round(spot, 2),
         "dte": dte,
+        "trading_days": round(trading_days(dte), 1),
         "confidence": conf,
         "measured_coverage": MEASURED_COVERAGE.get(round(conf, 2)),
         "low": round(low, 2),

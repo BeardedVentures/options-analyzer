@@ -133,3 +133,19 @@ def test_the_rendered_band_states_that_direction_is_not_predicted():
     t = re.sub(r"<[^>]+>", " ", h)
     assert "Direction is not predicted" in t
     assert "wrong about one time in" in t, "a confidence band must state its own failure rate"
+
+
+def test_the_horizon_is_counted_in_trading_days_not_calendar_days():
+    """`dte` is CALENDAR days everywhere in this codebase, but realised vol is annualised off
+    daily BARS. Feeding a calendar count into a trading-day formula stretched every band by
+    sqrt(365/252) = 1.204 — an "80%" window that actually covered 88%."""
+    b = pp.project(100.0, 35, 30.0)
+    assert b["trading_days"] == pytest.approx(24.2, abs=0.2)
+    expected = 0.30 * math.sqrt(24.16 / 252)
+    assert b["sigma_horizon"] == pytest.approx(expected, rel=0.01)
+
+
+def test_a_calendar_horizon_is_narrower_than_the_naive_trading_day_read():
+    b = pp.project(100.0, 35, 30.0)
+    naive_high = 100.0 * math.exp(1.2816 * 0.30 * math.sqrt(35 / 252))
+    assert b["high"] < naive_high
