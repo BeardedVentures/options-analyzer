@@ -207,15 +207,21 @@ def test_board_renders_the_full_mission_control_stack():
         assert m in h, f"missing {m}"
 
 
-def test_every_row_gets_a_copilot_drawer():
+def test_every_row_expands_and_the_top_rows_carry_the_full_analysis():
+    """Every row must still open — the toggle is how the board is read. But a full drawer is a
+    complete analysis card, and a fast-scan board carries 150+ rows: at 154 the page rendered
+    2.05 MB. The top MAX_DRAWERS get the real thing and the rest get a pointer, so the page
+    stays openable without any row becoming unreachable."""
     h = vega_app.render("today")
     rows = h.count('class="vmain"')
     if rows:
-        assert h.count("VEGA recommendation") == rows
-        assert h.count("Why VEGA likes this trade") == rows
+        expected = min(rows, vega_app.MAX_DRAWERS)
+        assert h.count('class="vdetail"') == rows, "a row with no drawer cannot be expanded"
+        assert h.count("VEGA recommendation") == expected
+        assert h.count("Why VEGA likes this trade") == expected
         # "Setup", not "action": VEGA hands the operator a trade to construct, it does not
         # issue an instruction. The distinction is the whole decision-support framing.
-        assert h.count("Recommended setup") == rows
+        assert h.count("Recommended setup") == expected
 
 
 def test_deep_metrics_are_behind_progressive_disclosure():

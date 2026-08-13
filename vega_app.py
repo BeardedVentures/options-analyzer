@@ -1923,7 +1923,7 @@ def _copilot(c, i, tier, log_form, deep):
     return ('<div class="cop">'
             f'<div class="coptop">{rec}{why}{ideas}</div>'
             f'<div class="copmid">{snap}{impact}</div>'
-            f'{_price_band_html(c)}'
+            f'{_price_band_html(c)}{_hedge_html(c)}'
             f'{action}'
             '<details class="copmore"><summary>Full analysis &mdash; payoff, metrics, gates, '
             'score composition</summary>'
@@ -2061,6 +2061,44 @@ def _market_band_rows(b, mkt):
                  f'downside {cmp_["downside_gap_pct"]:+.1f}%, upside {cmp_["upside_gap_pct"]:+.1f}%'
                  f'</span></div>')
     return rows
+
+
+def _hedge_html(c):
+    """The directional exposure this trade carries, and the honest hedge for it.
+
+    A credit spread is not direction-neutral and the board never said how much direction it
+    was carrying. "Short put, 0.20 delta" means nothing to most readers; "behaves like owning
+    18 shares" means something to everyone.
+
+    A desk would delta-hedge this with shares continuously. Retail cannot, and the numbers say
+    why rather than a rule of thumb doing it: the share-hedge notional is shown against the
+    position's max loss, and on retail size it is routinely 10-100x. Seeing that once teaches
+    more than being told. The affordable hedge is structural — the opposite spread on the same
+    name — and that is what gets suggested.
+    """
+    try:
+        from analysis import hedge as _h
+        hh = _h.hedge_suggestion(c)
+    except Exception as e:                                # pragma: no cover - defensive
+        logger.debug("[hedge] failed for %s: %s", c.get("ticker"), e)
+        return ""
+    if not hh:
+        return ""
+    sh = hh["share_equivalent"]
+    cls = "pos" if sh > 0 else "neg" if sh < 0 else ""
+    est = (' <span class="dim">(long leg estimated)</span>'
+           if hh.get("long_leg_estimated") else "")
+    return ('<div class="copcard"><div class="hd">Directional exposure &middot; hedge</div>'
+            f'<div class="pbrow"><span class="k">Behaves like</span>'
+            f'<b class="num {cls}">{sh:+.0f} shares</b>'
+            f'<span class="dim">net delta {hh["net_delta_per_contract"]:+.3f}/contract'
+            f'{est}</span></div>'
+            + (f'<div class="pbrow"><span class="k">Share hedge would cost</span>'
+               f'<b class="num">${hh["hedge_notional_usd"]:,.0f}</b>'
+               f'<span class="dim">{hh["hedge_cost_ratio"]:.1f}&times; the ${hh["max_loss_usd"]:,.0f} '
+               f'max loss</span></div>' if hh.get("hedge_notional_usd") and hh.get("hedge_cost_ratio")
+               else "")
+            + f'<div class="pbnote">{esc(hh["suggestion"])}</div></div>')
 
 
 def _price_band_html(c):
@@ -2288,9 +2326,25 @@ def _exposure_bar(board):
     risk = bk.get("current_book_risk_usd") or 0
     tks = bk.get("open_tickers") or []
     hold = (" &middot; " + ", ".join(esc(t) for t in tks)) if tks else ""
+    # Book-level direction. Eleven bull puts are not eleven independent bets — they are one
+    # large long position, and the correlation arrives exactly when it hurts. A desk watches
+    # this continuously; once per page load is most of the benefit for none of the cost.
+    bd = ""
+    try:
+        from analysis import hedge as _h
+        import analysis.outcome_logger as _ol
+        opens = [r for r in _ol.load_records() if r.get("status") == "open"]
+        b = _h.book_delta(opens)
+        if b["positions"] and abs(b["share_equivalent"]) > 0:
+            top = list(b["by_ticker"].items())[:3]
+            bd = (f' &middot; net <b class="num">{b["share_equivalent"]:+.0f}</b> share-equivalents '
+                  f'{b["direction"]} across {b["positions"]} '
+                  f'({esc(", ".join(k for k, _ in top))}&hellip;)')
+    except Exception as e:                                # pragma: no cover - defensive
+        logger.debug("[hedge] book delta failed: %s", e)
     return (f'<a class="expbar" href="/?view=open">'
             f'<b>{n} open positions</b> &middot; max remaining loss '
-            f'<b class="num">${risk:,.0f}</b>{hold}'
+            f'<b class="num">${risk:,.0f}</b>{hold}{bd}'
             f'<span class="go">Open tab &rarr;</span></a>')
 
 
@@ -2396,6 +2450,15 @@ def _row_thesis(c):
 
 
 
+# How many rows get a full Copilot drawer built into the page. Every drawer is a complete
+# analysis card — payoff diagram, gates, score composition, the lot — and a fast-scan board
+# routinely carries 150+ candidates. At 154 rows the Today page rendered 2.05 MB, which is a
+# page nobody's phone opens twice. The rows beyond this cap still appear, sort and filter
+# normally; they just say to run the engine for the full read rather than carrying one
+# pre-built for a row almost nobody expands.
+MAX_DRAWERS = int(getattr(config, "MAX_BOARD_DRAWERS", 25))
+
+
 def board_table(trades, tier):
     if not trades:
         return '<div class="empty">No qualified opportunities in the latest scan. Not a strong day to sell premium.</div>'
@@ -2437,7 +2500,14 @@ def board_table(trades, tier):
                f'<td class="num">{credit_c}</td>'
                f'<td class="num">{maxloss_c}</td>'
                f'</tr>'
-               f'<tr class="vdetail" id="vd-{i}"><td colspan="8">{detail_drawer(c,i,tier)}</td></tr>')
+               + (f'<tr class="vdetail" id="vd-{i}"><td colspan="8">{detail_drawer(c,i,tier)}</td></tr>'
+                  if i < MAX_DRAWERS else
+                  f'<tr class="vdetail" id="vd-{i}"><td colspan="8">'
+                  f'<div class="dim" style="padding:10px 12px;font-size:11.5px">'
+                  f'Full analysis is built for the top {MAX_DRAWERS} rows. This one is ranked '
+                  f'#{i+1} — sort or filter it into the top {MAX_DRAWERS}, or run the engine '
+                  f'(<code>python main.py</code>) for a graded board where every row carries '
+                  f'edge scores and a true-POP read.</div></td></tr>'))
     order=[("score","Edge",""),("tpop","VEGA POP",""),("roc","ROC",""),
            ("credit","Credit",""),("maxloss","Max loss","")]
     def sth(key,label,cls):

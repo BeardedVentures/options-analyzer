@@ -254,3 +254,29 @@ def test_the_card_shows_the_market_band_when_the_trade_carries_one():
     t = re.sub(r"<[^>]+>", " ", h)
     assert "Market expects" in t and "Disagreement" in t
     assert "carries the skew" in t
+
+
+def test_a_qualified_trade_never_spans_an_earnings_print():
+    """The bimodal case a lognormal band handles worst — total variance is diffusive vol PLUS
+    a jump — cannot reach a qualified trade, because _earnings_clear already refuses any
+    spread whose expiry sits past the print. Pinned so the band's assumption stays valid: if
+    that gate is ever relaxed, this fails and the band needs a jump term."""
+    from analysis import assessment as A
+    assert A._earnings_clear({"dte": 35}, {"earnings_days": 20}) is False
+    assert A._earnings_clear({"dte": 35}, {"earnings_days": 50}) is True
+
+
+def test_the_board_caps_how_many_full_drawers_it_builds():
+    """Every drawer is a complete analysis card, and a fast-scan board carries 150+ rows. At
+    154 the page rendered 2.05 MB, which nobody's phone opens twice."""
+    import vega_app
+    assert vega_app.MAX_DRAWERS <= 50
+    trades = [{"ticker": f"T{i}", "short": 100, "long": 95, "price": 110, "dte": 35,
+               "credit_ps": 1.0, "credit_usd": 100, "max_loss_usd": 400, "width": 5,
+               "exp": "2026-09-18", "strat_type": "bull_put", "edge_score": 70,
+               "priority": 70, "gates_passed": 8, "gates_total": 8, "entry_timing": {},
+               "support_levels": [], "resistance_levels": []} for i in range(60)]
+    h = vega_app.board_table(trades, "PROVISIONAL")
+    assert h.count("VEGA recommendation") == vega_app.MAX_DRAWERS
+    assert h.count('class="vmain"') == 60, "every row must still be listed, sortable and filterable"
+    assert "Full analysis is built for the top" in h
