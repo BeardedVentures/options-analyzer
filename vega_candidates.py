@@ -83,7 +83,8 @@ SPY_LIKE = getattr(config, "SPY_BUFFER_TICKERS", {"SPY", "QQQ", "IWM", "DIA", "G
 # Names match data.technicals.calculate_all wherever the two producers describe the same
 # quantity, because assessment.load_context accepts EITHER of them as `tech`. A consumer
 # cannot be expected to know which producer filled the dict it was handed.
-VOL_CONTEXT_KEYS = frozenset({"atm_iv", "iv_rank", "iv_rank_method", "rv", "vrp"})
+VOL_CONTEXT_KEYS = frozenset({"atm_iv", "iv_rank", "iv_rank_method", "rv", "vrp",
+                              "vrp_trailing_pp", "rv_forecast_pp", "vol_state"})
 
 # Emitted by an older vega_candidates; still present in snapshots already on disk. Consumers
 # may read these as fallbacks, and nothing new should be added here.
@@ -97,7 +98,8 @@ def vol_context(ticker: str, puts: list, current_price: float) -> dict:
     appears only when the happy path completes is indistinguishable, to a consumer, from a key
     that was renamed.
     """
-    ctx = {"atm_iv": None, "iv_rank": None, "iv_rank_method": None, "rv": None, "vrp": None}
+    ctx = {"atm_iv": None, "iv_rank": None, "iv_rank_method": None, "rv": None, "vrp": None,
+           "vrp_trailing_pp": None, "rv_forecast_pp": None, "vol_state": None}
     if not puts:
         return ctx
     # ONE definition of ATM IV, shared with the engine path via technicals.estimate_atm_iv.
@@ -126,7 +128,26 @@ def vol_context(ticker: str, puts: list, current_price: float) -> dict:
             # why it carries the same name. It was `vrp_pp`, and assessment.assess and
             # auto_paper_cycle both read "vrp", so the largest component of the edge score
             # (30 of 100) was silently zero on every trade the auto-trader ever opened.
-            ctx["vrp"] = round((atm_iv - float(rv)) * 100, 1)
+            # TRAILING vrp, kept for comparison.
+            ctx["vrp_trailing_pp"] = round((atm_iv - float(rv)) * 100, 1)
+            ctx["vrp"] = ctx["vrp_trailing_pp"]
+            # ...then the same forecast correction technicals.calculate_all applies, because
+            # THIS is the path the auto-trader opens from. Fixing the engine path alone left
+            # the desk still selecting on implied-minus-TRAILING realised — the biased number
+            # that reads too positive after a quiet stretch, which is precisely the setup that
+            # goes wrong. The two paths must agree or the board and the robot are two engines
+            # again.
+            try:
+                from analysis import vol_forecast as _vf
+                _fc = _vf.for_ticker(ticker, float(rv) * 100,
+                                     (_tech._historical_vol(close, 126) or 0) * 100)
+                if _fc:
+                    ctx["rv_forecast_pp"] = _fc["forecast_pp"]
+                    ctx["vol_state"] = _fc["state"]
+                    if getattr(config, "VRP_USE_FORECAST", True):
+                        ctx["vrp"] = round(atm_iv * 100 - _fc["forecast_pp"], 1)
+            except Exception as _e:
+                logger.debug(f"[{ticker}] vol forecast failed: {_e}")
     except Exception as e:
         logger.debug(f"[{ticker}] vol_context failed: {e}")
     return ctx

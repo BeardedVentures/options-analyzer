@@ -135,3 +135,27 @@ def test_technicals_emits_both_numbers_so_the_change_is_auditable():
     for field in ("vrp_trailing_pp", "vrp_shift_pp", "rv_forecast_pp", "vol_state"):
         assert field in src, f"{field} is not emitted"
     assert "VRP_USE_FORECAST" in src, "the change must be reversible by config"
+
+
+def test_the_fast_scan_path_uses_the_same_forecast_as_the_engine():
+    """THIS is the path the auto-trader opens from. Correcting only technicals.calculate_all
+    left the desk still selecting on implied-minus-TRAILING realised — the biased number that
+    reads too positive after a quiet stretch, which is exactly the setup that goes wrong. Two
+    paths disagreeing about VRP is the two-engine divergence this repo has fought repeatedly.
+    """
+    import inspect
+    import vega_candidates
+    src = inspect.getsource(vega_candidates.vol_context)
+    assert "vol_forecast" in src, "the fast scan still computes trailing VRP"
+    assert "VRP_USE_FORECAST" in src, "the fast path must honour the same switch"
+
+
+def test_the_vol_context_contract_covers_the_new_keys():
+    """vol_context promises to emit exactly VOL_CONTEXT_KEYS on every return path, including
+    the early ones — a key that appears only on the happy path is a key callers cannot rely on.
+    """
+    import vega_candidates as vc
+    for k in ("rv_forecast_pp", "vol_state", "vrp_trailing_pp"):
+        assert k in vc.VOL_CONTEXT_KEYS
+    empty = vc.vol_context("NOPE", [], 0.0)
+    assert set(empty) == set(vc.VOL_CONTEXT_KEYS), "an early return dropped a promised key"
