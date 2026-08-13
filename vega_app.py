@@ -459,6 +459,10 @@ def _adapt_engine(t: dict) -> dict:
         "credit_to_width": (ctw / 100.0) if ctw is not None else None,
         "edge_score": _f(t.get("edge_score")), "component_breakdown": t.get("component_breakdown") or {},
         "drift_mode": t.get("true_pop_drift_mode"), "vrp": _f(t.get("vrp")),
+        "vol_state": t.get("vol_state"), "vrp_shift_pp": _f(t.get("vrp_shift_pp")),
+        "vrp_trailing_pp": _f(t.get("vrp_trailing_pp")),
+        "rv_forecast_pp": _f(t.get("rv_forecast_pp")),
+        "sector_proxy": t.get("sector_proxy"), "sector_vol_state": t.get("sector_vol_state"),
         "news_sentiment": t.get("news_sentiment"), "fundamentals_score": t.get("fundamentals_score"),
         "trend": t.get("trend"), "rsi": _f(t.get("rsi")),
         "news_summary": t.get("news_summary"), "warnings": t.get("warnings") or [],
@@ -1709,8 +1713,23 @@ def _copilot_why(c):
 
     vrp = c.get("vrp")
     if vrp is not None and vrp > 0:
-        ok(f'Implied vol exceeds realised by {vrp:.1f}pp — the premium you sell is overpriced '
-           f'versus how much the stock has actually moved')
+        ok(f'Implied vol exceeds FORECAST realised by {vrp:.1f}pp — the premium you sell is '
+           f'overpriced versus how much the stock is expected to move over this horizon')
+    elif vrp is not None:
+        dislike(f'Implied vol is {abs(vrp):.1f}pp BELOW forecast realised — the options are '
+                f'cheap relative to the movement expected, which is the wrong side to sell')
+
+    # Where the vol forecast differs from the trailing number, and why. This is the single
+    # correction that most often changes whether a name qualifies at all, so it is stated
+    # rather than left inside the score.
+    st, shift = c.get("vol_state"), c.get("vrp_shift_pp")
+    if st and shift is not None and abs(shift) >= 0.5:
+        if st == "EXPANDING":
+            ok(f'Vol has spiked and typically reverts — forecasting the horizon instead of the '
+               f'trailing window moves VRP {shift:+.1f}pp in favour of this trade')
+        elif st == "COMPRESSING":
+            risk(f'Vol is unusually compressed and typically drifts back up — forecasting the '
+                 f'horizon moves VRP {shift:+.1f}pp against this trade')
 
     edge = c.get("edge_pp")
     if edge is not None and edge > 0:

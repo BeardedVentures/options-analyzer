@@ -470,6 +470,26 @@ VIX_ELEVATED_THRESHOLD = 25      # Above this: inject standard size-down caution
 # Default matches PREFERRED_DTE_TARGET = 35.
 VRP_HV_WINDOW = 35               # HV lookback days — set equal to PREFERRED_DTE_TARGET
 
+# ── VRP measured against FORECAST realised vol, not trailing ──────────────────
+# The trade is paid against the vol of the NEXT VRP_HV_WINDOW days; the trailing window
+# measures the LAST ones. Over 35,774 observations the trailing figure overstated future vol
+# by 10.4pp on names whose vol had just expanded and understated it by 5.5pp on names that had
+# gone quiet — so the engine refused rich premium after a shock and sold into a lull right
+# before it ended. Held-out MAE improves 13.07 -> 12.29 and the state biases collapse
+# (-7.25 -> +0.65 compressing, +13.11 -> +5.43 expanding). See analysis/vol_forecast.py.
+#
+# Set False to restore the trailing behaviour exactly; `vrp_trailing_pp` is emitted either way
+# so the two can be compared on any row.
+VRP_USE_FORECAST = True
+VOL_REVERSION_PHI = 0.55         # fitted on a 60% train split, held out. 1.0 = no reversion.
+VOL_SECTOR_WEIGHT = 0.30         # how far a cooling/heating SECTOR nudges a name's forecast
+
+# Sector RELATIVE STRENGTH is deliberately not used anywhere. Tested over 8 years on the 11
+# SPDR sectors: rank correlation between RS today and forward returns is +0.01 to -0.04 at
+# every horizon from 21 to 252 days, none significant (p > 0.18), and the top3-minus-bottom3
+# forward spread is ~0. Sector VOLATILITY persists strongly (+0.62 at 1m, +0.78 at 3m,
+# p ~ 1e-207); sector DIRECTION does not. Only the former is wired in.
+
 # ─────────────────────────────────────────────
 # IV HISTORY TRACKING — proper IV Rank calculation
 # ─────────────────────────────────────────────

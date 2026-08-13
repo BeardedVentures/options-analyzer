@@ -521,7 +521,16 @@ def calculate_edge_score(
         breakdown["news"] = 10
 
     # ── Earnings Safety Component (5 points max) ──
-    if earnings_days_away < config.EARNINGS_BLACKOUT_DAYS:
+    # None means "no earnings to be near" (an ETF) or "we never found out". Neither is inside
+    # the blackout, and comparing None to an int raises — which would take the whole scan down
+    # for that ticker rather than scoring it. The earnings GATE handles unknown separately and
+    # fails closed there; this is the scoring path, where absence is simply not a penalty.
+    if earnings_days_away is None:
+        # Full marks: there is no print to be close to. An ETF is not "safe by luck", it is
+        # structurally outside this component, and scoring it 0 would penalise every index
+        # name for a risk it cannot carry.
+        breakdown["earnings_safety"] = 5
+    elif earnings_days_away < config.EARNINGS_BLACKOUT_DAYS:
         breakdown["earnings_safety"] = 0
         if disqualification_reason is None:
             disqualification_reason = (

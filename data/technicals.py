@@ -606,10 +606,40 @@ def calculate_all(price_data: pd.DataFrame,
         iv_rank = iv_rank_result["iv_rank"]
         iv_rank_method = iv_rank_result["iv_rank_method"]
 
-        # ── VRP — uses window matched to PREFERRED_DTE_TARGET ──
+        # ── VRP — implied against FORECAST realised, not trailing realised ──
+        #
+        # This is the number the whole engine leans on: 30 of the 100 edge points, the VRP
+        # criterion in strategies.evaluate, and the premium read on the board. It used to be
+        # implied minus the realised vol of the LAST `vrp_window` days, but the trade is paid
+        # against the realised vol of the NEXT `vrp_window` days, and those differ in a
+        # measurable, directional way. Over 35,774 observations the trailing window
+        # OVERSTATED future vol by 10.4pp on names whose vol had just expanded and
+        # UNDERSTATED it by 5.5pp on names that had gone quiet — so VEGA was refusing rich
+        # premium after a shock and buying into a lull right before it ended. Unconditionally
+        # the bias is -0.13pp, which is exactly why it survived so long: the two errors are
+        # large, opposite and cancel in any average.
+        #
+        # analysis.vol_forecast does the mean reversion (phi fitted out-of-sample) plus a
+        # small sector-vol nudge. Held-out MAE 13.07 -> 12.29.
+        #
+        # vrp_raw keeps the trailing figure alongside, unchanged, so the two are comparable on
+        # every row and turning the flag off restores the old behaviour exactly.
         rv_vrp = _historical_vol(close, vrp_window)
-        vrp = round(current_iv - rv_vrp, 4) if current_iv > 0 and rv_vrp > 0 else 0.0
-        vrp_pct = round(vrp * 100, 2)
+        vrp_raw_pct = round((current_iv - rv_vrp) * 100, 2) if current_iv > 0 and rv_vrp > 0 else 0.0
+        vol_fc = None
+        if getattr(config, "VRP_USE_FORECAST", True) and current_iv > 0 and rv_vrp > 0:
+            try:
+                from analysis import vol_forecast as _vf
+                vol_fc = _vf.for_ticker(ticker, rv_vrp * 100,
+                                        (_historical_vol(close, 126) or 0) * 100)
+            except Exception as e:                       # pragma: no cover - defensive
+                logger.debug("[technicals] vol forecast failed for %s: %s", ticker, e)
+        if vol_fc:
+            vrp_pct = round(current_iv * 100 - vol_fc["forecast_pp"], 2)
+            vrp = round(vrp_pct / 100, 4)
+        else:
+            vrp = round(current_iv - rv_vrp, 4) if current_iv > 0 and rv_vrp > 0 else 0.0
+            vrp_pct = round(vrp * 100, 2)
 
         # ── Volume analysis ──
         vol_20d_avg = float(volume.tail(20).mean()) if len(volume) >= 20 else None
@@ -693,8 +723,16 @@ def calculate_all(price_data: pd.DataFrame,
             "current_iv": round(current_iv * 100, 2),
             "iv_rank": iv_rank,
             "iv_rank_method": iv_rank_method,
-            "vrp": vrp_pct,         # percentage points: IV - RV (DTE-matched window)
-            "vrp_raw": vrp,         # decimal
+            "vrp": vrp_pct,         # pp: IV - FORECAST RV over the horizon (the decision number)
+            "vrp_raw": vrp,         # decimal form of the same
+            # The trailing figure, kept beside the forecast one so the two are comparable on
+            # every row and the change is auditable rather than a silent re-definition.
+            "vrp_trailing_pp": vrp_raw_pct,
+            "vrp_shift_pp": (round(vrp_pct - vrp_raw_pct, 2) if vol_fc else 0.0),
+            "rv_forecast_pp": (vol_fc or {}).get("forecast_pp"),
+            "vol_state": (vol_fc or {}).get("state"),
+            "sector_proxy": (vol_fc or {}).get("sector_proxy"),
+            "sector_vol_state": (vol_fc or {}).get("sector_state"),
             # Volume
             "volume": int(vol_current),
             "vol_20d_avg": int(vol_20d_avg) if vol_20d_avg else None,
