@@ -102,3 +102,31 @@ def test_a_cohort_lookup_failure_does_not_silently_re_pool(monkeypatch):
     import analysis.outcome_logger as ol
     monkeypatch.setattr(ol, "cohort", lambda r: (_ for _ in ()).throw(RuntimeError("boom")))
     assert C._cohort_of({}) == "cohort-unavailable"
+
+
+def test_a_new_trade_records_its_basis_at_open_and_is_analysable(tmp_path, monkeypatch):
+    """The unlock. Both fields were DERIVED from the open date afterwards, which only works
+    while a cutoff date is the whole story — it breaks the moment a rule changes mid-week and
+    it cannot describe a trade opened under a config later reverted. 0 of 64 closed trades
+    passed analysis_eligible, so the cohort that could validate this system did not exist.
+    Recorded at write time, it does."""
+    import json
+    from analysis import outcome_logger as ol
+    p = tmp_path / "o.jsonl"
+    for attr in ("OUTCOMES_FILE", "LEDGER", "_FILE"):
+        if hasattr(ol, attr):
+            monkeypatch.setattr(ol, attr, p)
+    ol.open_paper_trade(ticker="TEST", short_strike=100, long_strike=95,
+                        expiration="2026-09-18", entry_credit_per_share=1.0,
+                        dte=35, delta=-0.2, contracts=1, source="test")
+    row = json.loads(p.read_text(encoding="utf-8").strip().splitlines()[-1])
+    assert row["fill_basis"] == "natural" and row["gate_basis"] == "natural"
+    assert ol.analysis_eligible(row) is True
+
+
+def test_the_basis_can_be_stated_explicitly_rather_than_inferred():
+    """A caller that knows it filled at the mid must be able to say so."""
+    import inspect
+    from analysis import outcome_logger as ol
+    sig = inspect.signature(ol.open_paper_trade)
+    assert "fill_basis" in sig.parameters and "gate_basis" in sig.parameters

@@ -135,3 +135,21 @@ def test_the_card_states_the_exposure_and_the_cost_of_removing_it():
 def test_a_card_without_delta_renders_nothing():
     import vega_app
     assert vega_app._hedge_html({"ticker": "X"}) == ""
+
+
+def test_the_long_leg_delta_is_now_recorded_rather_than_estimated():
+    """analysis.hedge was assuming the long leg at 60% of the short's because build_candidates
+    never stored it — the same class of error as grading CLV off short_theta alone."""
+    import inspect
+    import vega_candidates
+    assert '"long_delta"' in inspect.getsource(vega_candidates.build_candidates)
+
+
+def test_a_recorded_long_delta_beats_the_estimate():
+    # 0.22, deliberately NOT the 60% the estimator would assume (which is 0.18) — otherwise
+    # the two coincide and the test proves nothing.
+    exact = hedge.position_delta(-0.30, 1, long_delta=-0.22)
+    est = hedge.position_delta(-0.30, 1)
+    assert exact["long_leg_estimated"] is False and est["long_leg_estimated"] is True
+    assert exact["share_equivalent"] == pytest.approx(8.0, abs=0.1)
+    assert est["share_equivalent"] == pytest.approx(12.0, abs=0.1)

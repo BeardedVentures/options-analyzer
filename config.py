@@ -480,6 +480,12 @@ VRP_HV_WINDOW = 35               # HV lookback days — set equal to PREFERRED_D
 #
 # Set False to restore the trailing behaviour exactly; `vrp_trailing_pp` is emitted either way
 # so the two can be compared on any row.
+# Declared rather than defaulted, because outcome_logger stamps it onto every trade at open
+# and a phantom getattr default would write an unverifiable claim into the ledger. True since
+# the credit floor and the ranking score moved to the natural basis (sell the bid, buy the
+# ask) — the basis the desk actually fills at.
+USE_NATURAL_CREDIT = True
+
 VRP_USE_FORECAST = True
 VOL_REVERSION_PHI = 0.55         # fitted on a 60% train split, held out. 1.0 = no reversion.
 VOL_SECTOR_WEIGHT = 0.30         # how far a cooling/heating SECTOR nudges a name's forecast

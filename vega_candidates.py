@@ -366,6 +366,11 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                     "spot": round(float(current_price), 4) if current_price else None,
                     "ticker": ticker, "expiration": exp, "dte": dte,
                     "short_strike": short["strike"], "long_strike": long_strike, "width": width,
+                    # Both legs' deltas. The short alone overstates a SPREAD's exposure — the
+                    # long leg is decaying and hedging in your favour at the same time — and
+                    # analysis.hedge was estimating the long at 60% of the short because this
+                    # was never recorded. Same class of error as grading CLV off short_theta.
+                    "long_delta": long_opt.get("delta"),
                     "short_bid": short.get("bid"), "short_ask": short.get("ask"), "short_mid": short.get("mid"),
                     "long_bid": long_opt.get("bid"), "long_ask": long_opt.get("ask"), "long_mid": long_opt.get("mid"),
                     "credit_per_share": credit, "credit_usd": credit_usd, "natural_credit_per_share": natural,

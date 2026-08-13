@@ -1032,6 +1032,17 @@ th.srt .arw{color:var(--green);font-size:9px}
 .copdeep{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;padding-top:10px}
 @media(max-width:1100px){.copdeep{grid-template-columns:1fr}}
 /* Cross-venue gap: the two numbers and their difference, in the order they are read. */
+.verdict{border-color:rgba(0,201,122,.28)}
+.vhead{display:flex;align-items:baseline;gap:10px}
+.vword{font-size:20px;font-weight:800;letter-spacing:-.01em}
+.vscore{font-size:15px;font-weight:800}
+.vscore i{font-style:normal;font-size:11px;color:var(--ink3);font-weight:600}
+.vcap{margin-top:4px;font-size:10.5px;color:var(--amber);font-weight:700}
+.vbet{margin-top:7px;font-size:14px;line-height:1.55;color:var(--ink)}
+.vsec{margin-top:9px;font-size:12px;color:var(--ink2)}
+.vsec b{font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3)}
+.vsec ul{margin:4px 0 0 16px;line-height:1.6}
+.vsec.warn b{color:var(--amber)}
 .pband{margin-top:11px}
 .pbrow{display:flex;align-items:baseline;gap:10px;padding:4px 0;font-size:12px;flex-wrap:wrap}
 .pbrow .k{min-width:130px;color:var(--ink3)}
@@ -1921,6 +1932,7 @@ def _copilot(c, i, tier, log_form, deep):
     action = _copilot_action(c, log_form)
 
     return ('<div class="cop">'
+            f'{_verdict_html(c)}'
             f'<div class="coptop">{rec}{why}{ideas}</div>'
             f'<div class="copmid">{snap}{impact}</div>'
             f'{_price_band_html(c)}{_hedge_html(c)}'
@@ -2061,6 +2073,53 @@ def _market_band_rows(b, mkt):
                  f'downside {cmp_["downside_gap_pct"]:+.1f}%, upside {cmp_["upside_gap_pct"]:+.1f}%'
                  f'</span></div>')
     return rows
+
+
+def _verdict_html(c):
+    """The plain-language verdict, at the TOP of the drawer where the question is asked.
+
+    Everything below it is what premium sellers actually use — VRP, the POP gap against the
+    market's own pricing, defended levels, directional exposure. This does not replace any of
+    it and does not soften it. It answers, in the order a person actually asks: is this good,
+    what am I doing, why, and what could go wrong.
+
+    Every sentence is generated from a number the engine already computed, so the words cannot
+    drift from the scores. If they ever disagree the inputs disagree, which is worth seeing.
+    """
+    try:
+        from analysis import verdict as _v
+        sh = _shelter_note(c)
+        cc = dict(c)
+        if sh:
+            import re as _re
+            m = _re.search(r"\$([\d,]+\.?\d*)", sh)
+            if m:
+                cc["_shelter"] = m.group(1).replace(",", "")
+        v = _v.summarise(cc)
+    except Exception as e:                                # pragma: no cover - defensive
+        logger.debug("[verdict] failed for %s: %s", c.get("ticker"), e)
+        return ""
+    if not v.get("bet"):
+        return ""
+    g = v["grade"]
+    col = _band_color(g["score"])
+    cap = ("" if not g["capped_by"] else
+           '<div class="vcap">Capped: '
+           + ("the options are cheap for how much this moves"
+              if g["capped_by"] == "negative_vrp"
+              else "VEGA rates this worse than the market does") + '</div>')
+    ok_rows = "".join(f'<li>{esc(r)}</li>' for r in v["reasons"])
+    warn_rows = "".join(f'<li>{esc(r)}</li>' for r in v["watch_outs"])
+    return (
+        '<div class="copcard verdict">'
+        f'<div class="vhead"><span class="vword" style="color:{col}">{esc(g["word"])}</span>'
+        f'<span class="vscore num" style="color:{col}">{g["score"]:.1f}<i>/10</i></span></div>'
+        f'{cap}'
+        f'<div class="vbet">{esc(v["bet"])}</div>'
+        + (f'<div class="vsec"><b>Why this one</b><ul>{ok_rows}</ul></div>' if ok_rows else "")
+        + (f'<div class="vsec warn"><b>What could go wrong</b><ul>{warn_rows}</ul></div>'
+           if warn_rows else "")
+        + '</div>')
 
 
 def _hedge_html(c):
