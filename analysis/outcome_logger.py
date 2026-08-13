@@ -89,6 +89,7 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
                      natural_credit_per_share=None, mid_credit_per_share=None,
                      source: str = "manual", note: Optional[str] = None,
                      theta=None, allow_duplicate: bool = False,
+                     fill_basis: str = None, gate_basis: str = None,
                      edge_score=None, vrp=None, technical_score=None,
                      term_slope=None, skew_steepness=None, vix_at_entry=None,
                      atm_iv_at_entry=None, rv_at_entry=None,
@@ -186,6 +187,17 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
         "estimated_round_trip_cost_per_contract": _round_trip_cost_per_contract(),
         "delta": delta,
         "short_theta": theta,
+        # Recorded at write time, not derived from the open date afterwards. Both of these
+        # decide whether a closed trade may inform a base rate at all (analysis_eligible), and
+        # deriving them from a cutoff date only works while the cutoff is the whole story — it
+        # breaks the moment a rule changes mid-week, and it cannot describe a trade opened
+        # under a config that was later reverted. 0 of 64 closed trades currently pass
+        # analysis_eligible, so the cohort that could validate this system does not exist yet;
+        # it starts existing with these fields.
+        "fill_basis": fill_basis or ("natural" if getattr(_config, "USE_NATURAL_CREDIT", True)
+                                     else "mid"),
+        "gate_basis": gate_basis or ("natural" if getattr(_config, "USE_NATURAL_CREDIT", True)
+                                     else "mid"),
         "iv_rank": iv_rank,
         # true_pop = drift-removed (calibrated) POP from the engine edge calculator.
         # implied_pop = delta-derived market-implied POP (1 - abs(delta)).

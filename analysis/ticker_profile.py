@@ -67,6 +67,23 @@ def _cfg(name, default):
 # Keep this small and only for things that genuinely change how a setup should be read. A
 # profile that restates the watchlist note adds nothing; one that says "this name has no
 # earnings because it holds a commodity" changes which gates are meaningful.
+# ── Cross-venue schema ────────────────────────────────────────────────────────
+# An ETF's options and the underlying asset's own options are two venues pricing one risk.
+# Where a native reference exists, the gap between them is information the ETF's thin IV
+# history cannot supply on its own. Every value below is DECLARED per asset and NEVER shared:
+# a noise floor tuned for BTC would call a half-point gold move a signal, and BTC's driver
+# list is meaningless for gold. Shared defaults are how one asset's calibration silently
+# becomes another's.
+#
+#   has_cross_venue_signal        master switch — False renders a placeholder, not a card
+#   cross_venue_ref_name          human label ("CBOE Gold Volatility (GVZ)")
+#   cross_venue_ref_signal        machine key, matches the ctx key the fetch populates
+#   cross_venue_source            venue publishing it ("Deribit", "CBOE")
+#   cross_venue_hours             "24_7" | "equity_hours" — WHEN the two venues are comparable
+#   cross_venue_derived_from      set when the reference is not independent of the ETF
+#   cross_venue_gap_noise_floor_pp  below this the gap is noise. Per-asset. Never shared.
+#   cross_venue_drivers           what actually moves this gap. Per-asset. Never shared.
+#   cross_venue_blocked_reason    why the switch is False, when it is off for a data reason
 DECLARED: Dict[str, Dict] = {
     "IBIT": {
         "kind": "commodity_etf",
@@ -77,6 +94,84 @@ DECLARED: Dict[str, Dict] = {
                  "entire distribution is BTC's. Its IV should be read against BTC's own options "
                  "market (DVOL), which is why the cross-venue gap exists: with 3 days of IV "
                  "history of its own, borrowing Bitcoin's is the only honest reference."),
+        "has_cross_venue_signal": True,
+        "cross_venue_ref_name": "BTC DVOL",
+        "cross_venue_ref_signal": "BTC_DVOL",
+        "cross_venue_source": "Deribit",
+        "cross_venue_hours": "24_7",
+        "cross_venue_derived_from": None,
+        # 2.0pp: measured 2026-08-09 at DVOL 34.24 vs IBIT 32.72 — a 1.5pt gap that is ordinary
+        # venue basis, not a mispricing. The floor sits above it deliberately.
+        "cross_venue_gap_noise_floor_pp": 2.0,
+        "cross_venue_drivers": ["ETF net flows (IBIT, FBTC, BITB)", "Spot BTC funding rates",
+                                "Halving cycle position", "Macro risk-on/risk-off",
+                                "Exchange stablecoin reserves"],
+    },
+    "ETHA": {
+        "kind": "commodity_etf",
+        "tracks": "ETH",
+        "has_earnings": False,
+        "reference_vol": "deribit_dvol_eth",
+        "note": ("Holds spot Ethereum. Same shape as IBIT and the same reason for a cross-venue "
+                 "read, against ETH's DVOL rather than BTC's — ETH ran 69.3 vol against BTC's "
+                 "36.2 on 2026-08-11, so pricing it on BTC's reference would misread it by "
+                 "roughly a factor of two."),
+        "has_cross_venue_signal": True,
+        "cross_venue_ref_name": "ETH DVOL",
+        "cross_venue_ref_signal": "ETH_DVOL",
+        "cross_venue_source": "Deribit",
+        "cross_venue_hours": "24_7",
+        "cross_venue_derived_from": None,
+        # ETH's own vol runs ~2x BTC's, so the same PROPORTIONAL basis is a wider absolute gap.
+        # Sharing IBIT's 2.0 here would call ordinary ETH basis a signal several times a week.
+        "cross_venue_gap_noise_floor_pp": 4.0,
+        "cross_venue_drivers": ["Ethereum staking yield (APY)",
+                                "Layer 2 TVL (Arbitrum, Base, Optimism)", "Gas fee levels",
+                                "ETF net flows (ETHA, ETHW)", "ETH/BTC ratio"],
+    },
+    "GLD": {
+        "kind": "commodity_etf",
+        "tracks": "gold",
+        "has_earnings": False,
+        "reference_vol": "gvz",
+        "note": ("Holds bullion. GVZ is CBOE's gold volatility index and is computed FROM GLD's "
+                 "own option chain, so the gap measures our IV reconstruction against CBOE's, "
+                 "not two independent venues disagreeing. Read it as a data-quality check, "
+                 "never as an edge."),
+        "has_cross_venue_signal": True,
+        "cross_venue_ref_name": "CBOE Gold Volatility (GVZ)",
+        "cross_venue_ref_signal": "GVZ",
+        "cross_venue_source": "CBOE",
+        "cross_venue_hours": "equity_hours",
+        # NOT independent. GVZ is built from GLD options, so a gap here cannot be arbitraged —
+        # it means one of the two calculations is wrong, and the likelier one is ours.
+        "cross_venue_derived_from": "GLD_options",
+        "cross_venue_gap_noise_floor_pp": 0.5,
+        "cross_venue_drivers": ["Real yields (TIPS vs nominal)", "USD strength (DXY)",
+                                "Central bank buying", "Geopolitical stress", "CPI surprise"],
+    },
+    "GDX": {
+        "kind": "equity_etf",
+        "tracks": "gold_miners",
+        "has_earnings": False,
+        "reference_vol": "gvz",
+        "note": ("Miners, not metal. GDX carries equity beta, operating leverage and single-name "
+                 "earnings inside the basket that GLD does not, so its IV SHOULD sit well above "
+                 "GVZ — a large positive gap here is the miners' own risk, not a gold "
+                 "mispricing. Structurally different from GLD despite sharing a reference."),
+        "has_cross_venue_signal": True,
+        "cross_venue_ref_name": "CBOE Gold Volatility (GVZ)",
+        "cross_venue_ref_signal": "GVZ",
+        "cross_venue_source": "CBOE",
+        "cross_venue_hours": "equity_hours",
+        # Indirect: GVZ describes bullion vol, and GDX is a levered equity claim on it. The gap
+        # is a spread between two different risks, which is why the floor is far wider than
+        # GLD's 0.5 — most of it is miner beta and none of that is a signal.
+        "cross_venue_derived_from": "GLD_options",
+        "cross_venue_gap_noise_floor_pp": 6.0,
+        "cross_venue_drivers": ["Gold price direction (via GLD)", "Mining cost inflation",
+                                "Equity beta / broad risk appetite", "Single-name earnings "
+                                "inside the basket", "Real yields (TIPS vs nominal)"],
     },
     "COIN": {
         "kind": "equity",
@@ -91,7 +186,51 @@ DECLARED: Dict[str, Dict] = {
     "TLT": {
         "kind": "bond_etf", "tracks": "long_rates", "has_earnings": False,
         "reference_vol": None,
-        "note": "Long-duration Treasuries. Moves on rates, not on equity risk appetite.",
+        "note": ("Long-duration Treasuries. Moves on rates, not on equity risk appetite. The "
+                 "natural cross-venue reference is the ICE BofA MOVE index, which no free feed "
+                 "publishes — see cross_venue_blocked_reason."),
+        # The reference EXISTS and is the right one; the DATA does not. Verified 2026-08-11:
+        # FRED has no MOVE series (BAMLMOVE, MOVE, ICEBOFAMOVE all 404 — FRED's BAML* series are
+        # credit spreads), and Yahoo's ^MOVE stopped updating on 2026-07-17, 25 days stale while
+        # ^GVZ was current to the day. A gap computed against a month-old vol reading would
+        # compare today's TLT IV to July's MOVE and call the difference an edge, which is worse
+        # than showing nothing. Flip this to True only when a feed is verified CURRENT, not
+        # merely reachable — reachable was the trap.
+        "has_cross_venue_signal": False,
+        "cross_venue_ref_name": "ICE BofA MOVE Index",
+        "cross_venue_ref_signal": "MOVE",
+        "cross_venue_source": "ICE",
+        "cross_venue_hours": "business_hours",
+        "cross_venue_derived_from": None,
+        "cross_venue_gap_noise_floor_pp": 1.0,
+        "cross_venue_drivers": ["Fed meeting calendar and dot plot", "CPI/PCE surprises",
+                                "Treasury auction supply (10Y, 30Y)",
+                                "Yield curve slope (2Y-10Y)"],
+        "cross_venue_blocked_reason": ("No free MOVE feed. FRED publishes no MOVE series and "
+                                       "Yahoo's ^MOVE has been stale since 2026-07-17; ICE "
+                                       "licenses the index. Blocked on data, not on design."),
+    },
+    "SOLZ": {
+        "kind": "commodity_etf", "tracks": "SOL", "has_earnings": False,
+        "reference_vol": None,
+        "note": ("Solana ETF. Same shape as IBIT and ETHA, but Deribit publishes no SOL "
+                 "volatility index, so there is no native reference to read its IV against."),
+        # Deribit ACCEPTS currency=SOL on get_volatility_index_data and returns HTTP 200 with an
+        # empty data array — verified 2026-08-11. A 200 that carries nothing is exactly the
+        # shape that gets mistaken for a working feed, which is why this is declared off rather
+        # than left to fail at render time.
+        "has_cross_venue_signal": False,
+        "cross_venue_ref_name": "SOL DVOL",
+        "cross_venue_ref_signal": "SOL_DVOL",
+        "cross_venue_source": "Deribit",
+        "cross_venue_hours": "24_7",
+        "cross_venue_derived_from": None,
+        "cross_venue_gap_noise_floor_pp": 5.0,
+        "cross_venue_drivers": ["Network outage history", "Staking yield",
+                                "DeFi/DEX volume on Solana", "ETF net flows", "SOL/ETH ratio"],
+        "cross_venue_blocked_reason": ("Deribit returns HTTP 200 with zero data points for "
+                                       "currency=SOL — the endpoint exists, the index does not. "
+                                       "Verified 2026-08-11."),
     },
     "SPY": {
         "kind": "broad_market_etf", "tracks": "sp500", "has_earnings": False,
@@ -112,7 +251,49 @@ def declared(ticker: str) -> Dict:
     d = dict(DECLARED.get((ticker or "").upper(), {}))
     d.setdefault("kind", "unknown")
     d.setdefault("has_earnings", None)   # None = unknown, NOT False. Absence is not a negative.
+    # Default OFF. A name nobody has declared a reference for has no reference, and defaulting
+    # this True would make every unlisted ticker try to render a card against a ctx key that
+    # does not exist.
+    d.setdefault("has_cross_venue_signal", False)
     return d
+
+
+def cross_venue(ticker: str) -> Optional[Dict]:
+    """The declared cross-venue config for a ticker, or None if it has none at all.
+
+    Returns the block even when `has_cross_venue_signal` is False — the caller needs to tell
+    "this asset has no reference" (render nothing) from "this asset has a reference we cannot
+    currently feed" (render the placeholder and say why). Collapsing those two is how TLT would
+    quietly look like an asset nobody had thought about, when in fact it is fully specified and
+    blocked on a licensed feed.
+    """
+    d = DECLARED.get((ticker or "").upper())
+    if not d or "cross_venue_ref_signal" not in d:
+        return None
+    return {
+        "ticker": (ticker or "").upper(),
+        "enabled": bool(d.get("has_cross_venue_signal", False)),
+        "ref_name": d.get("cross_venue_ref_name"),
+        "ref_signal": d.get("cross_venue_ref_signal"),
+        "source": d.get("cross_venue_source"),
+        "hours": d.get("cross_venue_hours"),
+        "derived_from": d.get("cross_venue_derived_from"),
+        "noise_floor_pp": d.get("cross_venue_gap_noise_floor_pp"),
+        "drivers": list(d.get("cross_venue_drivers") or []),
+        "blocked_reason": d.get("cross_venue_blocked_reason"),
+    }
+
+
+def cross_venue_tickers(enabled_only: bool = False) -> List[str]:
+    """Every ticker carrying a cross-venue block, in declaration order.
+
+    The render loop reads this rather than a hardcoded list, so adding an asset is a config
+    change in one file instead of an edit in the view.
+    """
+    out = [t for t, d in DECLARED.items() if "cross_venue_ref_signal" in d]
+    if enabled_only:
+        out = [t for t in out if DECLARED[t].get("has_cross_venue_signal")]
+    return out
 
 
 # ── LEARNED: what we have actually observed about this name ───────────────────

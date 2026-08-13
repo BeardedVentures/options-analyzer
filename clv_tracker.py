@@ -34,6 +34,7 @@ CLI:
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import sys
@@ -96,9 +97,31 @@ def load_ledger(path: Optional[Path] = None) -> List[Dict]:
 def clv_for_record(r: Dict) -> Optional[Dict]:
     """CLV for one open/closed record. Returns None if it lacks the fields to score.
 
-    Prefers an explicitly-logged `theta_expected_mark` (written by the grader at re-mark
-    time, the most accurate). Falls back to a live proxy: entry credit minus |theta|·days,
-    using whatever mark and timestamps the record carries.
+    Prefers an explicitly-logged `theta_expected_mark`. Otherwise builds the no-edge baseline
+    from TIME REMAINING, not from the short leg's theta.
+
+    The old proxy was `entry - |short_theta| * days`, and it made the whole metric
+    unwinnable. `short_theta` is the SHORT LEG's decay; a credit spread's net decay is the
+    short leg's minus the long leg's, several times smaller, because the long leg is decaying
+    in your favour at the same time. Charging the position the short leg's full theta
+    overstated decay by roughly 3-10x: measured on the live ledger, META's short-leg theta
+    alone would have consumed its entire $1.71 credit in 3.5 days against a 16-day hold. The
+    result then clamped at zero, so 16% of records carried a baseline of exactly 0.00 — and
+    once the baseline is zero, CLV = -mark, which is negative for every positive mark. A 9.3%
+    beat rate over 75 records was measuring the formula, not the trades.
+
+    The replacement is the null model the docstring at the top of this file already describes:
+    what the spread is worth from the clock alone. With no price move and no vol change, a
+    credit spread bleeds toward zero over its life, so the zero-edge mark is the entry credit
+    scaled by the fraction of the original term still outstanding:
+
+        theta_expected = entry * (dte_remaining / dte_at_entry)
+
+    Assumption-light, uses only fields every record already carries, and — the property that
+    matters — it can come out either way. It is an approximation: real decay is convex and
+    accelerates near expiry, so this baseline is slightly generous early in a hold and
+    slightly harsh late. That is a known bias in a known direction, which is a different thing
+    from a number that cannot be positive.
     """
     entry = _f(r.get("modeled_credit_per_share"))
     if entry is None:
@@ -113,21 +136,29 @@ def clv_for_record(r: Dict) -> Optional[Dict]:
     theta_exp = _f(r.get("theta_expected_mark"))
     days = None
     if theta_exp is None:
-        theta = _f(r.get("short_theta"))
+        dte0 = _f(r.get("dte"))
         opened = _parse_ts(r.get("opened_at") or r.get("filled_at") or r.get("scan_ts"))
         marked = _parse_ts(r.get("marked_at") or r.get("closed_at") or r.get("opened_at"))
-        if theta is None or not opened or not marked:
+        if not dte0 or dte0 <= 0 or not opened or not marked:
+            # No term to scale against. Excluded from the scorecard rather than scored on a
+            # baseline that would have to be invented — an ungradeable trade must not become
+            # a graded one just because the grader had a fallback.
             return None
         days = max(0, (marked - opened).days)
-        theta_exp = max(0.0, entry - abs(theta) * days)
+        remaining = max(0.0, dte0 - days)
+        theta_exp = entry * (remaining / dte0)
 
     clv = theta_exp - mark
+    # A tie at zero is the maximum win, not a miss. At expiry the baseline is 0 by
+    # construction, so a spread that expired worthless — the whole credit captured — scored
+    # clv == 0 and failed a strict `> 0` test. Nothing beats capturing everything available.
+    beat = clv > 0 or (mark <= 0.0 and entry > 0)
     adverse = mark > entry * (1 + ADVERSE_MOVE_FRAC)
     return {
         "id": r.get("id"), "ticker": r.get("ticker"), "strategy": r.get("strategy"),
         "status": r.get("status"), "entry": entry, "mark": mark,
         "theta_expected": theta_exp, "clv": clv, "days": days,
-        "beat": clv > 0, "adverse": adverse,
+        "beat": beat, "adverse": adverse,
         "news_verdict": ((r.get("news_check") or {}).get("verdict")
                          if isinstance(r.get("news_check"), dict) else r.get("news_verdict")),
         "news_catalyst": bool(r.get("news_catalyst")),
@@ -148,8 +179,38 @@ def clv_records(rows: List[Dict]) -> List[Dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Calibration — predicted POP vs realized hit-rate (reliability curve)
 # ─────────────────────────────────────────────────────────────────────────────
-def calibration_curve(rows: List[Dict], bins=((0, .7), (.7, .8), (.8, .9), (.9, 1.01))) -> List[Dict]:
+def _cohort_of(r: Dict) -> str:
+    """The comparability key for one record, via outcome_logger.
+
+    Read through that module rather than off a raw field: it derives the key from
+    fill_model | gate_basis | close_logic, and history is deliberately not rewritten so older
+    trades carry no field of their own.
+    """
+    try:
+        from analysis import outcome_logger as ol
+        return ol.cohort(r)
+    except Exception as e:                               # pragma: no cover - defensive
+        # Distinct sentinel per record is wrong (it would fragment), but a silent single
+        # bucket is worse: it re-pools every regime and suppresses the multi-cohort warning
+        # while looking exactly like a clean ledger. Name the failure so it reads as one.
+        logging.getLogger(__name__).warning("[clv] cohort lookup failed: %s", e)
+        return "cohort-unavailable"
+
+
+def calibration_curve(rows: List[Dict], bins=((0, .7), (.7, .8), (.8, .9), (.9, 1.01)),
+                      cohort: Optional[str] = None) -> List[Dict]:
+    """Predicted vs realized win rate by POP bucket, for ONE cohort at a time.
+
+    `cohort=None` pools everything, which is what this did unconditionally and what makes the
+    pooled number meaningless on the current ledger: mid-fill trades won 13 of 18 and
+    natural-fill trades won 0 of 46, so pooling them reports a 56.8pp calibration miss that
+    describes the fill model rather than the POP model. vega_status has refused to pool these
+    since the cohorts were defined — "Cohorts are not comparable" — and this function was the
+    one place still doing it, feeding the number straight onto the cockpit's Track Record tab.
+    """
     closed = [r for r in rows if r.get("status") == "closed" and r.get("outcome") in ("win", "loss")]
+    if cohort is not None:
+        closed = [r for r in closed if _cohort_of(r) == cohort]
     curve = []
     for lo, hi in bins:
         b = [r for r in closed if lo <= (_f(r.get("modeled_pop")) or -1) < hi]
@@ -235,9 +296,43 @@ def summary(path: Optional[Path] = None) -> Dict:
         return {"n": len(rs), "beat_rate": beat / len(rs),
                 "avg_clv": sum(r["clv"] for r in rs) / len(rs)}
 
-    curve = calibration_curve(rows)
-    graded = [c for c in curve if c["n"]]
-    cal_gap = (sum(c["gap"] * c["n"] for c in graded) / sum(c["n"] for c in graded)) if graded else None
+    # Calibration, per cohort. The headline number reports the LARGEST cohort alone and says
+    # which one it is, because a single figure spanning incompatible selection and close rules
+    # is not a model verdict — it is an average of two different systems.
+    closed_rows = [r for r in rows if r.get("status") == "closed"
+                   and r.get("outcome") in ("win", "loss")]
+    cohorts: Dict[str, int] = {}
+    for r in closed_rows:
+        k = _cohort_of(r)
+        cohorts[k] = cohorts.get(k, 0) + 1
+
+    def _gap(cur):
+        g = [c for c in cur if c["n"]]
+        return (sum(c["gap"] * c["n"] for c in g) / sum(c["n"] for c in g)) if g else None
+
+    by_cohort = []
+    for name, n in sorted(cohorts.items(), key=lambda kv: -kv[1]):
+        cur = calibration_curve(rows, cohort=name)
+        by_cohort.append({"cohort": name, "n": n,
+                          "gap_pp": (lambda g: g * 100 if g is not None else None)(_gap(cur)),
+                          "curve": cur})
+
+    # Prefer a cohort the system considers analysable. Picking purely by size drew the
+    # cockpit's calibration verdict from 41 records that analysis_eligible() rejects as
+    # broken-thermometer readings — selected on a mid basis the desk could not execute.
+    try:
+        from analysis import outcome_logger as _ol
+        _eligible = {c["cohort"] for c in by_cohort
+                     if any(_ol.analysis_eligible(r) for r in closed_rows
+                            if _cohort_of(r) == c["cohort"])}
+    except Exception:                                    # pragma: no cover - defensive
+        _eligible = set()
+    _ranked = ([c for c in by_cohort if c["cohort"] in _eligible]
+               or by_cohort)
+    lead = _ranked[0] if _ranked else None
+    eligible_n = sum(c["n"] for c in by_cohort if c["cohort"] in _eligible)
+    curve = lead["curve"] if lead else calibration_curve(rows)
+    cal_gap = (lead["gap_pp"] / 100) if (lead and lead["gap_pp"] is not None) else None
 
     return {
         "counts": {"total": len(rows),
@@ -248,6 +343,16 @@ def summary(path: Optional[Path] = None) -> Dict:
         "clv_ex_catalyst": clv_stats(ex),
         "calibration_gap_pp": (cal_gap * 100) if cal_gap is not None else None,
         "calibration_curve": curve,
+        # Which cohort the headline gap describes, and whether anything was left out of it.
+        # Without these two the number reads as "the model", when it is one regime of several.
+        "calibration_cohort": (lead or {}).get("cohort"),
+        "calibration_cohort_n": (lead or {}).get("n"),
+        "calibration_cohorts_present": len(cohorts),
+        # How much of the ledger is analysable at all. Zero here means every calibration
+        # number on the page is drawn from trades the system itself calls unusable.
+        "calibration_eligible_n": eligible_n,
+        "calibration_lead_eligible": bool(lead and lead["cohort"] in _eligible),
+        "calibration_by_cohort": by_cohort,
         "edge_retention": edge_retention(rows),
         "freshness": fresh,
         "news": news_split(recs),
@@ -274,8 +379,22 @@ def _print_human(s: Dict) -> None:
     else:
         print("CLV: no scorable positions yet (need current_mark + theta on open records).")
     cg = s["calibration_gap_pp"]
-    print(f"Calibration gap    : {cg:+.0f}pp (realized − predicted POP)" if cg is not None
-          else "Calibration gap    : — (need closed win/loss records)")
+    # Name the cohort. This figure moved from pooled to cohort-scoped, and an unlabelled
+    # number that silently changed meaning is worse than the pooled one it replaced.
+    if cg is None:
+        print("Calibration gap    : — (need closed win/loss records)")
+    else:
+        _ch = s.get("calibration_cohort") or "?"
+        _n = s.get("calibration_cohort_n") or 0
+        _tot = s.get("counts", {}).get("closed") or 0
+        print(f"Calibration gap    : {cg:+.0f}pp (realized − predicted POP)")
+        print(f"  cohort           : {_ch}  n={_n} of {_tot} closed")
+        if (s.get("calibration_cohorts_present") or 1) > 1:
+            print(f"  NOT POOLED       : {s['calibration_cohorts_present']} cohorts in the ledger; "
+                  f"{_tot - _n} closed trades are excluded from this figure.")
+        if not s.get("calibration_lead_eligible"):
+            print("  WARNING          : no cohort passes analysis_eligible — every trade here was "
+                  "selected or filled on a basis the desk could not execute.")
     er = s["edge_retention"]
     if er["avg_realized_net_pl"] is not None:
         print(f"Edge retention     : avg realized net P/L ${er['avg_realized_net_pl']:+.2f}/ct "

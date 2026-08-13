@@ -207,13 +207,21 @@ def test_board_renders_the_full_mission_control_stack():
         assert m in h, f"missing {m}"
 
 
-def test_every_row_gets_a_copilot_drawer():
+def test_every_row_expands_and_the_top_rows_carry_the_full_analysis():
+    """Every row must still open — the toggle is how the board is read. But a full drawer is a
+    complete analysis card, and a fast-scan board carries 150+ rows: at 154 the page rendered
+    2.05 MB. The top MAX_DRAWERS get the real thing and the rest get a pointer, so the page
+    stays openable without any row becoming unreachable."""
     h = vega_app.render("today")
     rows = h.count('class="vmain"')
     if rows:
-        assert h.count("VEGA recommendation") == rows
-        assert h.count("Why VEGA likes this trade") == rows
-        assert h.count("Recommended action") == rows
+        expected = min(rows, vega_app.MAX_DRAWERS)
+        assert h.count('class="vdetail"') == rows, "a row with no drawer cannot be expanded"
+        assert h.count("VEGA recommendation") == expected
+        assert h.count("Why VEGA likes this trade") == expected
+        # "Setup", not "action": VEGA hands the operator a trade to construct, it does not
+        # issue an instruction. The distinction is the whole decision-support framing.
+        assert h.count("Recommended setup") == expected
 
 
 def test_deep_metrics_are_behind_progressive_disclosure():
@@ -332,14 +340,14 @@ def test_the_btc_board_reads_the_same_snapshot_the_robot_trades_from():
     """A board showing one engine's output while the desk opens from another is the two-engine
     divergence this codebase has fought four enforcement leaks over."""
     import inspect
-    src = inspect.getsource(vega_app._btc_candidates_block)
+    src = inspect.getsource(vega_app._tradeable_block)
     assert "_latest_candidates" in src
     assert "natural_credit" in src, "credit must be the fillable basis, not the mid"
 
 
 def test_the_btc_board_degrades_without_a_snapshot(monkeypatch):
     monkeypatch.setattr(vega_app, "_latest_candidates", lambda: (None, None))
-    assert "No candidate snapshot" in _txt(vega_app._btc_candidates_block())
+    assert "No candidate snapshot" in _txt(vega_app._tradeable_block("IBIT"))
 
 
 def test_a_modelled_after_hours_price_is_never_shown_as_fillable():

@@ -272,8 +272,26 @@ MIN_SPREAD_WIDTH_SPY_LIKE = 1.0   # Minimum spread width for SPY-like tickers (f
 MIN_SPREAD_WIDTH_OTHER = 1.0      # Allow 1-point width on non-index symbols
 ALLOW_NARROW_SPREAD_EXCEPTION = True
 NARROW_SPREAD_MIN_CREDIT_TO_WIDTH = 0.20  # H2 fix: was 0.30 — a 0.20Δ spread pays ~13–20% of width
-MIN_OPTION_VOLUME = 100
-MIN_OPTION_OPEN_INTEREST = 500
+# Leg liquidity floor. A leg passes on EITHER test (volume OR open interest), so these are
+# not "and" conditions — see select_bull_put_pair.
+#
+# Lowered 100/500 -> 25/100 on 2026-08-11, after measuring what the old floor actually did.
+# It was the single largest filter in the system: 1,037 of ~1,530 leg rejections in the
+# 2026-08-11 scan, and 28 of 56 tickers produced NO valid spread at all. Measured against live
+# 25-45 DTE chains it passed only 20% of legs on mega-caps — MU 20%, UNH 24%, WMT 25%, and
+# AMGN exactly ZERO — because open interest concentrates in front-month and round strikes
+# while the median leg in this DTE window carries OI of 21-38. The board was not reading a
+# thin market; it was reading a filter calibrated for a different part of the chain.
+#
+# Loosening it is affordable because THIS SYSTEM ALREADY MEASURES FILLABILITY DIRECTLY.
+# _quote_is_tradeable rejects any leg with a crossed book, a missing side, or a bid-ask wider
+# than MAX_QUOTE_SPREAD_PCT, and every credit is gated and ranked on the NATURAL basis (sell
+# the bid, buy the ask). Open interest is a proxy for exactly the thing those two already
+# check, so a heavy OI floor stacked on top was double-counting the same risk and paying for
+# it in coverage. 25/100 still excludes genuinely dead strikes; the quote test remains the
+# binding constraint, which is the right place for it.
+MIN_OPTION_VOLUME = 25
+MIN_OPTION_OPEN_INTEREST = 100
 # H2 fix: hard floor lowered 0.25 → 0.15. A 0.20-delta short strike structurally collects
 # ~13–20% of width in normal vol (Cboe/industry), so a 25% floor was mutually exclusive with
 # the 0.20Δ strike target and silently rejected most valid index spreads. 0.15 is the true floor;
@@ -451,6 +469,32 @@ VIX_ELEVATED_THRESHOLD = 25      # Above this: inject standard size-down caution
 # HV lookback should match expected DTE so VRP is relevant to the holding period.
 # Default matches PREFERRED_DTE_TARGET = 35.
 VRP_HV_WINDOW = 35               # HV lookback days — set equal to PREFERRED_DTE_TARGET
+
+# ── VRP measured against FORECAST realised vol, not trailing ──────────────────
+# The trade is paid against the vol of the NEXT VRP_HV_WINDOW days; the trailing window
+# measures the LAST ones. Over 35,774 observations the trailing figure overstated future vol
+# by 10.4pp on names whose vol had just expanded and understated it by 5.5pp on names that had
+# gone quiet — so the engine refused rich premium after a shock and sold into a lull right
+# before it ended. Held-out MAE improves 13.07 -> 12.29 and the state biases collapse
+# (-7.25 -> +0.65 compressing, +13.11 -> +5.43 expanding). See analysis/vol_forecast.py.
+#
+# Set False to restore the trailing behaviour exactly; `vrp_trailing_pp` is emitted either way
+# so the two can be compared on any row.
+# Declared rather than defaulted, because outcome_logger stamps it onto every trade at open
+# and a phantom getattr default would write an unverifiable claim into the ledger. True since
+# the credit floor and the ranking score moved to the natural basis (sell the bid, buy the
+# ask) — the basis the desk actually fills at.
+USE_NATURAL_CREDIT = True
+
+VRP_USE_FORECAST = True
+VOL_REVERSION_PHI = 0.55         # fitted on a 60% train split, held out. 1.0 = no reversion.
+VOL_SECTOR_WEIGHT = 0.30         # how far a cooling/heating SECTOR nudges a name's forecast
+
+# Sector RELATIVE STRENGTH is deliberately not used anywhere. Tested over 8 years on the 11
+# SPDR sectors: rank correlation between RS today and forward returns is +0.01 to -0.04 at
+# every horizon from 21 to 252 days, none significant (p > 0.18), and the top3-minus-bottom3
+# forward spread is ~0. Sector VOLATILITY persists strongly (+0.62 at 1m, +0.78 at 3m,
+# p ~ 1e-207); sector DIRECTION does not. Only the former is wired in.
 
 # ─────────────────────────────────────────────
 # IV HISTORY TRACKING — proper IV Rank calculation
