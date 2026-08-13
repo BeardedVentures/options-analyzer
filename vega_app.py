@@ -521,6 +521,12 @@ def _adapt_legacy(row: dict, c: dict) -> dict:
         "theta": _f(c.get("short_theta")), "iv_rank": ivr,
         "iv_method": (ctx.get("iv_rank_method") or "?").upper(),
         "true_pop": None,  # engine-only; unavailable on the fast path
+        # The projection only needs spot, dte and forecast vol — none of which are engine-only —
+        # so the band survives a fast rescan even though true_pop does not.
+        "rv_forecast_pp": _f(ctx.get("rv_forecast_pp")),
+        "vol_state": ctx.get("vol_state"),
+        "vrp_shift_pp": _f(ctx.get("vrp_shift_pp")),
+        "vrp_trailing_pp": _f(ctx.get("vrp_trailing_pp")),
         "true_pop_conf": "", "model_pop": model_pop, "implied_pop": implied,
         "edge_pp": None, "roi": roi,
         "credit_to_width": _f(c.get("credit_to_width")),
@@ -1025,6 +1031,11 @@ th.srt .arw{color:var(--green);font-size:9px}
 .copdeep{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;padding-top:10px}
 @media(max-width:1100px){.copdeep{grid-template-columns:1fr}}
 /* Cross-venue gap: the two numbers and their difference, in the order they are read. */
+.pband{margin-top:11px}
+.pbrow{display:flex;align-items:baseline;gap:10px;padding:4px 0;font-size:12px;flex-wrap:wrap}
+.pbrow .k{min-width:130px;color:var(--ink3)}
+.pbrow b{font-size:15px;font-weight:800}
+.pbnote{margin-top:7px;padding-top:6px;border-top:1px solid var(--line);font-size:10.5px;color:var(--ink3);line-height:1.55}
 .xvgap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-top:10px}
 .xvrow{display:flex;align-items:baseline;gap:10px;padding:4px 0;font-size:12px}
 .xvrow .k{min-width:190px;color:var(--ink3)}
@@ -1911,6 +1922,7 @@ def _copilot(c, i, tier, log_form, deep):
     return ('<div class="cop">'
             f'<div class="coptop">{rec}{why}{ideas}</div>'
             f'<div class="copmid">{snap}{impact}</div>'
+            f'{_price_band_html(c)}'
             f'{action}'
             '<details class="copmore"><summary>Full analysis &mdash; payoff, metrics, gates, '
             'score composition</summary>'
@@ -1992,6 +2004,62 @@ def _copilot_snapshot(c):
             + cell("RSI", f'{rsi:.0f}' if rsi is not None else "-",
                    esc((c.get("trend") or "").replace("_", " ").title()))
             + '</div></div>')
+
+
+def _price_band(c, confidence=None):
+    """The projected price window at expiry for one card, or None.
+
+    Built from the SAME forecast vol the VRP uses, so the band and the edge score cannot tell
+    the reader two different stories about how much the stock is expected to move.
+    """
+    try:
+        from analysis import price_projection as pp
+        vol = c.get("rv_forecast_pp")
+        if vol is None:
+            return None
+        st = c.get("strat_type") or "bull_put"
+        side = "call" if st == "bear_call" else "put"
+        strike = c.get("call_short") if side == "call" else (c.get("short") or c.get("put_short"))
+        return pp.for_candidate(c.get("price"), c.get("dte"), {"forecast_pp": vol},
+                                short_strike=strike, side=side, confidence=confidence)
+    except Exception as e:                                # pragma: no cover - defensive
+        logger.debug("[projection] failed for %s: %s", c.get("ticker"), e)
+        return None
+
+
+def _price_band_html(c):
+    """Where the engine thinks the stock will be, and where the short strike sits in it.
+
+    A credit spread IS a bet about a range, and the board showed a strike, a breakeven and a
+    probability without ever drawing the distribution those came from. Stated plainly here,
+    with the MEASURED coverage rather than the claimed one — an 80% window is wrong one time
+    in five by design, and saying so is what makes it usable rather than reassuring.
+    """
+    b = _price_band(c)
+    if not b:
+        return ""
+    cov = b.get("measured_coverage")
+    cov_txt = (f"held-out coverage {cov:.0%}" if cov else "coverage untested at this level")
+    sp = b.get("strike") or {}
+    if sp:
+        cls = "neg" if sp.get("inside_band") else "pos"
+        strike_row = (f'<div class="pbrow"><span class="k">Short strike</span>'
+                      f'<b class="num {cls}">${sp["strike"]:,.2f}</b>'
+                      f'<span class="dim">{esc(sp["note"])}</span></div>')
+    else:
+        strike_row = ""
+    return (
+        '<div class="copcard pband"><div class="hd">Projected price at expiry &middot; '
+        f'{b["confidence"]:.0%} window</div>'
+        f'<div class="pbrow"><span class="k">Range in {b["dte"]} days</span>'
+        f'<b class="num">${b["low"]:,.2f} &ndash; ${b["high"]:,.2f}</b>'
+        f'<span class="dim">{b["low_pct"]:+.1f}% / {b["high_pct"]:+.1f}% from ${b["spot"]:,.2f}</span></div>'
+        f'{strike_row}'
+        f'<div class="pbnote">Zero drift, lognormal, sigma from the same forecast the edge '
+        f'score uses ({b["vol_pp"]:.1f}% annualised). One-sigma move &asymp; '
+        f'${b["one_sigma_usd"]:,.2f}. Direction is not predicted &mdash; the band is symmetric '
+        f'by construction. {esc(cov_txt)}, so it is wrong about one time in '
+        f'{max(1, round(1/(1-b["confidence"]))):.0f}.</div></div>')
 
 
 def _copilot_impact(c):

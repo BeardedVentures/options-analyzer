@@ -883,6 +883,16 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "post_earnings_crush": post_earnings_crush,
         "days_since_earnings": days_since_earnings,
         "vrp": tech.get("vrp"),
+        # The vol forecast travels with the trade so the cockpit can draw the projected price
+        # window from the SAME sigma the edge score was built on. Recomputing it at render
+        # time from a different window is how a page ends up telling the reader two
+        # incompatible stories about how far the stock can travel.
+        "rv_forecast_pp": tech.get("rv_forecast_pp"),
+        "vol_state": tech.get("vol_state"),
+        "vrp_trailing_pp": tech.get("vrp_trailing_pp"),
+        "vrp_shift_pp": tech.get("vrp_shift_pp"),
+        "sector_proxy": tech.get("sector_proxy"),
+        "sector_vol_state": tech.get("sector_vol_state"),
         "trend": tech.get("trend"),
         "rsi": tech.get("rsi"),
         "macd_crossover": tech.get("macd_crossover"),
