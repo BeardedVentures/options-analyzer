@@ -215,7 +215,13 @@ PREDICTION_RESOLVE_GRACE_DAYS = 5
 # read of the survivors. It looked identically confident either way.
 CHAIN_QUALITY_LOG_ENABLED = True  # Write a per-ticker per-scan reading to data/data_quality_log.json
 CHAIN_QUALITY_GATE_ENABLED = True # Below the floor, return an empty chain instead of a thin one
-CHAIN_QUALITY_MIN_RATIO = 0.30    # Floor. Under 30% quotable, skip the ticker for this scan.
+# Raised 0.30 -> 0.50 on 2026-08-14, BEFORE activating a better chain source. The threshold
+# decides which tickers are eligible, so it is part of the cohort contract and cannot be moved
+# once the count starts. 0.30 was calibrated to yfinance's degraded chains (33-68% of records
+# discarded during market hours); scoring a ticker off a third of its chain is how a gate ends
+# up evaluating a name it cannot see. Set to where it should be for good data, accepting fewer
+# names in the interim.
+CHAIN_QUALITY_MIN_RATIO = 0.50    # Floor. Under 30% quotable, skip the ticker for this scan.
 CHAIN_QUALITY_GOOD_RATIO = 0.70   # At or above this the chain reads green in the cockpit tile.
 
 # ─────────────────────────────────────────────
@@ -484,6 +490,41 @@ VRP_HV_WINDOW = 35               # HV lookback days — set equal to PREFERRED_D
 # and a phantom getattr default would write an unverifiable claim into the ledger. True since
 # the credit floor and the ranking score moved to the natural basis (sell the bid, buy the
 # ask) — the basis the desk actually fills at.
+# ═══════════════════════════════════════════════════════════════════════════
+# COHORT CONTRACT — FROZEN 2026-08-14.  Read this before changing anything below it.
+# ═══════════════════════════════════════════════════════════════════════════
+# outcome_logger.cohort() keys a trade as `fill_model | gate_basis | close_logic`, and a
+# calibration number is only meaningful within one key. The ledger already proves what happens
+# when that is ignored: pooled it reports a -56.8pp miss, split it reports -5.4pp on the cohort
+# that filled where it was priced.
+#
+# We are now accumulating the FIRST cohort that can validate anything: natural|natural|<close>.
+# Every setting in this block defines which trades are eligible or how they are managed, so
+# changing ANY of them mid-run splits the cohort and restarts the count. That includes the
+# close logic — a roll rule or a 21-DTE exit added at trade 10 splits it exactly as surely as
+# moving a gate would, because close_logic is part of the key.
+#
+# WHAT THIS COHORT IS VALIDATING — stated so it cannot be quietly redefined:
+#     "Sell a defined-risk credit spread on the natural basis, hold to stop or expiry."
+# NOT rolls. NOT 21-DTE management. Those are deliberately deferred to a v2 cohort with its
+# own key, because the open question is whether SELECTION has edge, and 45 of the last 65
+# exits went through the stop — adding a second unvalidated mechanism now makes that question
+# unanswerable rather than answering it.
+#
+# Target: 30 closed trades under one key. Deferred work that does NOT touch this block
+# (scoring refinements, display, calibration analysis) may proceed in parallel.
+COHORT_FROZEN_AT = "2026-08-14"
+COHORT_STRATEGY_LABEL = "sell_natural_hold_to_stop_or_expiry"
+COHORT_TARGET_CLOSED_TRADES = 30
+
+# Negative pop_gap = VEGA's own model rates the trade WORSE than the market prices it. Eleven
+# gates and none of them tested this; observed live on IBIT at -12.6pp while passing 11/11.
+# Decision 2026-08-14: HARD block for the auto-trader, ADVISORY for the manual desk. The robot
+# must not open a trade its own model rates negatively; the operator may, with the warning in
+# front of them. Frozen for the cohort.
+POP_GAP_GATE_AUTO_TRADER = True
+POP_GAP_MIN = 0.0
+
 USE_NATURAL_CREDIT = True
 
 VRP_USE_FORECAST = True

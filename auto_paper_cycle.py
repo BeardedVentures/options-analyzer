@@ -268,6 +268,22 @@ def _candidate_passes_minimum(c: Dict, verbose: bool = False) -> bool:
         if verbose:
             _log(f"[GATE] {c.get('ticker')} REJECT failed={failed}")
         return False
+
+    # pop_gap: VEGA's own probability against the market's. Negative means the engine rates the
+    # trade WORSE than the price assumes, and none of the eleven contract gates tests it —
+    # observed live on IBIT at -12.6pp while passing 11/11. Decision 2026-08-14: HARD for the
+    # robot, ADVISORY for the operator. The desk may knowingly take a trade its model dislikes;
+    # an unattended process must not. Part of the frozen cohort contract — see config.
+    if getattr(config, "POP_GAP_GATE_AUTO_TRADER", True):
+        gap = c.get("pop_gap")
+        if gap is None:
+            tp, ip = c.get("true_pop"), c.get("pop_implied")
+            gap = (float(tp) - float(ip)) if (tp is not None and ip is not None) else None
+        floor = float(getattr(config, "POP_GAP_MIN", 0.0))
+        if gap is not None and gap < floor:
+            if verbose:
+                _log(f"[GATE] {c.get('ticker')} REJECT pop_gap={gap:+.4f} < {floor}")
+            return False
     # The credit floor is enforced by the contract's `min_credit_usd` gate against
     # natural_credit_usd (assessment.evaluate_gates), which is the basis the desk actually
     # fills at. A second check used to sit here reading c["credit_usd"] — the MID value — as a

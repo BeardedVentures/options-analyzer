@@ -72,7 +72,12 @@ def test_pop_falls_back_to_implied_when_true_pop_absent():
 
 
 def test_pop_exactly_at_floor_passes():
-    c = make_candidate(true_pop=config.MIN_PROBABILITY_OF_PROFIT)
+    """The POP floor is inclusive. pop_implied is pinned just under the floor so this exercises
+    the floor alone — the fixture's default 0.78 would leave a negative pop_gap once true_pop
+    drops to the floor, and the auto-trader's pop_gap gate (added 2026-08-14) would reject on
+    that instead, making the test pass or fail for the wrong reason."""
+    floor = config.MIN_PROBABILITY_OF_PROFIT
+    c = make_candidate(true_pop=floor, pop_implied=floor - 0.02, pop=floor - 0.02)
     assert apc._candidate_passes_minimum(c) is True
 
 
