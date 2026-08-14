@@ -181,3 +181,32 @@ def test_risk_tiers_carry_affordability_instead_of_the_gate():
     contracts-per-tier so the output serves accounts of any size."""
     assert len(config.RISK_TIERS) >= 3
     assert all("max_risk" in t for t in config.RISK_TIERS)
+
+
+# ── Regime copy must match the measured evidence ──────────────────────────────────────────────
+
+def test_low_vol_does_not_suppress_or_tell_the_operator_to_stand_aside():
+    """Measured 1990-2026 over 9,041 days: the VIX 13-16 band the engine called "too cheap to
+    sell" earned +2.95 vol points, was positive 85.5% of the time, and carried a 95.9% win rate
+    with a MILDER worst case than the 16-30 bands treated as normal. Every VIX bucket tested is
+    positive-expectancy. Low vol is a thinner market, not a wrong one — and the old copy told
+    the operator "do not chase setups", which the evidence does not support."""
+    reg = main._compute_regime_context({"vix": {"current": 14.5}})
+    assert reg["regime_flag"] == "LOW_VOL"
+    assert reg["trade_suppressed"] is False, "low vol must not read as Stand Aside"
+    note = reg["regime_note"].lower()
+    assert "not a stand-aside" in note
+    assert "do not chase" not in note
+
+
+def test_the_low_vol_note_quantifies_the_cost_rather_than_asserting_it():
+    """Fewer qualifiers is true and worth saying; 'no edge' was not. The note carries the
+    measured difference so the operator can weigh it."""
+    note = main._compute_regime_context({"vix": {"current": 14.5}})["regime_note"]
+    assert "+2.9" in note and "+4.2" in note, "state the size of the gap, not just its sign"
+
+
+def test_high_vix_still_reads_as_the_richer_regime():
+    """VRP rises monotonically with VIX (+2.43 -> +6.61). Correcting the low-vol copy must not
+    flatten that — a low tape genuinely pays less."""
+    assert main._compute_regime_context({"vix": {"current": 25.0}})["regime_flag"] != "LOW_VOL"
