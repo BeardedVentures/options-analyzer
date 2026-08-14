@@ -25,20 +25,27 @@ MAX_RISK_PER_TRADE_PCT = 0.20     # 20% of account per trade
 MAX_RISK_PER_TRADE_USD = ACCOUNT_BALANCE * MAX_RISK_PER_TRADE_PCT
 
 # ─────────────────────────────────────────────
-# POSITION SIZING — auto-scales with balance
+# POSITION SIZING
 # ─────────────────────────────────────────────
-# At $500:  only 1-3 wide spreads valid
-# At $1000+: 1-5 wide spreads valid
-# At $2500+: iron condors on SPY/QQQ viable
-# At $5000+: full strategy suite
-
-def get_max_spread_width():
-    if ACCOUNT_BALANCE >= 5000:
-        return 10
-    else:
-        return 5  # $5 wide at all levels — oversized warning flags risk at small accounts
-
-MAX_SPREAD_WIDTH = get_max_spread_width()
+# MAX_SPREAD_WIDTH was computed by get_max_spread_width(), which branched on ACCOUNT_BALANCE:
+# 5 below $5,000 and 10 above. That was the ONE place account size genuinely reached the board
+# — build_candidates refuses any pair wider than this, so at $500 a 10-wide spread was never
+# enumerated and could not be seen, let alone sized.
+#
+# That is the wrong shape for a discovery tool. A 10-wide SPY spread is a real opportunity
+# whether or not this account can carry it; RISK_TIERS already exists to say what it costs and
+# let the operator decide. Declared directly at the wider value on 2026-08-14 so the board is
+# balance-independent in fact and not only in intent.
+#
+# Note this WIDENS what gets enumerated and therefore raises max loss per spread. It is a
+# cohort-affecting change, made on day 0 of the frozen cohort with zero trades accumulated —
+# see the COHORT CONTRACT block below. Changing it later restarts the count.
+#
+# edge_calculator.select_best_strategy() was deleted alongside it. That one really was dead,
+# and it caused a false claim on 2026-08-14 that iron condors were unreachable at $500. The
+# ledger disproves it: 31 condors and 45 bear calls, produced by multi_strategy.scan_extra(),
+# which contains no reference to account balance at all.
+MAX_SPREAD_WIDTH = 10
 MIN_CONTRACTS = 1                 # Always show at least 1-contract setup, even if oversized
 
 # ─────────────────────────────────────────────
@@ -69,10 +76,12 @@ SPY_BUFFER_TICKERS = {"SPY", "QQQ", "IWM", "DIA", "GLD", "TLT"}
 # ─────────────────────────────────────────────
 # STRATEGY PREFERENCES
 # ─────────────────────────────────────────────
-# L2 fix: the engine only implements bull_put_spread (main.py hard-forces it, and
-# select_best_strategy's result is overridden). The previous 5-item list was aspirational and
-# misleading. Keep the roadmap in a comment; enable only what actually runs.
-#   Roadmap (NOT yet implemented): bear_call_spread, iron_condor, pmcc, csp
+# main.py's own screen_ticker path hard-forces bull_put_spread. Bear call and iron condor are
+# NOT unimplemented — they are produced by multi_strategy.scan_extra() and appended to the same
+# qualified_trades list, and the ledger carries 45 and 31 of them respectively. The comment
+# here previously said the engine "only implements bull_put_spread" and cited
+# select_best_strategy as the override; both were wrong and that function is now deleted.
+#   Genuinely not implemented: pmcc, csp
 ENABLED_STRATEGIES = [
     "bull_put_spread",
     "bear_call_spread",   # live via multi_strategy.py — spot-check vs broker on first run

@@ -219,7 +219,24 @@ P&L and it is currently unanswerable.**
 Both are the same class of defect: a textbook constant pretending to be universal. Per-ticker
 overrides exist as a mechanism but are deliberately unset.
 
-### 4.6 Hedge long-leg estimation
+### 4.6 Account size reached the board through one path (fixed 2026-08-14)
+
+`MAX_SPREAD_WIDTH` was computed by `get_max_spread_width()`, which returned 5 below a $5,000
+balance and 10 above. `build_candidates` refuses any pair wider than it, so at the configured
+$500 a 10-wide spread **was never enumerated** — invisible rather than merely unaffordable.
+Declared directly at 10 now; `RISK_TIERS` communicates affordability instead.
+
+Worth recording how this was found, because it is the review-failure this document warns
+about, committed by its own author: `edge_calculator.select_best_strategy()` contains
+balance branching and is **never called**. Reading it produced a confident, false claim that
+iron condors were structurally unreachable at $500. The ledger disproves it outright — 31
+condors and 45 bear calls, produced by `multi_strategy.scan_extra()`, which references account
+balance nowhere. The real constraint was one line away in a function that *was* called.
+
+**Both dead-looking functions are deleted.** A constraint that reads live and gates nothing is
+worse than no comment at all.
+
+### 4.7 Hedge long-leg estimation
 
 `analysis/hedge.py` assumed the long leg at 60% of the short's delta. `long_delta` is now
 stored, but **all historical candidates lack it** and cannot be backfilled.

@@ -623,36 +623,6 @@ def calculate_edge_score(
 # STRATEGY SELECTION HELPER
 # ─────────────────────────────────────────────
 
-def select_best_strategy(
-    account_balance: float,
-    trend: str,
-    iv_rank: float,
-    vix_level: float,
-) -> str:
-    """
-    Select the most appropriate strategy given market conditions and account size.
-    Respects account balance constraints.
-    """
-    max_spread = config.MAX_SPREAD_WIDTH
-
-    if account_balance < 1000:
-        # Very small account — only bull put spreads and bear call spreads
-        if trend in ("STRONG_UP", "UP", "NEUTRAL"):
-            return "bull_put_spread"
-        else:
-            return "bear_call_spread"
-
-    if account_balance >= 2500 and trend == "NEUTRAL" and iv_rank >= 55:
-        return "iron_condor"
-
-    if trend in ("STRONG_UP", "UP"):
-        return "bull_put_spread"
-    elif trend in ("STRONG_DOWN", "DOWN"):
-        return "bear_call_spread"
-    else:
-        return "bull_put_spread"  # default neutral
-
-
 def calculate_spread_metrics(
     short_put: dict,
     long_put_strike: float,

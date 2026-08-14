@@ -152,3 +152,32 @@ def test_the_chain_quality_floor_is_set_for_good_data_before_it_arrives():
     """The floor decides which tickers are eligible, so it is part of the cohort contract and
     cannot move once the count starts. 0.30 was calibrated to degraded yfinance chains."""
     assert config.CHAIN_QUALITY_MIN_RATIO >= 0.50
+
+
+# ── Account size must not reach the board ─────────────────────────────────────────────────────
+
+def test_the_board_is_not_gated_on_account_size():
+    """VEGA is a discovery tool across all risk levels, not a $500 autotrader. MAX_SPREAD_WIDTH
+    was derived from ACCOUNT_BALANCE (5 below $5k, 10 above) and build_candidates refuses any
+    pair wider than it — so at $500 a 10-wide spread was never enumerated. Declared directly
+    now; RISK_TIERS communicates affordability instead of the board hiding the trade."""
+    src = inspect.getsource(config)
+    i = src.index("MAX_SPREAD_WIDTH =")
+    assert "ACCOUNT_BALANCE" not in src[i:i + 80], "spread width must not derive from balance"
+    assert config.MAX_SPREAD_WIDTH >= 10
+
+
+def test_the_dead_balance_branching_functions_are_gone():
+    """Both read as live constraints while gating nothing (select_best_strategy) or gating the
+    wrong thing invisibly (get_max_spread_width). One of them caused a false claim about the
+    system's own behaviour on 2026-08-14."""
+    from analysis import edge_calculator
+    assert not hasattr(config, "get_max_spread_width")
+    assert not hasattr(edge_calculator, "select_best_strategy")
+
+
+def test_risk_tiers_carry_affordability_instead_of_the_gate():
+    """The mechanism that replaces balance gating: every qualified trade is presented with
+    contracts-per-tier so the output serves accounts of any size."""
+    assert len(config.RISK_TIERS) >= 3
+    assert all("max_risk" in t for t in config.RISK_TIERS)
