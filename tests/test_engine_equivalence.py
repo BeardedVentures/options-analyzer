@@ -217,37 +217,41 @@ def test_high_vix_still_reads_as_the_richer_regime():
 
 # ── P0-2: position sizing must actually bind ──────────────────────────────────────────────────
 
-def test_max_risk_per_trade_is_enforced_not_merely_configured():
-    """MAX_RISK_PER_TRADE_USD sat in config from the beginning and was read by NOTHING except
-    the tip-sheet renderer — a display value masquerading as a risk control. Measured
-    2026-08-16: 13 open positions carrying $4,141 against a $500 account (8.3x), 11 of 13
-    individually over the $100 cap. Every P&L figure in the ledger is confounded by
-    uncontrolled sizing until this binds."""
-    gates = {k: True for k in config.REQUIRED_GATES}
-    base = {"ticker": "X", "gates": gates, "true_pop": 0.80, "pop_implied": 0.72,
-            "natural_credit_usd": 50.0, "short_delta": -0.20,
-            "short_strike": 100.0, "long_strike": 95.0}
-    cap = config.MAX_RISK_PER_TRADE_USD
-    assert auto_paper_cycle._candidate_passes_minimum(dict(base, max_loss_usd=cap * 0.8)) is True
-    assert auto_paper_cycle._candidate_passes_minimum(dict(base, max_loss_usd=cap * 3)) is False
+def test_no_account_size_gate_exists_anywhere_in_the_trade_path():
+    """VEGA is a SCREENER. It recommends and does not act, and it does not model an account.
 
-
-def test_unknown_position_size_is_refused_rather_than_assumed_safe():
-    """A spread whose max loss cannot be computed cannot be shown to fit the account. This gate
-    exists because unmeasured risk accumulated silently for months."""
-    gates = {k: True for k in config.REQUIRED_GATES}
-    c = {"ticker": "X", "gates": gates, "true_pop": 0.80, "pop_implied": 0.72,
-         "natural_credit_usd": 50.0, "short_delta": -0.20,
-         "short_strike": 100.0, "long_strike": 95.0}
-    assert auto_paper_cycle._candidate_passes_minimum(c) is False
-
-
-def test_the_size_cap_binds_the_robot_not_the_board():
-    """MAX_SPREAD_WIDTH was decoupled from account size on 2026-08-14 so the cockpit surfaces
-    opportunities at every risk level. The cap belongs on the unattended process that sizes to
-    a $500 account, not on what the operator is allowed to see."""
+    A MAX_RISK_PER_TRADE_USD cap was added 2026-08-16 on a real finding ($4,141 of open risk
+    against a $500 balance) and removed 2026-08-17 as the wrong shape. The measurement argument
+    is stronger than the scope one: this paper loop is the INSTRUMENT that validates the
+    screener, so filtering it by account size makes the cohort test "the small spreads the
+    screener liked" rather than what the screener liked — biasing the exact sample the 30-trade
+    gate depends on, and excluding wide spreads from the record meant to grade them."""
+    # Executable lines only — the comment block explaining WHY the cap was removed names both
+    # constants, and that explanation is worth keeping. Asserting on raw source text would
+    # force the reasoning to be deleted to satisfy the test.
     src = inspect.getsource(auto_paper_cycle._candidate_passes_minimum)
-    assert "MAX_RISK_PER_TRADE_USD" in src
+    code = " ".join(l for l in src.splitlines() if not l.strip().startswith("#"))
+    assert "MAX_RISK_PER_TRADE_USD" not in code
+    assert "ACCOUNT_BALANCE" not in code
+
+
+def test_risk_sizing_is_presented_not_enforced():
+    """RISK_TIERS shows each trade at several sizes so the operator chooses. Display, not gate."""
+    assert len(config.RISK_TIERS) >= 3
+    assert all("max_risk" in t for t in config.RISK_TIERS)
+
+
+def test_spread_width_is_independent_of_account_size():
+    """The one place account size genuinely reached the board, fixed 2026-08-14."""
     cfg = inspect.getsource(config)
     i = cfg.index("MAX_SPREAD_WIDTH =")
     assert "ACCOUNT_BALANCE" not in cfg[i:i + 80]
+    assert config.MAX_SPREAD_WIDTH >= 10
+
+
+def test_the_select_contract_still_requires_computable_risk():
+    """Removing the CAP does not remove the requirement that risk be KNOWN. A candidate whose
+    max loss cannot be computed still cannot be presented as a recommendation — the operator
+    needs the number to size against, even though VEGA never sizes for them."""
+    from analysis import contracts
+    assert ("max_loss_usd", "num0") in contracts.SELECT_CANDIDATE

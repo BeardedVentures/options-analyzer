@@ -289,35 +289,22 @@ def _candidate_passes_minimum(c: Dict, verbose: bool = False) -> bool:
     # observed live on IBIT at -12.6pp while passing 11/11. Decision 2026-08-14: HARD for the
     # robot, ADVISORY for the operator. The desk may knowingly take a trade its model dislikes;
     # an unattended process must not. Part of the frozen cohort contract — see config.
-    # Position-size cap. MAX_RISK_PER_TRADE_USD has existed in config since the beginning and
-    # was read by NOTHING except the tip-sheet renderer — a display value masquerading as a
-    # risk control. Measured 2026-08-16: 13 open positions carrying $4,141 of defined risk
-    # against a $500 account (8.3x), with 11 of 13 individually over the $100 cap. Every P&L
-    # and win-rate figure in the ledger is confounded by uncontrolled sizing until this binds.
+    # NO POSITION-SIZE GATE HERE, AND THAT IS DELIBERATE.
     #
-    # HARD for the auto-trader, which trades the paper account and must respect its size.
-    # NOT applied to the board: MAX_SPREAD_WIDTH was deliberately decoupled from account size
-    # on 2026-08-14 so the cockpit surfaces opportunities at every risk level and RISK_TIERS
-    # says what each costs. The operator may take a $900 spread knowingly; an unattended
-    # process sizing to a $500 account may not. Same split as the pop_gap gate below.
-    cap = float(getattr(config, "MAX_RISK_PER_TRADE_USD", 0) or 0)
-    if cap > 0:
-        ml = c.get("max_loss_usd")
-        if ml is None:
-            w = c.get("width")
-            nc = c.get("natural_credit_usd")
-            ml = (float(w) * 100.0 - float(nc)) if (w is not None and nc is not None) else None
-        if ml is None:
-            # No sizing information is not a pass. A spread whose max loss cannot be computed
-            # cannot be shown to fit the account, and this gate exists precisely because
-            # unmeasured risk accumulated silently for months.
-            if verbose:
-                _log(f"[GATE] {c.get('ticker')} REJECT max_loss_usd unknown — cannot size")
-            return False
-        if float(ml) > cap:
-            if verbose:
-                _log(f"[GATE] {c.get('ticker')} REJECT max_loss ${float(ml):,.0f} > cap ${cap:,.0f}")
-            return False
+    # A MAX_RISK_PER_TRADE_USD cap was added 2026-08-16 after finding $4,141 of open defined
+    # risk against a $500 ACCOUNT_BALANCE. The finding was real; the fix was the wrong shape,
+    # and it was removed 2026-08-17 once the scope was stated plainly: VEGA is a SCREENER. It
+    # recommends and does not act, and it does not model an account.
+    #
+    # The measurement argument is stronger than the scope one. This paper loop is not a desk —
+    # it is the instrument that validates the screener, and its ledger is the only evidence the
+    # screener works. Filtering it by account size means the cohort tests "the small spreads
+    # the screener liked" rather than "what the screener liked", which biases the very sample
+    # the 30-trade gate depends on. A cap here would have quietly excluded every wide spread
+    # from the record that is supposed to grade wide spreads.
+    #
+    # Risk sizing belongs to the operator, and RISK_TIERS already presents each trade at
+    # several sizes so they can choose. That is a display concern, not a gate.
 
     if getattr(config, "POP_GAP_GATE_AUTO_TRADER", True):
         gap = c.get("pop_gap")
