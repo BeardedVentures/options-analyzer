@@ -141,7 +141,10 @@ def test_the_pop_gap_gate_is_hard_for_the_robot_and_declared():
 
 def test_a_negative_pop_gap_is_refused_by_the_auto_trader():
     gates = {k: True for k in config.REQUIRED_GATES}
-    base = {"ticker": "X", "gates": gates, "natural_credit_usd": 50.0, "short_delta": -0.20}
+    # max_loss_usd under the cap, so this exercises the pop_gap gate rather than the sizing
+    # gate added the same week.
+    base = {"ticker": "X", "gates": gates, "natural_credit_usd": 50.0, "short_delta": -0.20,
+            "max_loss_usd": 80.0}
     ok = dict(base, true_pop=0.80, pop_implied=0.72)
     bad = dict(base, true_pop=0.66, pop_implied=0.79)
     assert auto_paper_cycle._candidate_passes_minimum(ok) is True
@@ -210,3 +213,39 @@ def test_high_vix_still_reads_as_the_richer_regime():
     """VRP rises monotonically with VIX (+2.43 -> +6.61). Correcting the low-vol copy must not
     flatten that — a low tape genuinely pays less."""
     assert main._compute_regime_context({"vix": {"current": 25.0}})["regime_flag"] != "LOW_VOL"
+
+
+# ── P0-2: position sizing must actually bind ──────────────────────────────────────────────────
+
+def test_max_risk_per_trade_is_enforced_not_merely_configured():
+    """MAX_RISK_PER_TRADE_USD sat in config from the beginning and was read by NOTHING except
+    the tip-sheet renderer — a display value masquerading as a risk control. Measured
+    2026-08-16: 13 open positions carrying $4,141 against a $500 account (8.3x), 11 of 13
+    individually over the $100 cap. Every P&L figure in the ledger is confounded by
+    uncontrolled sizing until this binds."""
+    gates = {k: True for k in config.REQUIRED_GATES}
+    base = {"ticker": "X", "gates": gates, "true_pop": 0.80, "pop_implied": 0.72,
+            "natural_credit_usd": 50.0, "short_delta": -0.20}
+    cap = config.MAX_RISK_PER_TRADE_USD
+    assert auto_paper_cycle._candidate_passes_minimum(dict(base, max_loss_usd=cap * 0.8)) is True
+    assert auto_paper_cycle._candidate_passes_minimum(dict(base, max_loss_usd=cap * 3)) is False
+
+
+def test_unknown_position_size_is_refused_rather_than_assumed_safe():
+    """A spread whose max loss cannot be computed cannot be shown to fit the account. This gate
+    exists because unmeasured risk accumulated silently for months."""
+    gates = {k: True for k in config.REQUIRED_GATES}
+    c = {"ticker": "X", "gates": gates, "true_pop": 0.80, "pop_implied": 0.72,
+         "natural_credit_usd": 50.0, "short_delta": -0.20}
+    assert auto_paper_cycle._candidate_passes_minimum(c) is False
+
+
+def test_the_size_cap_binds_the_robot_not_the_board():
+    """MAX_SPREAD_WIDTH was decoupled from account size on 2026-08-14 so the cockpit surfaces
+    opportunities at every risk level. The cap belongs on the unattended process that sizes to
+    a $500 account, not on what the operator is allowed to see."""
+    src = inspect.getsource(auto_paper_cycle._candidate_passes_minimum)
+    assert "MAX_RISK_PER_TRADE_USD" in src
+    cfg = inspect.getsource(config)
+    i = cfg.index("MAX_SPREAD_WIDTH =")
+    assert "ACCOUNT_BALANCE" not in cfg[i:i + 80]

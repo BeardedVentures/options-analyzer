@@ -119,6 +119,18 @@ def make_candidate(**overrides):
     _w = float(c.get("width") or 0)
     c.setdefault("natural_credit_usd", round(_nat * 100, 2))
     c.setdefault("natural_credit_to_width", round(_nat / _w, 3) if _w else 0)
+    # A candidate with no computable max loss cannot be sized, and since 2026-08-16 the
+    # auto-trader refuses it rather than assuming it fits the account. Real candidates always
+    # carry this, so the fixture must too — a default-shaped candidate should exercise the
+    # gates it is meant to exercise, not trip the sizing one first. Kept under
+    # MAX_RISK_PER_TRADE_USD so the DEFAULT candidate passes; tests that want the size gate
+    # override it explicitly.
+    # Defaulted UNDER MAX_RISK_PER_TRADE_USD rather than derived from the 5-wide width, so a
+    # default-shaped candidate exercises the gate each test is actually about instead of
+    # tripping the sizing gate first. The derived figure for this fixture would be ~$410
+    # against a $100 cap — realistic for the spread, but it would mask every other assertion.
+    # Tests that mean to exercise sizing pass max_loss_usd explicitly.
+    c.setdefault("max_loss_usd", 80.0)
     return c
 
 
