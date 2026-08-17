@@ -512,7 +512,8 @@ def set_fill(trade_id: str, actual_fill_credit: float) -> bool:
 
 
 def set_close(trade_id: str, exit_price: float, outcome: str,
-              reason: Optional[str] = None) -> bool:
+              reason: Optional[str] = None,
+              effective_stop_multiplier: Optional[float] = None) -> bool:
     """
     Close a trade. exit_price = spread mark per share when you exited (what you paid to close).
     realized gross P/L per contract = (actual_fill_credit - exit_price) * 100.
@@ -545,6 +546,18 @@ def set_close(trade_id: str, exit_price: float, outcome: str,
             r["realized_pl_per_contract"] = net_pl
             r["outcome"] = (outcome or "").lower()
             r["exit_reason"] = reason
+            # WHICH stop governed this exit. Two coexist and the ledger could not tell them
+            # apart: STOP_LOSS_MULTIPLIER (1.5x credit, the legacy/data-failure path) and
+            # WOLF_STOP_MULTIPLIER (3.0x, the ravens hard floor). 45 of 65 closed trades exited
+            # via a stop, and cohort analysis was implicitly assuming they were all the same
+            # rule — a trade stopped at 1.5x and one stopped at 3.0x are not the same
+            # experiment and must not be pooled when grading the close logic.
+            #
+            # None on an exit that was not a stop, so "target-profit" and "dte-window" rows do
+            # not acquire a multiplier that never applied to them.
+            r["effective_stop_multiplier"] = (
+                float(effective_stop_multiplier)
+                if effective_stop_multiplier is not None else None)
             r["status"] = "closed"
             r["closed_at"] = datetime.utcnow().isoformat()
             try:

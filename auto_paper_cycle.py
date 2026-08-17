@@ -155,7 +155,12 @@ def _apply_close_rules(r: Dict, mark_price: float, dte, roundtrip_cost: float,
         net = ((float(entry) - float(mark_price)) * 100.0) - roundtrip_cost
         outcome = "win" if net > 1.0 else ("loss" if net < -1.0 else "scratch")
         should_close, reason = True, "auto-dte-window"
-    if should_close and ol.set_close(r.get("id"), float(mark_price), outcome, reason):
+    # Only a stop carries a multiplier. This path is the LEGACY stop (STOP_LOSS_MULTIPLIER,
+    # 1.5x credit) — it fires when the ravens cannot judge, which is the data-failure fallback.
+    # The wolf floor (3.0x) fires from _ravens_or_legacy_close and stamps its own value.
+    eff_mult = stop_mult if reason == "auto-stop-loss" else None
+    if should_close and ol.set_close(r.get("id"), float(mark_price), outcome, reason,
+                                     effective_stop_multiplier=eff_mult):
         _log(f"AUTO-CLOSE {r.get('id')} | exit={float(mark_price):.2f} outcome={outcome} reason={reason}")
         return True
     return False
@@ -774,7 +779,12 @@ def _ravens_or_legacy_close(r: Dict, mark, decision_mark, short_leg, long_leg, e
     if rec in ("WOLF_CLOSE", "CLOSE"):
         outcome = "loss" if float(mark) > float(entry or 0) else "win"
         reason = "wolf-stop" if rec == "WOLF_CLOSE" else "raven-thesis-violated"
-        if ol.set_close(r.get("id"), float(mark), outcome, reason):
+        # The ravens' hard floor, a different rule from the legacy 1.5x — recorded so the two
+        # cohorts stay separable. A thesis violation is not a stop and carries no multiplier.
+        wolf_mult = (float(getattr(config, "WOLF_STOP_MULTIPLIER", 3.0))
+                     if rec == "WOLF_CLOSE" else None)
+        if ol.set_close(r.get("id"), float(mark), outcome, reason,
+                        effective_stop_multiplier=wolf_mult):
             _log(f"RAVEN-CLOSE {r.get('id')} [{rec}] {synthesis['plain_english']}")
             return True
         return False

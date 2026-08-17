@@ -66,7 +66,7 @@ def _closes(monkeypatch, mark, dte=30):
     """Run _apply_close_rules with set_close stubbed; return (closed, outcome, reason)."""
     captured = {}
 
-    def fake_set_close(tid, exit_price, outcome, reason):
+    def fake_set_close(tid, exit_price, outcome, reason, **_kw):
         captured.update(id=tid, exit_price=exit_price, outcome=outcome, reason=reason)
         return True
 
