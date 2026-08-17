@@ -291,6 +291,12 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
         "filled_at": ts,
         "closed_at": None,
     })
+    # WRITE BOUNDARY. A row that cannot be graded is worse than no row — it looks like data and
+    # gets averaged into a base rate by someone who was not here when it was written. This is
+    # where edge_score=None and support_level_at_entry=null entered the ledger and sat for
+    # weeks; both were found by manual audit rather than by anything failing.
+    from analysis.contracts import enforce, OPEN_TRADE
+    enforce(rows[-1], OPEN_TRADE, "open_paper_trade")
     _write_all(rows)
     logger.info(f"[outcomes] Opened paper trade {tid}")
     return tid
@@ -560,6 +566,10 @@ def set_close(trade_id: str, exit_price: float, outcome: str,
                 if effective_stop_multiplier is not None else None)
             r["status"] = "closed"
             r["closed_at"] = datetime.utcnow().isoformat()
+            # The outcome is the measurement this whole project exists to collect. Enforced
+            # before persisting rather than after, so a malformed close cannot reach the file.
+            from analysis.contracts import enforce, CLOSE_TRADE
+            enforce(r, CLOSE_TRADE, "set_close")
             try:
                 _write_all(rows)
             except Exception:

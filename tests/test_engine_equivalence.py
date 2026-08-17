@@ -144,7 +144,7 @@ def test_a_negative_pop_gap_is_refused_by_the_auto_trader():
     # max_loss_usd under the cap, so this exercises the pop_gap gate rather than the sizing
     # gate added the same week.
     base = {"ticker": "X", "gates": gates, "natural_credit_usd": 50.0, "short_delta": -0.20,
-            "max_loss_usd": 80.0}
+            "max_loss_usd": 80.0, "short_strike": 100.0, "long_strike": 95.0}
     ok = dict(base, true_pop=0.80, pop_implied=0.72)
     bad = dict(base, true_pop=0.66, pop_implied=0.79)
     assert auto_paper_cycle._candidate_passes_minimum(ok) is True
@@ -225,7 +225,8 @@ def test_max_risk_per_trade_is_enforced_not_merely_configured():
     uncontrolled sizing until this binds."""
     gates = {k: True for k in config.REQUIRED_GATES}
     base = {"ticker": "X", "gates": gates, "true_pop": 0.80, "pop_implied": 0.72,
-            "natural_credit_usd": 50.0, "short_delta": -0.20}
+            "natural_credit_usd": 50.0, "short_delta": -0.20,
+            "short_strike": 100.0, "long_strike": 95.0}
     cap = config.MAX_RISK_PER_TRADE_USD
     assert auto_paper_cycle._candidate_passes_minimum(dict(base, max_loss_usd=cap * 0.8)) is True
     assert auto_paper_cycle._candidate_passes_minimum(dict(base, max_loss_usd=cap * 3)) is False
@@ -236,7 +237,8 @@ def test_unknown_position_size_is_refused_rather_than_assumed_safe():
     exists because unmeasured risk accumulated silently for months."""
     gates = {k: True for k in config.REQUIRED_GATES}
     c = {"ticker": "X", "gates": gates, "true_pop": 0.80, "pop_implied": 0.72,
-         "natural_credit_usd": 50.0, "short_delta": -0.20}
+         "natural_credit_usd": 50.0, "short_delta": -0.20,
+         "short_strike": 100.0, "long_strike": 95.0}
     assert auto_paper_cycle._candidate_passes_minimum(c) is False
 
 

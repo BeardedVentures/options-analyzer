@@ -12,7 +12,7 @@ def _open(**kw):
     args = dict(ticker="NVDA", short_strike=100.0, long_strike=95.0,
                 expiration="2026-09-18", entry_credit_per_share=1.20, source="test")
     args.update(kw)
-    return ol.open_paper_trade(**args)
+    return ol.open_paper_trade(dte=35, **args)
 
 
 # ── tagging ───────────────────────────────────────────────────────────────────────────────────

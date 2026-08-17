@@ -267,6 +267,16 @@ def _candidate_passes_minimum(c: Dict, verbose: bool = False) -> bool:
     gates = c.get("gates") or {}
     # Enforce the full contract rather than a hand-maintained subset. The old local tuple omitted
     # `pop` (and had no way to know about quote_spread), which is how the POP floor went unenforced.
+    # READ BOUNDARY, before any gate reasons about this record. A gate reading a missing field
+    # through `or 0` cannot tell an absent measurement from a real zero — which is how the
+    # silent-None class got through repeatedly. Refuse and count; never raise, because one
+    # malformed candidate must not take down a scan of 56 names.
+    from analysis.contracts import accept, SELECT_CANDIDATE
+    if not accept(c, SELECT_CANDIDATE, "auto_open"):
+        if verbose:
+            _log(f"[GATE] {c.get('ticker')} REJECT failed the select contract")
+        return False
+
     required = tuple(getattr(config, "REQUIRED_GATES", ()))
     failed = [k for k in required if not gates.get(k, False)]
     if failed:
