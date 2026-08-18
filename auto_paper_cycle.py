@@ -1150,10 +1150,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         _run([sys.executable, "paper_desk.py", "report"])
         _run([sys.executable, "paper_desk.py", "dashboard", "--no-open"])
 
+        # Resolve the snapshot BEFORE pruning, or the file just reported may be the one that
+        # was deleted. `cand_path` used to be bound near the top of the cycle by the candidates
+        # opener; when that path was removed the binding went with it and this line kept the
+        # reference, so every full run since has raised NameError on its very last statement —
+        # after all the work was done, and after the lock was released by the `finally`. Six
+        # runs, each reporting exit 1 to Task Scheduler while having actually succeeded, which
+        # is precisely the signal the re-mark-loop postmortems needed and could not trust.
+        _, cand_path = _latest_candidates()
         pruned = _prune_candidates()
         _log(
             f"Cycle summary: opened={opened}, marked={marked}, closed={closed}, "
-            f"snapshot={cand_path.name}, pruned_old_files={pruned}"
+            f"snapshot={cand_path.name if cand_path else 'none'}, pruned_old_files={pruned}"
         )
         _log("=== AUTO PAPER CYCLE END ===")
         return 0
