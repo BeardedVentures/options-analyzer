@@ -465,14 +465,41 @@ def record_modeled_trades(scan_ts: str, session_type: str, qualified_trades: Lis
                 # Modeled expectations (what the engine believed at scan time)
                 "modeled_credit_per_share": t.get("credit_per_share"),
                 "modeled_credit_usd": t.get("credit_usd"),
+                # `credit_per_share` above does NOT mean the same thing on both paths: main.py
+                # fills it with the MID, multi_strategy fills it with the NATURAL. One field,
+                # two prices, no way to tell them apart after the fact — which is how a ledger
+                # ends up reporting a 72% win rate it never earned. Record the fillable credit
+                # and the basis explicitly so a grader never has to guess which one it is
+                # holding. Absent on rows written before this change: unrecoverable rather than
+                # wrong, and the shadow grader declines to price P/L when it is missing.
+                "natural_credit_per_share": t.get("natural_credit_per_share"),
+                "natural_credit_usd": t.get("natural_credit_usd"),
+                "fill_basis": t.get("fill_basis"),
+                "quotes_live": t.get("quotes_live"),
                 "modeled_net_credit_per_share": t.get("net_credit_per_share"),
                 "modeled_net_credit_usd": t.get("net_credit_usd"),
                 "estimated_entry_cost_per_contract": t.get("estimated_entry_cost_per_contract"),
                 "estimated_exit_cost_per_contract": t.get("estimated_exit_cost_per_contract"),
                 "estimated_round_trip_cost_per_contract": t.get("estimated_round_trip_cost_per_contract"),
-                "spread_width": t.get("spread_width") or (
+                # Width is a DISTANCE and is never negative. The subtraction fallback assumed a
+                # put spread, where the short strike is the higher one; on the call side it is
+                # the lower, so all 49 bear-call rows recorded a negative width and any P/L or
+                # max-loss computed from it had the sign inverted. multi_strategy emits `width`
+                # positive on both sides — prefer it, and take the magnitude of the fallback.
+                "spread_width": t.get("spread_width") or t.get("width") or abs(
                     (t.get("short_strike") or 0) - (t.get("long_strike") or 0)
                 ),
+                # A condor has four legs and this ledger has two strike columns, so its strikes
+                # were landing as null and the row could not be resolved against price history
+                # even in principle. Recorded here as a leg map rather than by forcing four
+                # strikes into two columns: the shape is preserved instead of misrepresented,
+                # and `short_strike`/`long_strike` stay null for structures that genuinely have
+                # no single pair. Two-legged trades get the same map, so one reader handles all.
+                "legs": {k: t.get(k) for k in (
+                    "short_strike", "long_strike",
+                    "put_short_strike", "put_long_strike",
+                    "call_short_strike", "call_long_strike",
+                ) if t.get(k) is not None} or None,
                 "delta": t.get("delta"),
                 "iv_rank": t.get("iv_rank"),
                 "vrp": t.get("vrp"),
@@ -494,6 +521,22 @@ def record_modeled_trades(scan_ts: str, session_type: str, qualified_trades: Lis
                 "filled_at": None,
                 "closed_at": None,
             })
+
+        # Warn, do not drop. A recommendation the board made is a fact worth recording even
+        # when it cannot be graded — but it must not fail SILENTLY, which is exactly how the
+        # expiration mismatch survived 81 rows. The shadow book reports these as unresolvable;
+        # this makes them visible at the moment they are written.
+        try:
+            from analysis import contracts as _C
+            ungradeable = [r for r in new_rows
+                           if not _C.accept(r, _C.GRADEABLE_RECOMMENDATION, "modeled_trade")]
+            if ungradeable:
+                logger.warning(
+                    "[outcomes] %d of %d modeled trade(s) cannot be graded as written — "
+                    "they are recorded, but the shadow book will report them unresolvable.",
+                    len(ungradeable), len(new_rows))
+        except Exception as e:                       # pragma: no cover - never block a scan
+            logger.debug(f"[outcomes] gradeability check skipped: {e}")
 
         if new_rows:
             _write_all(existing + new_rows)

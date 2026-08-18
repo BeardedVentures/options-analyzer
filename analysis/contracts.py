@@ -78,6 +78,19 @@ CLOSE_TRADE: Tuple[Tuple[str, str], ...] = (
     ("status", "str"),
 )
 
+GRADEABLE_RECOMMENDATION: Tuple[Tuple[str, str], ...] = (
+    # A board recommendation the shadow book can resolve against price history. This is the
+    # FIELD-NAME MISMATCH class this module was built for, caught live: multi_strategy emitted
+    # the expiry as `expiration_display` while every consumer read `expiration`, so 81 of 158
+    # modeled rows carried expiration=None and trade ids with the literal string "None" in
+    # them. Nothing failed — a missing key reads as None, and None renders as a blank cell.
+    # Checked at the write seam so the next such mismatch is loud on the first scan instead of
+    # eight days later.
+    ("ticker", "str"),
+    ("expiration", "str"),
+    ("dte", "num0"),
+)
+
 SELECT_CANDIDATE: Tuple[Tuple[str, str], ...] = (
     ("ticker", "str"),
     ("short_strike", "num"),

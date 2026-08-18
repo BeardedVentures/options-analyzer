@@ -215,6 +215,13 @@ def _base(ticker, strategy_key, price, tech, sentiment, dte, exp):
     return {
         "ticker": ticker, "strategy": strategies.STRATEGY_SPECS[strategy_key]["label"],
         "current_price": round(price, 2), "dte": dte, "expiration_display": exp,
+        # The SAME date, under the key every downstream consumer actually reads. Emitting only
+        # `expiration_display` left every call-side row in the ledger with expiration=None —
+        # 81 of 158 modeled records, each carrying a trade id with the literal string "None" in
+        # it — so a bear call or condor the board recommended could never be marked, expired or
+        # graded. The bull-put path has always emitted `expiration` (main.py); this was the one
+        # path that did not, and nothing raised because a missing key reads as None.
+        "expiration": exp,
         "iv_rank": tech.get("iv_rank"), "vrp": tech.get("vrp"), "trend": tech.get("trend"),
         "rsi": tech.get("rsi"), "nearest_support": tech.get("nearest_support"),
         "nearest_resistance": tech.get("nearest_resistance"),

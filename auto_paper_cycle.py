@@ -1019,6 +1019,31 @@ def _resolve_predictions() -> Dict:
         return {}
 
 
+def _grade_shadow_book() -> Dict:
+    """Grade every trade the BOARD recommended, including the ones this desk declined to open.
+
+    The desk's refusals are correct and they are also invisible: between 2026-08-11 and
+    2026-08-17 the board produced eleven recommendations, every one of them call-side, and the
+    desk opened none — so six trading days of the system's own output left no evidence behind
+    at all. A platform that only grades what it took cannot tell a board that picks badly from
+    a board whose picks it kept refusing.
+
+    Reads the modeled rows and writes its own ledger. Never opens, marks or closes anything,
+    and never touches vega_outcomes.jsonl — a shadow grade is evidence about the BOARD and is
+    deliberately kept out of the live cohort, which is still accumulating toward its own target.
+    """
+    try:
+        from analysis import shadow_book
+        stats = shadow_book.build()
+        _log(f"SHADOW BOOK graded={stats['resolved']}/{stats['total']} "
+             f"expired={stats['expired']} priced={stats['priced']} "
+             f"unresolvable={stats['unresolvable']}")
+        return stats
+    except Exception as e:
+        _log(f"Shadow book grading failed: {e}")
+        return {}
+
+
 def _acquire_lock(max_age_seconds: Optional[int] = None) -> bool:
     # Stale-lock threshold: a crashed/killed run must not wedge the cycle. Default 30 min -
     # comfortably above a normal run, below the inter-run gap and the 25-min task kill limit.
@@ -1084,6 +1109,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             marked, closed = _reprice_and_close_open()
             _record_btc_forecast()
             _resolve_predictions()
+            _grade_shadow_book()
             _run([sys.executable, "paper_desk.py", "report"])
             _run([sys.executable, "paper_desk.py", "dashboard", "--no-open"])
             _log(f"Mark-only summary: marked={marked}, closed={closed}")
@@ -1119,6 +1145,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         marked, closed = _reprice_and_close_open()
         _record_btc_forecast()
         _resolve_predictions()
+        _grade_shadow_book()
 
         _run([sys.executable, "paper_desk.py", "report"])
         _run([sys.executable, "paper_desk.py", "dashboard", "--no-open"])
