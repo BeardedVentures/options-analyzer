@@ -1005,7 +1005,23 @@ PREDICTION_TIMING_HORIZON_DAYS = 14 # how long an EARLY timing claim gets to pro
 # The cockpit runs a market-hours-only background scheduler so the board tracks the free
 # (≈15-min delayed) Polygon/yfinance data without any Windows scheduled tasks. All cadences
 # are minutes; the scheduler only fires while US equity options are open (weekdays 9:30–16:00 ET).
-INTRADAY_SCHEDULER_ENABLED = True   # Master switch for the in-cockpit market-hours scheduler
+# DISABLED 2026-08-19. Two schedulers were firing the same cycle: this one hourly at :21, and
+# the VEGA_AutoPaper_2Weeks task every two hours at :35. A cycle takes 13-16 minutes, so the
+# task's fire landed INSIDE the cockpit's run every time and was turned away by the lock —
+# 2026-08-18 recorded "Another cycle appears active; skipping this run" at 11:35 and got 13:35
+# through only because the 13:21 run had ended five seconds earlier. Three of that day's four
+# task fires did no work at all.
+#
+# The Windows task is the surviving driver rather than this one, despite the note above and in
+# auto_paper_cycle's docstring recommending the reverse. That advice assumes the cockpit is
+# always up; it is a UI process, so it stops when the window closes or the box reboots, and it
+# stops silently. Paper execution and the re-mark loop the cohort depends on must not be
+# conditional on a dashboard being open.
+#
+# Re-enabling this REQUIRES disabling the task, or the collision returns. The flag is read once
+# when the scheduler thread starts (vega_app._scheduler_loop), so the cockpit must be restarted
+# for a change here to take effect.
+INTRADAY_SCHEDULER_ENABLED = False  # Master switch for the in-cockpit market-hours scheduler
 BOARD_REFRESH_MIN = 15              # Full local re-scan (main.py, no JARVIS post) cadence
 PAPER_CYCLE_MIN = 60               # Auto-open + mark paper positions (auto_paper_cycle.py) cadence
 NEWS_CACHE_TTL_MIN = 60            # Sentiment disk-cache lifetime — news re-scrapes ~hourly, and the
