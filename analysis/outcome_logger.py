@@ -396,6 +396,13 @@ def append_raven_alert(trade_id: str, alert: Dict) -> bool:
     return _append_to_list_field(trade_id, "raven_alerts", alert)
 
 
+# Mark availability. An open position is either priced from a chain we just read (LIVE) or it
+# is carrying a price we could not refresh (DATA_UNAVAILABLE). Before these existed there was
+# only the third, unnamed state: a stale number that read exactly like a current one.
+MARK_LIVE = "LIVE"
+MARK_UNAVAILABLE = "DATA_UNAVAILABLE"
+
+
 def set_mark(trade_id: str, current_mark_per_share: float) -> bool:
     """Update the live spread mark for an OPEN paper trade → unrealized P/L (per contract).
     unrealized gross = (entry_credit - current_mark) * 100; net subtracts round-trip fees.
@@ -427,9 +434,59 @@ def set_mark(trade_id: str, current_mark_per_share: float) -> bool:
             r["marked_at"] = now
             # setdefault, not assume: trades opened before this field existed are still open.
             r.setdefault("mark_history", []).append({"at": now, "mark": mark})
+            # A successful mark ends any data outage. Clearing here rather than in the caller
+            # means the two states cannot disagree: a fresh mark IS the definition of LIVE.
+            r["mark_status"] = MARK_LIVE
+            r["mark_unavailable_since"] = None
+            r["mark_unavailable_reason"] = None
+            r["mark_skips_consecutive"] = 0
             _write_all(rows)
             return True
     return False
+
+
+def set_mark_unavailable(trade_id: str, reason: str) -> bool:
+    """Record that this OPEN position could not be re-marked, and why.
+
+    The state this replaces was silence. When a reprice failed the position kept its last known
+    mark and its `marked_at` from days earlier, so "the position has not moved" and "we have no
+    idea where the position is" were the same row in the ledger — and the close rules, which
+    live behind the same chain lookup, simply did not run. PSX went unmarked from 2026-08-13
+    and AMGN and XLE from 2026-08-14; nothing raised, nothing appeared on the board, and the
+    DTE close would have been skipped straight through expiry the same way.
+
+    The stale mark is deliberately LEFT IN PLACE. Blanking it would destroy the last real
+    observation, and the point is not to forget where the trade was -- it is to stop pretending
+    that number is current. `mark_status` is what downstream code must consult.
+
+    Returns True if the row was found and stamped.
+    """
+    rows = _read_all()
+    for r in rows:
+        if r.get("id") == trade_id and r.get("status") == "open":
+            now = datetime.now().isoformat()
+            if r.get("mark_status") != MARK_UNAVAILABLE:
+                # First skip of this outage. Later skips must not keep resetting the clock,
+                # or a position stuck for a month would always report "stale since today".
+                r["mark_unavailable_since"] = now
+                r["mark_skips_consecutive"] = 0
+            r["mark_status"] = MARK_UNAVAILABLE
+            r["mark_unavailable_reason"] = str(reason)
+            r["mark_skips_consecutive"] = int(r.get("mark_skips_consecutive") or 0) + 1
+            r["mark_last_attempt_at"] = now
+            _write_all(rows)
+            return True
+    return False
+
+
+def mark_is_stale(record: Dict) -> bool:
+    """Is this position's mark known to be out of date? The one predicate close logic may ask.
+
+    Explicitly not "is marked_at old" -- a mark taken 20 minutes ago on a market that has since
+    moved is old but not unknown, and the distinction the ledger can actually make is whether
+    the last reprice attempt succeeded.
+    """
+    return (record or {}).get("mark_status") == MARK_UNAVAILABLE
 
 
 def record_modeled_trades(scan_ts: str, session_type: str, qualified_trades: List[Dict]) -> int:

@@ -29,6 +29,15 @@ def _reset_process_caches():
         crypto._cache.clear()
     except Exception:
         pass
+    try:
+        # Chain-quality readings are de-duplicated per (ticker, dte window) for the life of a
+        # process so one chain cannot be logged twice. Same reasoning as above: correct for a
+        # scan, order-dependent poison for a test session, where the second test to touch a
+        # ticker would silently record nothing.
+        from data import fetcher
+        fetcher._quality_recorded.clear()
+    except Exception:
+        pass
     yield
 
 

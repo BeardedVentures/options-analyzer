@@ -173,17 +173,46 @@ def cmd_open(a):
     return 0
 
 
+def _mark_flag(r) -> str:
+    """How old is this row's price, in one column. Blank when the mark is current.
+
+    An open position carrying a stale mark used to render identically to one marked seconds
+    ago, so a data outage was invisible on the one screen built to show the book.
+    """
+    if not ol.mark_is_stale(r):
+        return ""
+    days = ""
+    try:
+        since = r.get("mark_unavailable_since") or r.get("marked_at")
+        if since:
+            days = f" {(datetime.now() - datetime.fromisoformat(str(since))).days}d"
+    except Exception:
+        pass
+    return f"STALE{days}"
+
+
 def cmd_list():
     rows = ol.load_records()
     open_ = [r for r in rows if r.get("status") == "open"]
     if not open_:
         print("No open paper positions. Open one:  python paper_desk.py open --from-latest SPY")
         return 0
-    print(f"{'ID':44} {'CR/sh':>6} {'x':>3} {'MAXLOSS':>8} {'DTE':>4}")
-    print("-" * 70)
+    print(f"{'ID':44} {'CR/sh':>6} {'x':>3} {'MAXLOSS':>8} {'DTE':>4} {'MARK':>10}")
+    print("-" * 82)
+    stale = 0
     for r in open_:
+        flag = _mark_flag(r)
+        stale += 1 if flag else 0
         print(f"{r.get('id',''):44} {_fmt(r.get('actual_fill_credit')):>6} "
-              f"{int(r.get('contracts') or 1):>3} {_fmt(r.get('max_loss_per_contract'),0):>8} {str(r.get('dte') or '—'):>4}")
+              f"{int(r.get('contracts') or 1):>3} {_fmt(r.get('max_loss_per_contract'),0):>8} "
+              f"{str(r.get('dte') or '—'):>4} {flag:>10}")
+    if stale:
+        print("")
+        print(f"!! {stale} position(s) could not be re-priced. Their stop/target rules did NOT "
+              f"run — a stale mark is not a hold decision.")
+        for r in open_:
+            if ol.mark_is_stale(r):
+                print(f"   {r.get('id')}: {r.get('mark_unavailable_reason')}")
     return 0
 
 
@@ -296,11 +325,20 @@ def _dash_html(rows):
             f'<td>{r.get("expiration","")}<div class=dim>{r.get("dte") or "—"}d</div></td>'
             f'<td>${_fmt(r.get("actual_fill_credit"))}</td><td>{int(r.get("contracts") or 1)}</td>'
             f'<td>${_fmt(r.get("max_loss_per_contract"),0)}</td>'
+            f'<td class="{"loss" if ol.mark_is_stale(r) else ""}">{_mark_flag(r) or "live"}'
+            f'<div class=dim>{(r.get("mark_unavailable_reason") or "")[:48]}</div></td>'
             f'<td class=mono title="{r.get("id","")}">{r.get("id","")[:38]}…</td></tr>'
             for r in open_
         )
-        open_tbl = (f'<table><thead><tr><th>Ticker</th><th>Short/Long</th><th>Exp</th><th>Credit/sh</th>'
-                    f'<th>Ct</th><th>Max loss</th><th>ID (for close)</th></tr></thead><tbody>{orows}</tbody></table>')
+        n_stale = sum(1 for r in open_ if ol.mark_is_stale(r))
+        banner = (f'<div class="empty" style="border-color:#b00;color:#b00">'
+                  f'{n_stale} open position(s) could not be re-priced this cycle. Stop and target '
+                  f'rules did not run for them, and the mark shown is the last one that worked.'
+                  f'</div>') if n_stale else ""
+        open_tbl = (banner +
+                    f'<table><thead><tr><th>Ticker</th><th>Short/Long</th><th>Exp</th><th>Credit/sh</th>'
+                    f'<th>Ct</th><th>Max loss</th><th>Mark</th><th>ID (for close)</th></tr></thead>'
+                    f'<tbody>{orows}</tbody></table>')
     else:
         open_tbl = '<div class="empty">No open paper positions. Run <code>vega_candidates.py</code> then <code>paper_desk.py open</code>.</div>'
 

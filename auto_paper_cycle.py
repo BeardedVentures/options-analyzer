@@ -860,6 +860,79 @@ def _level_breach_alerts(ticker: str, positions: List[Dict]) -> int:
         return 0
 
 
+DTE_CLOSE_WINDOW = 7          # mirrors the `dte <= 7` literal in the close rules below
+
+
+def _leg_quote_is_usable(leg: Dict) -> bool:
+    """Can this ONE contract be priced right now? Deliberately not the entry predicate.
+
+    fetcher._option_record_is_usable also demands volume or open interest, which is the right
+    question when deciding whether a market is liquid enough to SELL into and the wrong one for
+    a position already held: a leg that has not traded today still has a quote, and refusing to
+    use it is how a position stops being managed.
+
+    Equally deliberately, this does NOT require the specific side the natural basis needs. It
+    was written that way first, and the live 08:46 cycle on 2026-08-20 showed the cost: NEE's
+    short leg quoted 0.36 bid / 0.00 ask and demanding the ask paused the position outright.
+    The file already has a considered answer for a one-sided quote — degrade to the mid and log
+    that the mark is optimistic — so requiring the side here replaced a documented degradation
+    with a refusal. That is a stricter marking rule than the one the bug was hiding, which is
+    not what this fix is for.
+
+    So the bar is only: is there a market here at all, and is it not obvious nonsense. The
+    thresholds mirror fetcher._option_record_is_usable minus the activity test, which makes
+    this predicate strictly MORE permissive than the entry filter — a leg it accepts and the
+    filter rejects differs on liquidity alone. That direction matters: this must not be able to
+    reduce how often a position gets marked relative to the pre-fix behaviour.
+    """
+    bid = float(leg.get("bid") or 0)
+    ask = float(leg.get("ask") or 0)
+    mid = float(leg.get("mid") or 0)
+    if bid <= 0 and ask <= 0:
+        return False                                  # no market on either side
+    if bid > 0 and ask > 0 and ask < bid:
+        return False                                  # crossed — a data error, not a price
+    if mid > 0 and bid > 0 and ask > 0 and (ask - bid) / mid > 0.80:
+        return False                                  # so wide the midpoint means nothing
+    return True
+
+
+def _mark_unavailable(r: Dict, reason: str) -> None:
+    """Stamp the position as unpriceable and make the consequence visible.
+
+    Every branch that used to `continue` past a position now lands here. The distinction that
+    matters: a stale mark is not a hold signal, and a position the desk cannot price is a
+    position the desk cannot manage. Saying so is the whole fix — re-marking XLE by hand
+    addresses one row, this addresses the class.
+    """
+    ol.set_mark_unavailable(r.get("id"), reason)
+    dte = _current_dte(r.get("expiration"))
+    stale_for = ""
+    try:
+        since = r.get("mark_unavailable_since") or r.get("marked_at")
+        if since:
+            days = (datetime.now() - datetime.fromisoformat(str(since))).days
+            stale_for = f", last good mark {days}d ago"
+    except Exception:
+        pass
+    _log(f"MARK-UNAVAILABLE {r.get('id')} — {reason}{stale_for}. "
+         f"Stop/target NOT evaluated this cycle (dte={dte}); the last mark "
+         f"{r.get('current_mark')} is stale and is not a hold decision.")
+
+    # The escalation. Target and stop can wait for a quote; the DTE window cannot, because it
+    # closes on a calendar fact and it lives behind this same lookup. A position that goes
+    # unpriceable inside the window rides to expiry with nothing managing it, and until now it
+    # did that silently.
+    # 7 is not a knob; it is the literal in _ravens_or_legacy_close and _apply_close_rules.
+    # Kept in sync by hand rather than invented as config, so this alert cannot claim a
+    # different window from the rule it is warning about.
+    if isinstance(dte, (int, float)) and dte <= DTE_CLOSE_WINDOW:
+        _log(f"UNMANAGED-AT-EXPIRY {r.get('id')} {r.get('ticker')} dte={dte} — inside the "
+             f"{DTE_CLOSE_WINDOW}-DTE close window with no usable quote. The mechanical DTE "
+             f"close CANNOT run. This position needs a human before expiry "
+             f"{r.get('expiration')}.")
+
+
 def _reprice_and_close_open() -> Tuple[int, int]:
     """Reprice EVERY open paper position from a fresh, wide options chain (not just names that
     still happen to be top candidates), update its mark, and auto-close by target/stop/DTE.
@@ -890,14 +963,25 @@ def _reprice_and_close_open() -> Tuple[int, int]:
         # strikes were never found in the index below: the position would be opened and then
         # skipped on every mark forever — never re-marked, never closed, never learned from.
         # That is worse than refusing to open it, because it looks like it is being managed.
+        # apply_quality_gate=False: the SELECTION floor must not decide whether an open
+        # position can be managed. With it on, get_options_chain returned [] for any chain
+        # under CHAIN_QUALITY_MIN_RATIO (0.50) quotable, so PSX at 5% and AMGN at 7% logged
+        # "chain depth: 0 strikes" every cycle from 2026-08-13 and were never re-marked —
+        # and because the close rules run inside this same lookup, they were never managed
+        # either. Whether THIS position's two legs quote is asked per-leg below, which is the
+        # question marking actually has.
         try:
-            chain = list(fetcher.get_options_chain(ticker, 0, 200))  # wide window
+            chain = list(fetcher.get_options_chain(ticker, 0, 200,
+                                                   apply_quality_gate=False))  # wide window
         except Exception as exc:
             _log(f"Reprice: chain fetch failed for {ticker}: {exc}")
+            for r in positions:
+                _mark_unavailable(r, f"chain fetch failed: {exc}")
             continue
         if any(_is_call_side(r) for r in positions):
             try:
-                chain += list(fetcher.get_call_options_chain(ticker, 0, 200))
+                chain += list(fetcher.get_call_options_chain(ticker, 0, 200,
+                                                             apply_quality_gate=False))
             except Exception as exc:
                 _log(f"Reprice: call chain fetch failed for {ticker}: {exc}")
         _level_breach_alerts(ticker, positions)
@@ -916,6 +1000,17 @@ def _reprice_and_close_open() -> Tuple[int, int]:
                     f"Reprice: strike not found in chain for {r.get('id')} "
                     f"(short={r.get('short_strike')} long={r.get('long_strike')} exp={exp}) "
                     f"— skipping mark this cycle (chain depth: {len(idx)} strikes)"
+                )
+                _mark_unavailable(r, f"strike not in chain (chain depth {len(idx)})")
+                continue
+
+            # Both legs are present; is there a market on them at all? A missing side is
+            # handled below by the existing degrade-to-mid path, not here.
+            if not (_leg_quote_is_usable(s) and _leg_quote_is_usable(l)):
+                _mark_unavailable(
+                    r,
+                    f"legs present but not quotable (short bid/ask={s.get('bid')}/{s.get('ask')}, "
+                    f"long bid/ask={l.get('bid')}/{l.get('ask')})"
                 )
                 continue
             # EXIT MARK (audit fix 2026-08-02). Closing a bull put spread is a BUY-TO-CLOSE, so the
@@ -941,8 +1036,22 @@ def _reprice_and_close_open() -> Tuple[int, int]:
                         f"Reprice: missing ask/bid for {r.get('id')} — marking at mid "
                         f"(short_ask={s_ask} long_bid={l_bid}); this mark is optimistic."
                     )
+            # Sanity bound. Reading an ungated chain means occasionally reading a bad quote,
+            # and a vertical can only ever be worth between zero and its width. A mark outside
+            # that is not a loss, it is a broken print, and acting on it would be the same
+            # mistake in the opposite direction from ignoring the position entirely.
+            width = r.get("spread_width")
+            try:
+                width = abs(float(width)) if width is not None else None
+            except (TypeError, ValueError):
+                width = None
+            if mark < 0 or (width and mark > width):
+                _mark_unavailable(r, f"implausible mark {mark} outside [0, {width}] — bad quote")
+                continue
+
             if ol.set_mark(r.get("id"), mark):
                 marked += 1
+                r["mark_status"] = ol.MARK_LIVE      # keep the in-memory row honest for callees
 
             # DECISION MARK. `mark` above is the natural (worst-side) price and stays the
             # basis for realised P&L — the record must remain honest about slippage. But it

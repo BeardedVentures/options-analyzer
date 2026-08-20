@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 # Session-level in-memory cache
 # ─────────────────────────────────────────────
 _cache: Dict[str, Any] = {}
+# (ticker, min_dte, max_dte) already written to the chain-quality log this process.
+_quality_recorded: set = set()
 _call_timestamps: List[float] = []
 
 # One id per process, stamped onto every chain-quality reading, so the log can be sliced back
@@ -93,6 +95,7 @@ def get_api_call_log() -> List[Dict]:
 def clear_cache():
     """Clear session cache -- call at start of each scan."""
     _cache.clear()
+    _quality_recorded.clear()
     _log_api_call.calls = []
 
 
@@ -665,7 +668,9 @@ def get_chain_by_expiry(ticker: str,
 
 def get_options_chain(ticker: str,
                       min_dte: int = None,
-                      max_dte: int = None) -> List[Dict]:
+                      max_dte: int = None,
+                      *,
+                      apply_quality_gate: bool = True) -> List[Dict]:
     """
     Get options chain for a ticker within the DTE range.
 
@@ -674,13 +679,25 @@ def get_options_chain(ticker: str,
       2. yfinance   -- fallback, Black-Scholes Greeks
 
     Returns list of standardized option dicts.
+
+    apply_quality_gate (default True) is the SELECTION contract: drop unquotable records and,
+    if too little of the chain survives, return [] so no signal is built on a chain that is
+    mostly absent. That is correct when choosing a NEW trade and wrong when marking one that is
+    already open -- marking a vertical needs two specific strikes to quote, not a healthy chain,
+    and returning [] there does not decline to score a position, it declines to MANAGE it.
+    See _reprice_and_close_open() in auto_paper_cycle.py: with the gate on, PSX (5% quotable)
+    and AMGN (7%) were never re-marked after 2026-08-13, and the DTE close rule that runs behind
+    the same lookup was skipped with them. Pass False for the marking path only.
+
+    The two views are cached separately. They are different answers to different questions and
+    must never be able to serve each other.
     """
     if min_dte is None:
         min_dte = config.MIN_DTE
     if max_dte is None:
         max_dte = config.MAX_DTE
 
-    cache_key = f"options_{ticker}_{min_dte}_{max_dte}"
+    cache_key = f"options_{ticker}_{min_dte}_{max_dte}_{'gated' if apply_quality_gate else 'raw'}"
     if cache_key in _cache:
         return _cache[cache_key]
 
@@ -702,18 +719,28 @@ def get_options_chain(ticker: str,
     if not records:
         logger.debug(f"[fetcher] Polygon returned no data for {ticker} -- falling back to yfinance")
         raw_yf = _parse_yfinance_options(ticker, current_price, min_dte, max_dte)
-        records = _quality_filter_options(raw_yf, ticker, "yfinance")
+        kept = _quality_filter_options(raw_yf, ticker, "yfinance")
+        records = kept if apply_quality_gate else raw_yf
         chain_source = "yfinance"
         _log_api_call("yfinance.options", ticker, len(records) > 0)
         # Measure BEFORE the filter on this path: what arrived is the honest denominator.
-        raw_count, usable_count, ratio = len(raw_yf), len(records), (
-            round(len(records) / len(raw_yf), 4) if raw_yf else 0.0)
+        # The reading describes the CHAIN, so it is the same number whether or not this caller
+        # asked for the filtered view -- otherwise the ungated path would log a perfect ratio.
+        raw_count, usable_count, ratio = len(raw_yf), len(kept), (
+            round(len(kept) / len(raw_yf), 4) if raw_yf else 0.0)
     else:
         # Polygon is not filtered, so measure it with the same predicate rather than
         # comparing a list to itself. See _option_record_is_usable.
         raw_count, usable_count, ratio = measure_chain_quality(records)
 
-    _record_chain_quality(ticker, chain_source, raw_count, usable_count, ratio)
+    # Once per chain, not once per view. Splitting the cache by apply_quality_gate made it
+    # possible for one process to read the same chain twice and log the same reading twice,
+    # which would double-count that ticker in every aggregate built on this file. The reading
+    # describes the chain; how many callers asked for it is not part of the measurement.
+    quality_key = (ticker, min_dte, max_dte)
+    if quality_key not in _quality_recorded:
+        _quality_recorded.add(quality_key)
+        _record_chain_quality(ticker, chain_source, raw_count, usable_count, ratio)
 
     # The floor. Below it the chain is too thin to reason over, and every downstream signal —
     # IV rank, skew, term structure, the delta the strike is chosen on — becomes a statement
@@ -721,7 +748,8 @@ def get_options_chain(ticker: str,
     # Returning [] empties the board for this ticker, which is the correct outcome: no read is
     # better than a confident read of nothing.
     floor = float(getattr(config, "CHAIN_QUALITY_MIN_RATIO", 0.30))
-    if raw_count > 0 and ratio < floor and getattr(config, "CHAIN_QUALITY_GATE_ENABLED", True):
+    if (apply_quality_gate and raw_count > 0 and ratio < floor
+            and getattr(config, "CHAIN_QUALITY_GATE_ENABLED", True)):
         logger.warning(
             f"[fetcher] SKIP_DATA_QUALITY {ticker}: only {usable_count}/{raw_count} "
             f"({ratio:.0%}) of the {chain_source} chain is quotable, floor is {floor:.0%} "
@@ -1074,15 +1102,20 @@ def _parse_yfinance_calls(ticker: str, current_price: float,
         return []
 
 
-def get_call_options_chain(ticker: str, min_dte: int = None, max_dte: int = None) -> List[Dict]:
+def get_call_options_chain(ticker: str, min_dte: int = None, max_dte: int = None,
+                           *, apply_quality_gate: bool = True) -> List[Dict]:
     """Live call chain within DTE (yfinance, 15-min delayed). Session-cached.
     Used by bear-call / iron-condor / lottery generators. NOTE: first live use should be
-    spot-checked against your broker (new code path, not yet validated on live calls data)."""
+    spot-checked against your broker (new code path, not yet validated on live calls data).
+
+    apply_quality_gate=False returns the unfiltered chain for the MARKING path only; see the
+    note on get_options_chain. A call-side position has exactly the same right to be managed
+    on a thin chain as a put-side one."""
     if min_dte is None:
         min_dte = config.MIN_DTE
     if max_dte is None:
         max_dte = config.MAX_DTE
-    cache_key = f"calls_{ticker}_{min_dte}_{max_dte}"
+    cache_key = f"calls_{ticker}_{min_dte}_{max_dte}_{'gated' if apply_quality_gate else 'raw'}"
     if cache_key in _cache:
         return _cache[cache_key]
     price_data = get_price_data(ticker, period="5d")
@@ -1090,10 +1123,11 @@ def get_call_options_chain(ticker: str, min_dte: int = None, max_dte: int = None
     if not current_price:
         return []
     records = _parse_yfinance_calls(ticker, current_price, min_dte, max_dte)
-    try:
-        records = _quality_filter_options(records, ticker, "yfinance")
-    except Exception:
-        pass
+    if apply_quality_gate:
+        try:
+            records = _quality_filter_options(records, ticker, "yfinance")
+        except Exception:
+            pass
     _log_api_call("yfinance.calls", ticker, len(records) > 0)
     _cache[cache_key] = records
     return records
