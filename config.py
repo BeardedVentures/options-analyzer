@@ -1000,6 +1000,23 @@ PREDICTION_MIN_FOR_GRADE = 10       # resolved claims of a type before it is gra
 PREDICTION_TIMING_HORIZON_DAYS = 14 # how long an EARLY timing claim gets to prove itself
 
 # ─────────────────────────────────────────────
+# DIRECTIONAL FORECAST (analysis/direction_forecast.py)
+# ─────────────────────────────────────────────
+# A MEASUREMENT INSTRUMENT, not a signal. Nothing it produces reaches selection, sizing or
+# execution, and price_projection still draws its bands with zero drift — that rejection stands
+# (sector relative strength: rank correlation +0.01 to -0.04 at every horizon, none significant).
+#
+# It exists because every other claim VEGA makes matures at a 30-45 day expiry, so the question
+# "do these probabilities mean anything?" takes quarters to answer. One-day claims answer it in
+# a fortnight, and a null result is a perfectly good result.
+DIRECTION_FORECAST_ENABLED = True
+DIRECTION_RECORD_AFTER_HOUR = 14   # local hour; claims anchor near the close, not at the open
+DIRECTION_MAX_TILT_SIGMAS = 0.25   # hard cap on how far the signal may move the mean
+# Record a climatology twin (same band, mean pinned at zero) beside every live claim. Without it
+# the signal gets credited with the base rate and there is nothing to charge it against.
+DIRECTION_RECORD_BASELINE = True
+
+# ─────────────────────────────────────────────
 # INTRADAY REFRESH SCHEDULER (runs inside vega_app.py cockpit)
 # ─────────────────────────────────────────────
 # The cockpit runs a market-hours-only background scheduler so the board tracks the free

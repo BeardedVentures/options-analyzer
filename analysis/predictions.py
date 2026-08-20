@@ -52,6 +52,39 @@ TIMING_IMPROVES = "timing_improves"  # EARLY: waiting would have paid better pre
 EVENT_REALISED = "event_realised"    # term-structure event spike showed up as a real move
 DIRECTION = "direction"              # the regime call was right about which way price went
 
+# Direction, one claim type PER HORIZON. grade() buckets by claim_type, so pooling a one-day
+# call with a one-month call would average two populations with different base rates, different
+# flat bands and different amounts of noise — the same mistake outcome_logger.cohort exists to
+# prevent on the trade side. They share the single scorer below; only the bucket differs.
+DIRECTION_1D = "direction_1d"                # pre-open: where this session closes
+DIRECTION_OVERNIGHT = "direction_overnight"  # post-close: the gap to the next open
+DIRECTION_1W = "direction_1w"                # five trading days out
+DIRECTION_1M = "direction_1m"                # ~21 trading days out
+
+# Does the underlying travel far enough, in a stated direction, to pay a long call? This is the
+# lottery tab's own question — it already computes `breakeven_move_pct` per candidate and has
+# never once recorded whether that move arrived. Distinct from EVENT_REALISED, which is
+# undirected and measures a single day's range rather than cumulative travel.
+MOVE_EXCEEDS = "move_exceeds"
+
+# Did price finish inside the band the engine drew? price_projection states a range at a stated
+# confidence and nothing has ever checked the coverage in production. A 68% band that contains
+# price 45% of the time is not a tighter band, it is a wrong one, and only this catches it.
+BAND_CONTAINS = "band_contains"
+
+DIRECTION_TYPES = (DIRECTION, DIRECTION_1D, DIRECTION_OVERNIGHT, DIRECTION_1W, DIRECTION_1M)
+
+
+def is_direction_claim(claim_type: Optional[str]) -> bool:
+    """One scorer, many buckets — including the `_baseline` twins.
+
+    Every directional variant is scored identically and graded separately. Membership is by
+    PREFIX rather than by list so that adding a horizon, or the climatology twin that charges a
+    signal for its own existence, cannot silently land in the "no scorer for claim type" branch
+    and mark a whole population unresolvable while the ledger still looks healthy.
+    """
+    return bool(claim_type) and str(claim_type).startswith("direction")
+
 
 def _cfg(name, default):
     return getattr(_config, name, default) if _config else default
@@ -192,8 +225,51 @@ def resolve(price_lookup, today: Optional[date] = None) -> Dict:
     return stats
 
 
+def _bar_date(bar) -> str:
+    d = bar[0]
+    return d.isoformat()[:10] if hasattr(d, "isoformat") else str(d)[:10]
+
+
+def _bar_on(bars: Sequence, target_iso: str):
+    """The bar for a date, or the last one at or before it (the date may be a holiday)."""
+    chosen = None
+    for b in bars:
+        ds = _bar_date(b)
+        if ds == target_iso:
+            return b
+        if ds < target_iso:
+            chosen = b
+    return chosen
+
+
+def _settle_price(bars: Sequence, ctx: Dict):
+    """The price that settles a claim: None to use the window's last close, or an error string.
+
+    `score_on` names the settling bar. `score_field` selects open or close on that bar — an
+    OVERNIGHT claim is about the gap from one close to the next OPEN, and scoring it on the
+    following close would fold a whole session into a claim that never mentioned one. Opens are
+    the fifth element of a bar and are optional, so a caller whose price_lookup predates them
+    gets an explicit refusal instead of a silently wrong number.
+    """
+    target = ctx.get("score_on")
+    if not target:
+        return None
+    bar = _bar_on(bars, str(target)[:10])
+    if bar is None:
+        return f"no bar on or before the settling date {str(target)[:10]}"
+    if (ctx.get("score_field") or "close").lower() == "open":
+        if len(bar) < 5 or bar[4] is None:
+            return "this claim settles on the OPEN and price_lookup returned no opening price"
+        return float(bar[4])
+    return float(bar[3])
+
+
 def _score(r: Dict, bars: Sequence) -> tuple:
-    """Mark one claim. bars = [(date, high, low, close), ...]."""
+    """Mark one claim. bars = [(date, high, low, close)] or [(date, high, low, close, open)].
+
+    The fifth element is optional so that adding it did not break every existing caller; only
+    claims that settle on the open require it.
+    """
     ctx = r.get("context") or {}
     ct = r.get("claim_type")
     closes = [b[3] for b in bars]
@@ -252,11 +328,23 @@ def _score(r: Dict, bars: Sequence) -> tuple:
         return moved and pct >= 1.0, (f"price reached {best:.2f} from {float(entry_px):.2f} "
                                       f"({pct:.1f}% toward the short side)")
 
-    if ct == DIRECTION:
+    if is_direction_claim(ct):
         entry_px = ctx.get("price_at_claim")
         expect = (ctx.get("expected") or "").lower()
         if entry_px is None or expect not in ("up", "down", "flat"):
             return None, "missing direction context"
+        # WHICH bar settles the claim. Without this the scorer reads the last bar in the
+        # window, which is correct only when the claim matures exactly at the window's end.
+        # A one-day call made Monday cannot be resolved until Monday's bar is COMPLETE, so it
+        # is given a Tuesday resolution date — and then the last bar is Tuesday's, scoring a
+        # two-day move against a one-day claim. `score_on` names the bar that settles it and
+        # the resolution date only says when it is safe to read. Absent, behaviour is
+        # unchanged, which is what keeps the existing BTC claims scoring as they always have.
+        settled = _settle_price(bars, ctx)
+        if isinstance(settled, str):
+            return None, settled
+        if settled is not None:
+            final = settled
         # The "flat" band was hard-coded at 1%, which is calibrated for an equity over a couple
         # of weeks. Bitcoin at 34 vol moves ±6.7% over 14 days, so a 1% band is 0.15 sigma —
         # "flat" becomes unreachable and the claim degrades into a coin flip on noise while
@@ -271,6 +359,43 @@ def _score(r: Dict, bars: Sequence) -> tuple:
         got = "up" if chg > band else ("down" if chg < -band else "flat")
         return got == expect, (f"expected {expect}, price went {got} "
                                f"({chg:+.1f}% vs ±{band:.1f}% flat band)")
+
+    if ct == MOVE_EXCEEDS:
+        entry_px = ctx.get("price_at_claim")
+        need = ctx.get("move_pct")
+        side = (ctx.get("direction") or "up").lower()
+        if entry_px is None or need is None or side not in ("up", "down"):
+            return None, "missing move context (price_at_claim, move_pct, direction)"
+        entry_px, need = float(entry_px), abs(float(need))
+        # TOUCH or SETTLE, stated per claim rather than assumed. A long call that only has to
+        # be SOLD is made whole the moment price trades through the level, so touch is the
+        # honest read for the lottery tab's target multiple. A call HELD to expiry is made
+        # whole only by where it settles. Scoring one on the other's basis inflates or deflates
+        # the hit rate by exactly the amount of the path, which is most of the variance.
+        basis = (ctx.get("basis") or "touch").lower()
+        if basis == "settle":
+            settled = _settle_price(bars, ctx)
+            if isinstance(settled, str):
+                return None, settled
+            reached = settled if settled is not None else final
+        else:
+            reached = max(highs) if side == "up" else min(lows)
+        moved = (reached / entry_px - 1) * 100
+        got = moved >= need if side == "up" else moved <= -need
+        return got, (f"needed {side} {need:.1f}%, {basis} reached {reached:.2f} "
+                     f"from {entry_px:.2f} ({moved:+.1f}%)")
+
+    if ct == BAND_CONTAINS:
+        lo, hi = ctx.get("band_low"), ctx.get("band_high")
+        if lo is None or hi is None:
+            return None, "no band in context"
+        settled = _settle_price(bars, ctx)
+        if isinstance(settled, str):
+            return None, settled
+        px = settled if settled is not None else final
+        lo, hi = float(lo), float(hi)
+        return (lo <= px <= hi), (f"settled {px:.2f} vs band {lo:.2f}-{hi:.2f} "
+                                  f"({'inside' if lo <= px <= hi else 'outside'})")
 
     return None, f"no scorer for claim type {ct}"
 

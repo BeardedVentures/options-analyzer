@@ -1005,7 +1005,14 @@ def _resolve_predictions() -> Dict:
             for idx, row in df.iterrows():
                 d = idx.date() if hasattr(idx, "date") else idx
                 if start <= d <= end:
-                    out.append((d, float(row["High"]), float(row["Low"]), float(row["Close"])))
+                    # The OPEN is appended as a fifth element rather than inserted, so every
+                    # existing scorer's indexing is untouched. Overnight claims are close-to-
+                    # OPEN and cannot be scored without it; scored on the following close they
+                    # would quietly become one-and-a-half-day claims still calling themselves
+                    # overnight. Scorers that do not need it never look.
+                    op = row.get("Open") if hasattr(row, "get") else None
+                    out.append((d, float(row["High"]), float(row["Low"]), float(row["Close"]),
+                                float(op) if op is not None else None))
             return out
 
         stats = pred.resolve(lookup)
@@ -1016,6 +1023,42 @@ def _resolve_predictions() -> Dict:
         return stats
     except Exception as e:
         _log(f"Prediction resolution failed: {e}")
+        return {}
+
+
+def _record_direction_forecasts() -> Dict:
+    """One dated directional claim per watchlist ticker per horizon, once a day.
+
+    Recorded on the LAST cycle of the session rather than the first. The claim is anchored to
+    `price_at_claim` and settles on the next session, so anchoring it at 09:35 ET would make the
+    "overnight" claim span the rest of today PLUS the gap while still being labelled overnight,
+    and would hand the one-day claim several hours of the move it is supposed to be predicting.
+    Near the close the latest bar is effectively today's close, which is the anchor these claims
+    are defined against.
+
+    predictions.record is idempotent per (ticker, date, claim type), so a retry or an overlapping
+    run cannot double-write, and a missed final cycle simply means no claims that day — visible
+    in the counts rather than silently backfilled at the wrong price.
+
+    This is a measuring instrument, not a signal: nothing here reaches selection, sizing or
+    execution. It exists because every other claim VEGA makes matures at a 30-45 day expiry, so
+    calibration currently takes quarters to read.
+    """
+    if not getattr(config, "DIRECTION_FORECAST_ENABLED", True):
+        return {}
+    after = int(os.getenv("VEGA_DIRECTION_AFTER_HOUR",
+                          str(getattr(config, "DIRECTION_RECORD_AFTER_HOUR", 14))))
+    if datetime.now().hour < after:
+        return {}
+    try:
+        from analysis import direction_forecast as fc
+        stats = fc.record_watchlist()
+        _log(f"DIRECTION FORECAST recorded={stats['recorded']} claims across "
+             f"{stats['tickers']} tickers (abstained={stats['abstained']} "
+             f"failed={stats['failed']})")
+        return stats
+    except Exception as e:
+        _log(f"Direction forecast failed: {e}")
         return {}
 
 
@@ -1109,6 +1152,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             marked, closed = _reprice_and_close_open()
             _record_btc_forecast()
             _resolve_predictions()
+            _record_direction_forecasts()
             _grade_shadow_book()
             _run([sys.executable, "paper_desk.py", "report"])
             _run([sys.executable, "paper_desk.py", "dashboard", "--no-open"])
@@ -1145,6 +1189,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         marked, closed = _reprice_and_close_open()
         _record_btc_forecast()
         _resolve_predictions()
+        _record_direction_forecasts()
         _grade_shadow_book()
 
         _run([sys.executable, "paper_desk.py", "report"])
