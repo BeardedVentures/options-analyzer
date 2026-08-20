@@ -322,10 +322,10 @@ stderr line from a native exe in a `NativeCommandError`, which under
 wrapper drops to `"Continue"` for the native call — and the error record is *still being
 emitted*.
 
-**It is not sufficient on its own:** today's 08:35 cycle emitted the identical
-`NativeCommandError` and completed normally. So this is the strongest lead, not the cause. What
-makes it fatal on some runs and harmless on others is the actual question. Both deaths were also
-the first and last fire of their day, which may mean nothing at n=2.
+**Superseded — see §9.3.** This lead is a red herring for every death after 2026-08-09. The
+`NativeCommandError` mechanism was real, but its fix landed in commit `bfffd32` on 08-09, and
+only the 08-04 and 08-05 deaths predate it. Today's healthy cycle emits the identical record.
+§9 has the actual root-cause work: three distinct causes, one of them live and daily.
 
 ### 2.3 The silent-open-path bug, and what it cost the diagnosis
 
@@ -572,3 +572,136 @@ the like-for-like comparison and should be checked before this is called settled
    reset alone.
 3. **§5 — root-cause the cycle deaths and the lock next?** This is where the entry throughput
    went, and it outranks every threshold question in this document.
+
+---
+
+## 9 · Root cause of the cycle deaths
+
+Asked for directly. Three of nine are explained, one of those recurs **daily and is still
+happening**, and the remaining six cannot be closed out from here — for a reason that is itself
+the most actionable finding.
+
+### 9.1 First, the deaths are real — confirmed independently of the log
+
+The wrapper log cannot prove a death, because `run_auto_paper_cycle.ps1` pipes Python through
+`Out-File`, which flushes in chunks: a killed process loses its buffered tail, so "the log stops"
+and "the process stopped" are different events. Two independent sources settle it:
+
+- **The ledger.** All seven post-fix dead cycles produced **zero marks**. Every finished cycle in
+  the same window produced 9–15. The work genuinely did not happen.
+- **`logs/run.log`**, which `main.py` writes directly rather than through the pipeline, so it is
+  unbuffered and gives true lifetimes.
+
+### 9.2 What the true lifetimes show — two distinct populations
+
+| dead cycle | main.py ran | died at |
+|---|---:|---|
+| 2026-08-10 13:35 | 1491s | 13:59:51 |
+| 2026-08-11 13:35 | 1455s | 13:59:15 |
+| 2026-08-11 09:35 | 37s | 09:35:37 |
+| 2026-08-17 11:35 | 66s | 11:36:06 |
+| 2026-08-19 14:35 | 15s | 14:35:15 |
+| 2026-08-19 08:35 | 3s | 08:35:03 |
+| 2026-08-13 09:35 | — | wrote nothing at all |
+
+*(control: healthy cycles run main.py for 489–540s)*
+
+Group A dies at ~24 minutes; Group B inside 66 seconds. And Group A's two deaths land at
+**13:59:51 and 13:59:15** — the same wall-clock minute on different days, which is a coincidence
+worth noticing and not one I can currently explain.
+
+None of the nine ends on a traceback or a PowerShell error. They stop on ordinary mid-scan
+output, mid-work, with `Finished` never written. **That is an external kill, not a crash.**
+
+### 9.3 Explained: 2 of 9 — the pre-08-09 wrapper bug
+
+`2026-08-04 08:37` and `2026-08-05 08:37` predate commit `bfffd32` (2026-08-09), which introduced
+the `$ErrorActionPreference = "Continue"` guard around the native call. The 08-05 death's final
+log line is literally:
+
+```
+    + FullyQualifiedErrorId : NativeCommandError
+```
+
+That is the documented mechanism, firing before its fix existed. **Closed — and it means the
+`NativeCommandError` lead from §2.2a is a red herring for everything after 08-09:** today's
+healthy cycle emits the identical record. Withdraw it as an explanation.
+
+### 9.4 Explained: 1 of 9 — and this one is live, daily, and hitting the close scan
+
+The task's trigger:
+
+```
+StartBoundary : 2026-08-19T08:35:00-05:00
+Repetition    : Interval PT1H   Duration PT6H   StopAtDurationEnd TRUE
+```
+
+`08:35 + 6h = 14:35`. The **final repetition fires at exactly the instant the repetition window
+expires**, and `StopAtDurationEnd` means "stop all running tasks at the end of the duration." The
+14:35 instance is started and then immediately stopped by the scheduler.
+
+The 2026-08-19 14:35 cycle died **15 seconds in with zero work done**, which is exactly that
+signature. 08-19 is the only complete day under this trigger, and its 14:35 fire is one of only
+two that died.
+
+**This is the daily close-scan cycle** — the end-of-day resolution run, the one that matters most
+for marking and closing positions before the session ends. Under the current schedule it has
+never completed.
+
+**Testable prediction: today's 14:35 CDT fire will die the same way**, in seconds, with zero
+marks. That is the check to run before accepting this.
+
+Fix, when you want it — two settings, neither touching the repo:
+
+```
+Duration PT6H  ->  PT7H        (window ends 15:35; the 14:35 fire gets a full hour)
+                               a 15:35 fire is 16:35 ET and exits on the market-closed guard
+ExecutionTimeLimit PT72H -> PT30M    a real runaway guard; a healthy cycle takes ~13 min
+```
+
+Alternatively `StopAtDurationEnd = false`, but only *with* the `ExecutionTimeLimit` change — at
+PT72H there would be nothing left to stop a genuinely hung instance.
+
+**Do not apply either while a cycle is running:** re-registering a task terminates its running
+instances, which is plausibly what happened to 08-19 08:35 (the old task XMLs in
+`backups/scheduled_tasks/` are timestamped 2026-08-19 08:06, the morning the schedule was
+rewritten; today's 08:35 fire ran fine).
+
+### 9.5 Unexplained: 6 of 9 — and why they cannot be closed from here
+
+**`Microsoft-Windows-TaskScheduler/Operational` is DISABLED** (`IsEnabled: False`). There is no
+record of a single task start, stop or termination on this machine. Every conclusion above had to
+be reconstructed from application logs, and the six remaining deaths cannot be reconstructed at
+all, because the one artifact that would name the terminator does not exist.
+
+**Enabling it is the single highest-value action here**, and it needs one elevated command:
+
+```
+wevtutil sl Microsoft-Windows-TaskScheduler/Operational /e:true
+```
+
+This session is not elevated, so I could not run it. With it on, the next death names its own
+cause — including today's predicted 14:35 one.
+
+### 9.6 Ruled out, so nobody re-treads them
+
+| hypothesis | verdict |
+|---|---|
+| `ExecutionTimeLimit` timeout | **No.** PT72H. |
+| Machine sleep / hibernate / reboot | **No.** Zero Kernel-Power 41/42/107/109/6008 or shutdown events at any death time since 08-04; the only System events in range are evening clock syncs. |
+| Overlapping task instances | **No.** `MultipleInstancesPolicy: IgnoreNew`, and a cycle takes ~13 min against a 60-min interval. |
+| `JARVIS_Watchdog` killing it | **No.** Runs every 10 min, but its only process check is Docker Desktop and it kills nothing. Its trigger also starts 2026-08-18, after five of the nine. |
+| Cockpit / task collision | **Only 1 of 6.** A cockpit cycle ended at 13:42:59 during the 08-10 13:35 run; the other five have no cockpit activity within ±20 min. |
+| Two wrapper instances running at once | **No** — and this one was my own error. A process query filtering on `CommandLine -match 'run_auto_paper_cycle'` matches *the query process itself*, because the pattern appears in its own command line. The "duplicate wrapper" was my `Where-Object` finding itself. |
+| `StopOnIdleEnd: true` | **Unlikely, not cleared.** It is set on every VEGA task, but `RunOnlyIfIdle` is false, and Windows only honours idle-stop when the task is idle-triggered. Worth clearing anyway since it costs nothing. |
+
+### 9.7 Where this leaves it
+
+- **2 of 9** — a fixed wrapper bug. Closed.
+- **1 of 9** — `StopAtDurationEnd` killing the daily close scan. Live, recurring, fixable in two
+  task settings, and testable at 14:35 today.
+- **6 of 9** — open, and they stay open until task history is enabled. Nothing in the application
+  logs can name what stopped those processes.
+
+The honest summary is that the deaths are **not one bug**. They are at least three, one of which
+is still running daily against the most important cycle of the day.
