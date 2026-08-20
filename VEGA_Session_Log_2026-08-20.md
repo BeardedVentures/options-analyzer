@@ -274,25 +274,58 @@ Except that most of them do not, and that is the finding.
 |---|---:|---|
 | opened | 11 | all on or before 08-10 |
 | **ran, open path SILENT** | **11** | cycle completed, open path logged *nothing at all* |
-| **DIED — no `Finished` line** | **10** | the run never completed and left its lock behind |
-| **BLOCKED by a held lock** | **7** | `Another cycle appears active; skipping this run` |
+| **DIED — no `Finished` line** | **9** | the run stopped mid-scan and left its lock behind |
+| blocked by a concurrent cycle | 7 | the two-scheduler race — see the correction below |
 | board genuinely empty | 4 | the only cause the first draft reported |
 | book full (15 open) | 1 | `No slots free` |
 | board trade carried no gates | 1 | `SKIP TLT … missing=[all 11]` |
 
-**"Board qualifies nothing" explains 4 of 34 cycles.** Seventeen — half of every cycle since
-go-live — were lost to a crash-and-lock loop. On 08-12 all three market-hours cycles were
-blocked and the day produced nothing at all.
+**"Board qualifies nothing" explains 4 of 34 cycles.**
 
-Corroboration for the deaths, independent of the log: the lock file found at the start of this
-session held PID 35580 from the 08-19 14:35 run, and that process was gone. A clean exit calls
-`_release_lock()` and deletes the file. The lock's existence *is* the death certificate.
+**Two corrections to my own first pass at this table**, both caught by checking rather than by
+reasoning:
 
-**Caveat on the classifier, stated because it nearly fooled me.** `run_auto_paper_cycle.ps1`
-pipes Python's output through `Out-File`, which flushes in chunks — so a *currently running*
-cycle also shows "Starting" with nothing after it. Today's 08:35 run looked like an eleventh
-death at 08:43 and was in fact healthy, mid-scan, and finished normally at 08:46:53. The ten
-above are historical runs with a later run after them, where the reading is unambiguous.
+- *I attributed the 7 blocked cycles to locks left behind by deaths.* Wrong. They are the
+  cockpit-vs-task race already recorded in project memory as fixed. `logs/intraday_paper.log`
+  holds **51 cockpit-spawned cycles** that are invisible in the task log, ending 2026-08-18
+  14:35:49, and every blocked task cycle falls on 08-12, 08-14, 08-17 or 08-18 — inside that
+  window, none after it. `INTRADAY_SCHEDULER_ENABLED = False`. Those cycles were also not lost
+  work: the cockpit had just done it (`marked=10` on its final run). **Already fixed; not a live
+  problem.**
+- *I counted 10 deaths.* One is today's 08:35 run, which was mid-scan when I classified it and
+  finished normally at 08:46:53. `run_auto_paper_cycle.ps1` pipes Python through `Out-File`,
+  which flushes in chunks, so a healthy running cycle is indistinguishable from a dead one until
+  it ends. Nine are genuine — historical runs with a later run after them.
+
+So "half of every cycle was lost" was overstated. The honest claim is **9 genuine deaths out of
+34**, and those are the live problem; the lock blocks are a solved one.
+
+Corroboration for the deaths, independent of the classifier: a clean exit calls `_release_lock()`
+and deletes the lock. The lock found at the start of this session held PID 35580 from the 08-19
+14:35 run, and that process was gone. The 08-19 09:35 run logged `Removed stale automation lock`,
+meaning the 08:35 run before it died holding one. The lock's existence is the death certificate.
+
+### 2.2a The deaths have a strong lead — which should not be called the answer yet
+
+Both 08-19 deaths stop mid-scan, and both carry this immediately before their output ends:
+
+```
+python.exe : 2026-08-19 08:35:03,390 [INFO] [main] Running morning scan ...
+At ...\run_auto_paper_cycle.ps1:44 char:1
++ & $PythonExe "auto_paper_cycle.py" 2>&1 | Out-File -FilePath $logFile ...
+    + FullyQualifiedErrorId : NativeCommandError
+```
+
+That is the exact mechanism the wrapper's own comment says was fixed: PowerShell 5.1 wraps every
+stderr line from a native exe in a `NativeCommandError`, which under
+`$ErrorActionPreference = "Stop"` aborts the script mid-run and leaves the lock behind. The
+wrapper drops to `"Continue"` for the native call — and the error record is *still being
+emitted*.
+
+**It is not sufficient on its own:** today's 08:35 cycle emitted the identical
+`NativeCommandError` and completed normally. So this is the strongest lead, not the cause. What
+makes it fatal on some runs and harmless on others is the actual question. Both deaths were also
+the first and last fire of their day, which may mean nothing at n=2.
 
 ### 2.3 The silent-open-path bug, and what it cost the diagnosis
 
@@ -463,24 +496,25 @@ comes out of §2.2, since that is where the actual entry throughput went.
 
 ## 5 · What actually blocks entries — the next diagnostic, unranked by anyone so far
 
-§2.2 is the finding of this session and it has not been root-caused. Seventeen of 34 cycles lost
-to deaths and locks is not a tuning problem, and it is upstream of every gate question above:
-a cohort cannot accumulate at any threshold if half the cycles never run.
+§2.2 is the finding of this session and it is not root-caused. **Nine of 34 cycles since 08-04
+died mid-run**, two of them after every previously-known cause had been fixed, and this sits
+upstream of every gate question in this document: a cohort cannot accumulate at any threshold if
+a quarter of the cycles never finish.
 
-Three specific threads, none investigated:
+Two threads:
 
-1. **Why do cycles die?** Ten since 08-04, several producing zero log lines — dying before the
-   market-hours check prints. `run_auto_paper_cycle.ps1` documents two prior root causes
-   (cp1252 stdout, PowerShell's `NativeCommandError` under `$ErrorActionPreference = "Stop"`),
-   both fixed. This is a third.
-2. **Why does the lock outlast its 30-minute staleness window?** On 08-12 three cycles two hours
-   apart were each blocked. A lock written once cannot be <30 min old at three separate
-   two-hourly checks unless something is rewriting it. `vega_app.py` has been running since
-   08-19 10:22.
-3. **`board.qualified_trades` carrying `assessment_gates: MISSING`.** Seen on TLT (08-14) and on
-   yesterday's META bear call. The board publishes a trade as qualified while omitting the
-   annotations the desk requires — the leak shape `REQUIRED_GATES` exists to catch, pointed the
-   other way.
+1. **Why do cycles die?** Nine since 08-04, including 08-19 08:35 and 14:35. §2.2a has the lead
+   — `NativeCommandError` is still emitted from `run_auto_paper_cycle.ps1:44` — and its
+   limitation: today's healthy cycle emitted the same record. The question is what makes it fatal
+   sometimes. Two prior root causes are documented in that file (cp1252 stdout, and this same
+   error under `$ErrorActionPreference = "Stop"`), both fixed; this is a third. Note that two of
+   the nine produced **zero** log lines, dying before the market-hours check prints — those may
+   be a different failure from the mid-scan ones.
+2. **`board.qualified_trades` carrying `assessment_gates: MISSING`.** Seen on TLT (08-14) and on
+   the 08-19 META bear call. The board publishes a trade as qualified while omitting the
+   annotations the desk requires in order to open it — the leak shape `REQUIRED_GATES` exists to
+   catch, pointed the other way. Cheap to check, and currently a hard blocker on board trades
+   that do reach the desk.
 
 ---
 
