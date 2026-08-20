@@ -560,8 +560,10 @@ session — which is now observable rather than guessed at.
 `marked=2` on that cycle, against 9 on a comparable cycle yesterday. Most of that is time of
 day: 08:46 CDT is earlier in the session than any of yesterday's successful marks (08:47–12:48
 CDT), and chains fill out as the session goes on. The leg predicate itself cannot be responsible
-— §1.6 proves by enumeration that it is a strict superset of the old filter. The 09:35 cycle is
-the like-for-like comparison and should be checked before this is called settled.
+— §1.6 proves by enumeration that it is a strict superset of the old filter.
+
+**Answered in §10:** the 09:35 cycle marked 8 of 11 against yesterday's 9 of 11 at the same slot.
+No regression. It also closed XLE as a genuine win and caught a fabricated one on PSX.
 
 ---
 
@@ -705,3 +707,77 @@ cause — including today's predicted 14:35 one.
 
 The honest summary is that the deaths are **not one bug**. They are at least three, one of which
 is still running daily against the most important cycle of the day.
+
+---
+
+## 10 · Live verification, 2026-08-20 09:35 cycle — the like-for-like check §7 asked for
+
+`Cycle summary: opened=0, marked=8, closed=1` — against **marked=9, closed=1** on yesterday's
+comparable 09:35 cycle.
+
+### 10.1 The mark rate did not regress
+
+Eight of eleven marked, versus nine of eleven yesterday at the same slot. The §7 caveat
+(`marked=2` at 08:46) was time-of-day, as suspected — not the leg predicate. That matches the
+enumeration proof in §1.6 rather than merely being consistent with it: the new bar is a strict
+superset of the old filter, so it *cannot* mark less often. **Settled.**
+
+### 10.2 XLE resolved — and the frozen cohort went from 1 to 2
+
+The position the brief opened with, unmarkable since 2026-08-14, marked and closed on the first
+cycle that could see its legs:
+
+```
+XLE 56.0/55.0 exp 2026-09-18
+  entry credit  0.16 (natural)     exit 0.03      outcome  win
+  exit_reason   auto-target-profit                net      +$10.84
+  cohort        natural|natural|ravens_v1         analysis_eligible: True
+  marks         0.12 (08-13)  ->  0.09 (08-14)  ->  [5 dark days]  ->  0.03 (08-20)
+```
+
+This is the fix's whole thesis demonstrated in one row. Nothing about the close rules changed;
+they simply became able to run. The position sat at or near its profit target for five days with
+the desk unable to see it.
+
+**Frozen-cohort closed trades: 2 of 30** — PEP (+$51.84) and XLE (+$10.84), both wins. GDX and
+ARKK remain open in the same cohort.
+
+### 10.3 PSX — the plausibility bound earned its place on day one
+
+The most valuable thing this cycle produced. PSX quoted `short_ask=0.8, long_bid=0.0`, so the
+file's existing degrade-to-mid path fired correctly and said so — and the mid it produced was
+**−0.75**, a long leg priced above the short. A broken print.
+
+```
+Reprice: missing ask/bid for PSX ... marking at mid (short_ask=0.8 long_bid=0.0); this mark is optimistic.
+MARK-UNAVAILABLE PSX ... implausible mark -0.75 outside [0, 5.0] - bad quote
+```
+
+Without the `[0, width]` bound, that number reaches the close rules, and the arithmetic is not
+close:
+
+| | |
+|---|---|
+| profit-target trigger | `decision_mark <= 0.40 × (1 − 0.65)` = **0.140** |
+| decision mark | **−0.75** → fires |
+| booked realised P&L | **+$115.00 gross / +$112.84 net** |
+| max possible profit on the trade | **$40.00** |
+| | a **287%-of-max** "win", from a quote that never existed |
+
+Stated precisely rather than dramatically: **PSX is `natural|mid|ravens_v1`, not the frozen
+cohort**, so this would have corrupted that cohort's statistics and the desk's P&L totals — not
+the 30-trade count. Still a fabricated win written into an append-only ledger, on the first live
+day, from a guard added almost as an afterthought because reading an ungated chain means
+occasionally reading a bad quote.
+
+Note the ordering that makes this work: the degradation logged its own optimism, *and* the bound
+refused the result anyway. Either alone was insufficient — the log line would have been an
+accurate warning nobody read, and a bound without the degradation would have paused a position
+that mid-marking can usually handle.
+
+### 10.4 The three that remain paused
+
+PSX, AMGN and NEE are `DATA_UNAVAILABLE` with `skips=2`, each carrying its reason and the age of
+its last good mark. NEE's long leg quotes 0.13/0.37 — 96% of mid — which the *entry* filter
+rejects on the same 80% rule, so this is not a new strictness. They are visibly paused rather
+than silently stale, which is the whole of what §1 set out to achieve.
