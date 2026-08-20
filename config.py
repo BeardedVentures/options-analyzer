@@ -238,16 +238,31 @@ CHAIN_QUALITY_GOOD_RATIO = 0.70   # At or above this the chain reads green in th
 # ─────────────────────────────────────────────
 # Three enforcement leaks in one week (IV-rank 07-25, POP floor 08-02, quote-spread 08-02) shared
 # one shape: a rule defined here, annotated by the scanner, then omitted from the path that actually
-# opens trades. REQUIRED_GATES is the contract between the two. Every key must be EMITTED by
-# vega_candidates.build_candidates() and ENFORCED by auto_paper_cycle._candidate_passes_minimum().
-# _auto_open_from_candidates() validates candidates against this list and refuses to open anything
-# if a key is missing, so dropping a gate in the scanner fails loudly instead of silently widening
-# what gets traded.
+# opens trades. REQUIRED_GATES is the contract between the two.
 #
-# NOTE: these are the scanner's gate KEYS, not the config knob names above — they must match
-# build_candidates()'s `gates` dict exactly. One rule is deliberately NOT here:
-#   - IV rank : gated per TICKER in _pick_new_trades() from row.ctx.iv_rank (see MIN_IV_RANK),
-#               because iv_rank lives on the row's ctx, not on individual candidates.
+# WHERE ENFORCEMENT ACTUALLY LIVES (corrected 2026-08-20). This block used to name
+# _candidate_passes_minimum() and _auto_open_from_candidates() as the enforcers. Neither is the
+# enforcer any more: _auto_open_from_candidates() was DELETED when the desk was rewired to open
+# from the board, and _candidate_passes_minimum() survives only inside the orphaned, unreachable
+# selection subtree (see the banner above _pick_new_trades in auto_paper_cycle.py). A reader
+# following the old wording would audit code that cannot run — the exact failure this project
+# has been bitten by before.
+#
+# The live enforcer is auto_paper_cycle._auto_open_from_board(): it reads each board trade's
+# `assessment_gates` dict, refuses to open when any REQUIRED_GATES key is missing or False, and
+# logs "SKIP <ticker> — board trade is not fully gated". Every key must therefore be EMITTED onto
+# that dict by the board builder; a gate dropped upstream fails loudly here instead of silently
+# widening what gets traded.
+#
+# NOTE: these are the scanner's gate KEYS, not the config knob names above — they must match the
+# board's `assessment_gates` dict exactly. One rule is deliberately NOT here:
+#   - IV rank : enforced in main.py:647-653 during screening, per TICKER, because iv_rank is a
+#               property of the underlying rather than of an individual spread. Be aware that
+#               enforcement there is CONDITIONAL: a below-threshold reading is a hard reject only
+#               when iv_rank_method == "HISTORY". On the approximated path (thin IV history) it
+#               writes tech["iv_rank_warning"] and lets the ticker through — and nothing reads
+#               that field, so the softest case is also the silent one. Sitting outside
+#               REQUIRED_GATES, it is invisible to the contract above. See MIN_IV_RANK.
 REQUIRED_GATES = [
     "delta_cap",
     "otm_buffer",
@@ -525,6 +540,34 @@ VRP_HV_WINDOW = 35               # HV lookback days — set equal to PREFERRED_D
 COHORT_FROZEN_AT = "2026-08-14"
 COHORT_STRATEGY_LABEL = "sell_natural_hold_to_stop_or_expiry"
 COHORT_TARGET_CLOSED_TRADES = 30
+
+# ─── ENTRY DIVERSIFICATION (added 2026-08-20; part of this contract, see below) ──────────────
+# The cohort's premise is 30 INDEPENDENT observations. The ledger says it was not getting them:
+# 65 of 79 paper entries (82%) were opened in the same MINUTE as at least one other, in batches
+# of up to 5, and 10 of the 11 currently-open positions share a single expiration (2026-09-18).
+# Four spreads opened from one board snapshot are four readings of one market moment, not four
+# samples — they share the volatility regime, the day's news, the same scan's data quality and,
+# increasingly, the same settlement date. Correlated observations inflate apparent sample size
+# without adding information, so a 30-trade count assembled that way validates less than it
+# claims to.
+#
+# These caps are FORWARD-LOOKING ONLY. They never close, re-open or re-classify an existing
+# position, and they do not redefine what counts as a valid observation — that would reopen the
+# contract's own definition of what is being measured, which is a larger change than the problem
+# needs. They gate NEW opens and nothing else.
+#
+# Yes, these are entry gates, and yes, changing them restarts the 30-trade count. That is why
+# they land NOW: the count is 1, which is the cheapest moment in this cohort's life to pay it.
+# Deferring until entries resume pays the identical cost at a strictly higher count.
+#
+# The tension, stated rather than hidden: nothing has opened since 2026-08-10, so tightening
+# throughput while the pipe is already clogged could look perverse. It is not — the drought is
+# operational (see VEGA_Session_Log_2026-08-20.md §4a) and will be fixed separately. But if
+# unblocking entry flow shows these numbers are too tight, they are three integers in one place,
+# deliberately.
+MAX_NEW_OPENS_PER_RUN = 2        # was an undocumented VEGA_MAX_NEW_PER_RUN default of 5
+MAX_NEW_OPENS_PER_DAY = 3        # the batch that matters most: one day is ~one regime
+MAX_OPEN_PER_EXPIRATION = 4      # with 15 open max, forces at least four settlement dates
 
 # Negative pop_gap = VEGA's own model rates the trade WORSE than the market prices it. Eleven
 # gates and none of them tested this; observed live on IBIT at -12.6pp while passing 11/11.

@@ -622,21 +622,64 @@ def _auto_open_from_board() -> int:
     open_rows = [r for r in rows if r.get("status") == "open" and r.get("mode") == "paper"]
     open_tickers = {str(r.get("ticker")).upper() for r in open_rows if r.get("ticker")}
     slots = max(0, int(os.getenv("VEGA_MAX_OPEN_TOTAL", "15")) - len(open_rows))
-    budget = min(slots, int(os.getenv("VEGA_MAX_NEW_PER_RUN", "5")))
+
+    # ENTRY DIVERSIFICATION — see the block under COHORT_FROZEN_AT in config.py for why.
+    # The per-run number was previously an undocumented env default of 5, which is how four
+    # spreads came to be opened in the same minute on 2026-08-10 without anything objecting.
+    per_run = int(os.getenv("VEGA_MAX_NEW_PER_RUN",
+                            str(getattr(config, "MAX_NEW_OPENS_PER_RUN", 2))))
+    per_day = int(os.getenv("VEGA_MAX_NEW_PER_DAY",
+                            str(getattr(config, "MAX_NEW_OPENS_PER_DAY", 3))))
+    today = datetime.now().date().isoformat()
+    opened_today = sum(
+        1 for r in rows
+        if r.get("mode") == "paper" and r.get("status") in ("open", "closed")
+        and str(r.get("opened_at") or r.get("logged_at") or "")[:10] == today
+    )
+    day_room = max(0, per_day - opened_today)
+    budget = min(slots, per_run, day_room)
     if budget <= 0:
-        _log("No slots free; nothing opened.")
+        if slots <= 0:
+            _log(f"No slots free ({len(open_rows)} open); nothing opened.")
+        elif day_room <= 0:
+            _log(f"Daily entry cap reached ({opened_today}/{per_day} opened today) — nothing "
+                 f"opened. Entries are spread across days deliberately; see the entry "
+                 f"diversification block in config.py.")
+        else:
+            _log("No entry budget this run; nothing opened.")
         return 0
 
     # Highest edge first — the board's own ranking, so the desk validates the top of the list
     # the operator would have acted on rather than an order of its own.
     trades = sorted(trades, key=lambda t: (t.get("edge_score") or 0), reverse=True)
 
+    per_expiration = int(getattr(config, "MAX_OPEN_PER_EXPIRATION", 4))
+    by_expiration: Dict[str, int] = {}
+    for r in open_rows:
+        k = str(r.get("expiration") or "")
+        if k:
+            by_expiration[k] = by_expiration.get(k, 0) + 1
+
     opened = 0
+    already_open: List[str] = []
     for t in trades:
         if opened >= budget:
             break
         tk = str(t.get("ticker") or "").upper()
-        if not tk or tk in open_tickers:
+        if not tk:
+            continue
+        if tk in open_tickers:
+            # Logged, not silent. This branch is why 11 cycles between 08-06 and 08-19 ran the
+            # open path and recorded NOTHING: the board kept re-qualifying names the desk was
+            # already holding, every one hit this `continue`, and the cycle looked identical to
+            # one where the board was empty. Two very different problems, one blank log.
+            already_open.append(tk)
+            continue
+        exp_key = str(t.get("expiration") or "")
+        if exp_key and by_expiration.get(exp_key, 0) >= per_expiration:
+            _log(f"SKIP {tk} — {by_expiration[exp_key]} position(s) already expire {exp_key}, "
+                 f"cap is {per_expiration}. A shared settlement date is a shared outcome; see "
+                 f"the entry diversification block in config.py.")
             continue
         if not is_manageable(t):
             _log(f"SKIP {tk} {t.get('strategy')} — the desk cannot mark this structure, so it "
@@ -689,9 +732,19 @@ def _auto_open_from_board() -> int:
                  f"{t.get('short_strike')}/{t.get('long_strike')} {t.get('expiration')} "
                  f"credit={float(credit):.2f} (natural) edge={t.get('edge_score')}")
             open_tickers.add(tk)
+            if t.get("expiration"):
+                k = str(t["expiration"])
+                by_expiration[k] = by_expiration.get(k, 0) + 1
             opened += 1
         except Exception as exc:
             _log(f"Failed to open board trade {tk}: {exc}")
+
+    if already_open:
+        _log(f"Board re-qualified {len(already_open)} name(s) the desk already holds "
+             f"({', '.join(sorted(set(already_open)))}) — one position per ticker, so these "
+             f"were not opened. This is a saturated book, not an empty board.")
+    if opened == 0 and not already_open:
+        _log(f"Board had {len(trades)} qualified trade(s) but none was openable this run.")
     return opened
 
 
