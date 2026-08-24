@@ -653,12 +653,38 @@ def _auto_open_from_board() -> int:
     # the operator would have acted on rather than an order of its own.
     trades = sorted(trades, key=lambda t: (t.get("edge_score") or 0), reverse=True)
 
+    # PER-EXPIRATION CAP — counted over the CURRENT entry epoch only.
+    #
+    # The cap exists so the cohort being measured is not a pile of trades sharing one settlement
+    # date. It was written as though the book were empty. It is not: seven positions opened
+    # 2026-08-04 to 08-07 are still open, six of them on 2026-09-18, and NONE of them belong to
+    # the cohort — every one is gate_basis 'mid', excluded from analysis_eligible. Counting them
+    # meant a frozen legacy book spent the diversification budget of a cohort it is not part of.
+    #
+    # The result, from 2026-08-21 on: every candidate the board produced was refused with
+    # "SKIP CRWD — 6 position(s) already expire 2026-09-18, cap is 4", every cycle, because the
+    # engine's DTE window keeps landing on the September monthly. The cap added on 2026-08-20 to
+    # stop correlated entries had become the reason there were no entries at all.
+    #
+    # Legacy positions still count toward MAX_OPEN_TOTAL above — that is real capital at risk
+    # and it is a different question from whether this cohort's observations are independent.
     per_expiration = int(getattr(config, "MAX_OPEN_PER_EXPIRATION", 4))
+    epoch_now = ol.current_entry_epoch()
     by_expiration: Dict[str, int] = {}
+    out_of_epoch = 0
     for r in open_rows:
         k = str(r.get("expiration") or "")
-        if k:
-            by_expiration[k] = by_expiration.get(k, 0) + 1
+        if not k:
+            continue
+        if ol.entry_epoch(r) != epoch_now:
+            out_of_epoch += 1
+            continue
+        by_expiration[k] = by_expiration.get(k, 0) + 1
+    if out_of_epoch:
+        # Logged, not silent — the same lesson as the already_open branch below. An entry rule
+        # that quietly ignores part of the book is one nobody can audit from the log.
+        _log(f"{out_of_epoch} open position(s) predate the {epoch_now} entry rules and do not "
+             f"count toward the per-expiration cap; they still count toward the total-open cap.")
 
     opened = 0
     already_open: List[str] = []

@@ -357,6 +357,11 @@ def entry_epoch(record: Dict) -> str:
     return post if opened >= epoch else pre
 
 
+def current_entry_epoch() -> str:
+    """The epoch a trade opened right now would belong to."""
+    return entry_epoch({"opened_at": datetime.now().isoformat()})
+
+
 def cohort(record: Dict) -> str:
     """The comparability key: trades sharing it were selected and closed under the same rules.
 

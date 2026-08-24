@@ -184,6 +184,73 @@ def test_the_cap_counts_positions_that_were_already_open(desk, read_ledger, monk
     assert apc._auto_open_from_board() == 0
 
 
+def _backdate_all_open(before=None):
+    """Move every open position's opened_at to before the entry-rules epoch.
+
+    Reaches into the (throwaway) ledger rather than going through open_paper_trade, which always
+    stamps 'now' — the legacy book this models was written weeks before the caps existed.
+    """
+    before = before or "2026-08-06T09:38:00"
+    rows = ol._read_all()
+    for r in rows:
+        if r.get("status") == "open":
+            r["opened_at"] = before
+    ol._write_all(rows)
+
+
+def test_the_legacy_book_does_not_spend_the_new_cohorts_expiration_budget(desk, read_ledger,
+                                                                          monkeypatch):
+    """THE DROUGHT, 2026-08-21 → 2026-08-24.
+
+    Six of seven open positions expire 2026-09-18. All seven were opened 08-04 to 08-07, all are
+    gate_basis 'mid', and not one is in the cohort being validated. Counting them against
+    MAX_OPEN_PER_EXPIRATION meant every board candidate was refused —
+    "SKIP CRWD — 6 position(s) already expire 2026-09-18, cap is 4" — on every cycle for four
+    days. The cap added to stop correlated entries had become the reason there were no entries.
+
+    A position from a previous entry regime is not an observation in this cohort, so it cannot
+    make this cohort's observations correlated.
+    """
+    monkeypatch.setattr(config, "MAX_OPEN_PER_EXPIRATION", 4)
+    monkeypatch.setattr(config, "MAX_NEW_OPENS_PER_RUN", 9)
+    monkeypatch.setattr(config, "MAX_NEW_OPENS_PER_DAY", 9)
+    for i in range(6):
+        ol.open_paper_trade(ticker=f"OLD{i}", short_strike=50.0 + i, long_strike=45.0 + i,
+                            expiration="2026-09-18", entry_credit_per_share=1.0, dte=45,
+                            fill_model="natural", source="test")
+    _backdate_all_open()
+
+    set_board, lines = desk
+    set_board([board_trade("CRWD", exp="2026-09-18")])
+
+    assert apc._auto_open_from_board() == 1, (
+        "a legacy position from a previous entry regime must not block the current cohort")
+    assert "CRWD" in opened_tickers(read_ledger)
+    assert any("predate" in l for l in lines), "the exclusion must be logged, not silent"
+
+
+def test_the_cap_still_binds_within_the_current_epoch(desk, read_ledger, monkeypatch):
+    """The other half. If the fix above simply stopped counting, the cap would be dead.
+
+    Same six positions on one expiration — but opened under the CURRENT rules this time. These
+    are cohort observations, they are correlated, and the cap must refuse.
+    """
+    monkeypatch.setattr(config, "MAX_OPEN_PER_EXPIRATION", 4)
+    monkeypatch.setattr(config, "MAX_NEW_OPENS_PER_RUN", 9)
+    monkeypatch.setattr(config, "MAX_NEW_OPENS_PER_DAY", 9)
+    for i in range(6):
+        ol.open_paper_trade(ticker=f"CUR{i}", short_strike=50.0 + i, long_strike=45.0 + i,
+                            expiration="2026-09-18", entry_credit_per_share=1.0, dte=45,
+                            fill_model="natural", source="test")
+    # deliberately NOT back-dated
+
+    set_board, lines = desk
+    set_board([board_trade("CRWD", exp="2026-09-18")])
+
+    assert apc._auto_open_from_board() == 0
+    assert any("already expire 2026-09-18" in l for l in lines)
+
+
 def test_a_different_expiration_is_still_free(desk, read_ledger, monkeypatch):
     """The cap steers entries apart; it must not become a general stop on trading."""
     monkeypatch.setattr(config, "MAX_OPEN_PER_EXPIRATION", 1)
