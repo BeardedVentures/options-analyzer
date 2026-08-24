@@ -569,6 +569,19 @@ MAX_NEW_OPENS_PER_RUN = 2        # was an undocumented VEGA_MAX_NEW_PER_RUN defa
 MAX_NEW_OPENS_PER_DAY = 3        # the batch that matters most: one day is ~one regime
 MAX_OPEN_PER_EXPIRATION = 4      # with 15 open max, forces at least four settlement dates
 
+# The date those three caps took effect. outcome_logger.cohort() reads it so a trade opened
+# under the caps cannot be pooled with one opened before them.
+#
+# This block says plainly that "changing them restarts the 30-trade count", but nothing in the
+# code enforced that: cohort() keyed on fill_model|gate_basis|close_logic, none of which move
+# when an ENTRY rule changes. The four closed trades in natural|natural|ravens_v1 were all
+# opened in the same minute on 2026-08-10 — precisely the clustering the caps now forbid — so
+# the first trade opened under the new rules would have joined them under an identical key and
+# the count would have read 5 of 30 as though nothing had changed. Entry rules select the
+# population; a change to them starts a new one, and the key has to say so.
+ENTRY_RULES_EPOCH = "2026-08-20"
+ENTRY_RULES_EPOCH_LABELS = ("pre_caps", "caps_v1")
+
 # Negative pop_gap = VEGA's own model rates the trade WORSE than the market prices it. Eleven
 # gates and none of them tested this; observed live on IBIT at -12.6pp while passing 11/11.
 # Decision 2026-08-14: HARD block for the auto-trader, ADVISORY for the manual desk. The robot

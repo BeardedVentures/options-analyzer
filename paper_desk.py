@@ -68,8 +68,38 @@ def _latest_candidates():
 
 
 def compute_stats(rows):
-    closed = [r for r in rows if r.get("status") == "closed"]
+    """Headline stats, scoped to the trades that are allowed to inform a base rate.
+
+    The returned `s` is computed from analysis_eligible() closes ONLY. This is the whole
+    point: the ledger holds four cohorts whose separation is total (mid-fill 13/18, natural
+    -fill 0/46), and outcome_logger.cohort's own docstring says pooling them "produces a
+    number that describes no population that ever existed." Every consumer of `s` — the
+    cockpit's stat cards, the confidence scorecard's n/30, and edge_tier's live-confirmation
+    gate — was reading that meaningless pooled number and presenting it as the result.
+
+    `closed` and `open_` are returned UNSCOPED, because the tables that render them are
+    inventory, not inference: every trade the desk took should still be visible. Only the
+    aggregate claims are restricted.
+
+    The pooled aggregate is kept, clearly named, under s["pooled"] — it is a fair description
+    of "everything this desk has ever done", just not of anything that can be validated.
+    """
     open_ = [r for r in rows if r.get("status") == "open"]
+    closed = [r for r in rows if r.get("status") == "closed"]
+    eligible_closed = [r for r in closed if ol.analysis_eligible(r)]
+
+    s = _aggregate(eligible_closed, open_)
+    s["pooled"] = _aggregate(closed, open_)
+    s["n_closed_pooled"] = len(closed)
+    s["n_closed_excluded"] = len(closed) - len(eligible_closed)
+    cohorts = sorted({ol.cohort(r) for r in eligible_closed})
+    s["cohort_keys"] = cohorts
+    s["cohort_label"] = cohorts[0] if len(cohorts) == 1 else (
+        f"{len(cohorts)} eligible cohorts" if cohorts else "no eligible cohort yet")
+    return s, closed, open_
+
+
+def _aggregate(closed, open_):
     s = {
         "n_open": len(open_), "n_closed": len(closed),
         "wins": 0, "losses": 0, "scratch": 0, "win_rate": None,
@@ -84,7 +114,7 @@ def compute_stats(rows):
         if isinstance(ml, (int, float)):
             s["open_risk"] += ml * c
     if not closed:
-        return s, closed, open_
+        return s
 
     net_per_c, wins_pl, losses_pl, pops = [], [], [], []
     for r in closed:
@@ -125,7 +155,7 @@ def compute_stats(rows):
         s["avg_implied_pop"] = statistics.mean(pops)
         if s["win_rate"] is not None:
             s["calibration_gap"] = s["win_rate"] - s["avg_implied_pop"]
-    return s, closed, open_
+    return s
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -229,10 +259,19 @@ def _print_report(rows):
     print("=" * 62)
     print("VEGA PAPER DESK — RESULTS")
     print("=" * 62)
+    target = getattr(config, "COHORT_TARGET_CLOSED_TRADES", 30)
     print(f"Open positions : {s['n_open']}   (capital at risk ${s['open_risk']:.0f})")
-    print(f"Closed trades  : {s['n_closed']}   (target: 30 before trusting the edge)")
-    if not closed:
-        print("\nNo closed trades yet — stats appear once you close some.")
+    print(f"Closed trades  : {s['n_closed']}   (target: {target} before trusting the edge)")
+    print(f"  cohort       : {s['cohort_label']}")
+    if s["n_closed_excluded"]:
+        p = s["pooled"]
+        pwr = f"{p['win_rate']:.1%}" if p["win_rate"] is not None else "—"
+        print(f"  excluded     : {s['n_closed_excluded']} closed trade(s) selected or filled on a "
+              f"basis the desk could not execute")
+        print(f"  (whole ledger, pooled and NOT comparable: {p['n_closed']} closed, {pwr}, "
+              f"${p['net_total']:+.0f})")
+    if not s["n_closed"]:
+        print("\nNo closed trades in an eligible cohort yet — stats appear once one closes.")
         print("=" * 62); return
     print(f"\nWin rate       : {s['win_rate']:.1%}  ({s['wins']}W / {s['losses']}L / {s['scratch']}S)")
     if s["avg_implied_pop"] is not None:

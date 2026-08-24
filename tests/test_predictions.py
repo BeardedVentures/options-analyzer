@@ -48,6 +48,24 @@ def test_a_claim_without_a_horizon_is_an_opinion_not_a_prediction():
     assert P.record("T1", "AAA", P.STRIKE_HOLDS, "x", 0.8, None) is None
 
 
+@pytest.mark.parametrize("bad", ["2026-13-18", "2026-02-30", "not-a-date", "18-12-2026", ""])
+def test_a_claim_that_can_never_come_due_is_refused_at_write_time(bad):
+    """`2026-13-18` lived in the live ledger from 2026-08-20 because nothing checked here.
+
+    It was written without complaint, reached the resolver, and could only be marked
+    unresolvable — a permanently dead row that three audits chased as a quote-feed glitch.
+    A resolution date that is not a date can never come due, so the claim can never be graded.
+    """
+    assert P.record("T1", "AAA", P.STRIKE_HOLDS, "x", 0.8, bad) is None
+    assert P.load() == []
+
+
+def test_a_valid_horizon_is_still_accepted():
+    """The guard above must reject bad dates WITHOUT rejecting good ones."""
+    assert P.record("T1", "AAA", P.STRIKE_HOLDS, "x", 0.8, "2026-12-18") is not None
+    assert len(P.load()) == 1
+
+
 def test_claims_are_deduplicated_per_trade_and_type():
     P.record("T1", "AAA", P.STRIKE_HOLDS, "x", 0.8, "2026-08-01")
     P.record("T1", "AAA", P.STRIKE_HOLDS, "x", 0.9, "2026-08-01")

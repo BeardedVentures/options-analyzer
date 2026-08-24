@@ -336,19 +336,46 @@ def gate_basis(record: Dict) -> str:
     return "natural" if opened >= GATE_BASIS_FIX_DATE else "mid"
 
 
+def entry_epoch(record: Dict) -> str:
+    """Which set of ENTRY rules was in force when this trade was opened.
+
+    The caps added 2026-08-20 (MAX_NEW_OPENS_PER_RUN / _PER_DAY / MAX_OPEN_PER_EXPIRATION)
+    changed which trades are allowed to exist, not merely how they are priced or closed. That
+    makes them part of the comparability key: a book that may not put five spreads on one
+    expiration is a different population from one that did, even if fill, gate and close logic
+    are identical. See the ENTRY DIVERSIFICATION block in config.py.
+
+    Derived from opened_at, never written to history — same contract as cohort().
+    """
+    pre, post = getattr(_config, "ENTRY_RULES_EPOCH_LABELS", ("pre_caps", "caps_v1"))
+    epoch = getattr(_config, "ENTRY_RULES_EPOCH", None)
+    if not epoch:
+        return post
+    opened = str(record.get("opened_at") or record.get("logged_at") or "")[:10]
+    if not opened:
+        return "epoch_unknown"
+    return post if opened >= epoch else pre
+
+
 def cohort(record: Dict) -> str:
     """The comparability key: trades sharing it were selected and closed under the same rules.
 
-    `fill_model | gate_basis | close_logic`. All three matter and the ledger proves it — split
-    by fill_model alone, mid-fill trades won 13 of 18 and natural-fill trades won 0 of 46,
-    because mid overstated the achievable credit by ~75% and a target set at 65% of an inflated
-    credit is a different trade from one set at 65% of a real one. Pooling across any of the
-    three produces a number that describes no population that ever existed.
+    `fill_model | gate_basis | close_logic | entry_epoch`. All four matter and the ledger
+    proves it for the first three — split by fill_model alone, mid-fill trades won 13 of 18
+    and natural-fill trades won 0 of 46, because mid overstated the achievable credit by ~75%
+    and a target set at 65% of an inflated credit is a different trade from one set at 65% of
+    a real one. Pooling across any of them produces a number that describes no population that
+    ever existed.
+
+    The fourth was added 2026-08-24. Without it the entry caps of 2026-08-20 were invisible to
+    the key, so the next trade to open would have been counted alongside four trades opened in
+    a single minute on 2026-08-10 — the exact clustering those caps exist to prevent.
 
     Derived, never written to history. The ledger is append-only and closed records are left
     exactly as they were written — see close_cohort.
     """
-    return f"{record.get('fill_model') or 'mid'}|{gate_basis(record)}|{close_cohort(record)}"
+    return (f"{record.get('fill_model') or 'mid'}|{gate_basis(record)}|"
+            f"{close_cohort(record)}|{entry_epoch(record)}")
 
 
 def analysis_eligible(record: Dict) -> bool:

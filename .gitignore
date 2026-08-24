@@ -53,3 +53,7 @@ VEGA_EntryTiming_AsBuilt_*.md
 VEGA_MVP_RUNBOOK.md
 VEGA_Project_Review_*.md
 VEGA_PAPER_DESK_README.md
+
+# Ledger snapshots taken before a repair. Data, not source — and they carry the same
+# contents as logs/, which is already ignored.
+backups/ledgers/

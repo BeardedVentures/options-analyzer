@@ -1249,6 +1249,73 @@ def _grade_shadow_book() -> Dict:
         return {}
 
 
+DEATHS_FILE = LOGS_DIR / "cycle_deaths.jsonl"
+CYCLE_LOG = BASE / "output" / "paper_desk" / "auto_paper_cycle.log"
+
+
+def _pid_alive(pid: int) -> Optional[bool]:
+    """True/False if determinable, None if we cannot tell. Never raises, never signals."""
+    if not pid or pid <= 0:
+        return None
+    try:
+        if os.name == "nt":
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            k32 = ctypes.windll.kernel32
+            h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            if not h:
+                return False                      # no such process (or no rights to it)
+            code = ctypes.c_ulong()
+            ok = k32.GetExitCodeProcess(h, ctypes.byref(code))
+            k32.CloseHandle(h)
+            return bool(ok) and code.value == STILL_ACTIVE
+        os.kill(int(pid), 0)
+        return True
+    except Exception:
+        return None
+
+
+def _record_cycle_death(prev_pid, lock_mtime: float, reason: str) -> None:
+    """Write down that the previous run was killed, and what it was doing when it happened.
+
+    Task Scheduler's own record of WHY a run ended lives in
+    Microsoft-Windows-TaskScheduler/Operational, which is disabled on this machine and needs an
+    elevated `wevtutil sl ... /e:true` to turn on. Until that happens nothing on the box can name
+    the killer — which is how 21 deaths since 2026-08-01 (11% of all runs, and 2 of 6 working
+    runs on 2026-08-24 alone) accumulated as an unexplained pile that three audits could only
+    count.
+
+    This does not replace that log. It captures what CAN be captured without admin rights: that
+    a run ended without releasing its lock, when, under which PID, and the tail of what it had
+    written — so the next death arrives with evidence attached instead of as a gap. A killed
+    process cannot run its own cleanup, so this is deliberately written by the NEXT run rather
+    than by an exit handler that a kill would skip.
+    """
+    try:
+        tail: List[str] = []
+        if CYCLE_LOG.exists():
+            with CYCLE_LOG.open(encoding="utf-8", errors="replace") as fh:
+                tail = [l.rstrip("\n") for l in fh][-12:]
+        rec = {
+            "detected_at": _now(),
+            "previous_pid": prev_pid,
+            "previous_started_or_last_wrote": datetime.fromtimestamp(lock_mtime).isoformat(),
+            "silent_for_seconds": round(time.time() - lock_mtime),
+            "reason": reason,
+            "last_log_lines": tail,
+        }
+        DEATHS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with DEATHS_FILE.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+        _log(f"PREVIOUS CYCLE DIED — pid {prev_pid} held the lock since "
+             f"{rec['previous_started_or_last_wrote']} and never released it ({reason}). "
+             f"Recorded to {DEATHS_FILE.name}; last line it wrote: "
+             f"{tail[-1][:120] if tail else '(nothing)'}")
+    except Exception as exc:                      # never let bookkeeping break the cycle
+        _log(f"Could not record previous cycle death: {exc}")
+
+
 def _acquire_lock(max_age_seconds: Optional[int] = None) -> bool:
     # Stale-lock threshold: a crashed/killed run must not wedge the cycle. Default 30 min -
     # comfortably above a normal run, below the inter-run gap and the 25-min task kill limit.
@@ -1259,11 +1326,26 @@ def _acquire_lock(max_age_seconds: Optional[int] = None) -> bool:
     if LOCK_FILE.exists():
         try:
             age = time.time() - LOCK_FILE.stat().st_mtime
-            if age < max_age_seconds:
+            mtime = LOCK_FILE.stat().st_mtime
+            try:
+                prev_pid = int((LOCK_FILE.read_text(encoding="utf-8") or "0").strip())
+            except Exception:
+                prev_pid = 0
+            alive = _pid_alive(prev_pid)
+
+            # A dead PID means the holder is gone, whatever the clock says. Waiting out the
+            # staleness window in that case skips a run for no reason AND throws away the one
+            # moment the death is still attributable.
+            if alive is False:
+                _record_cycle_death(prev_pid, mtime, "holder process no longer exists")
+            elif age >= max_age_seconds:
+                _record_cycle_death(prev_pid, mtime,
+                                    f"lock older than {max_age_seconds // 60} min"
+                                    + ("" if alive is None else "; holder still running"))
+            else:
                 _log("Another cycle appears active; skipping this run.")
                 return False
             LOCK_FILE.unlink(missing_ok=True)
-            _log("Removed stale automation lock.")
         except Exception:
             return False
     try:

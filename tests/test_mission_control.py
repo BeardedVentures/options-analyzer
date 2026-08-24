@@ -30,6 +30,59 @@ def _t(**over):
     return c
 
 
+@pytest.fixture
+def seeded_measurement_ledgers():
+    """Give the Track Record panels their own data instead of the live ledgers'.
+
+    These five tests used to render against logs/vega_predictions.jsonl and
+    logs/vega_counterfactuals.jsonl as they happened to exist on the developer's machine. They
+    passed because production data happened to contain enough resolved claims and matured
+    counterfactuals to populate the panels — not because anything asserted it. That is a test
+    that reports on the operator's disk, and it would have started failing the day the ledger
+    was rotated, cleaned, or read on another machine.
+
+    Seeds deliberately varied probabilities (0.55–0.92) so the forecast-spread ceiling has a
+    real standard deviation to report, and one sole-failed-gate counterfactual per named gate so
+    the value-of-information table has rows.
+    """
+    import json
+    import config
+    from analysis import counterfactuals as cf
+    from analysis import predictions as pred
+
+    claims = []
+    for i, (p, correct) in enumerate(
+            [(0.92, True), (0.85, True), (0.78, False), (0.66, True), (0.55, False)]):
+        claims.append({
+            "id": f"T{i}::strike_holds", "trade_id": f"T{i}", "ticker": f"TK{i}",
+            "claim_type": "strike_holds", "claim": "x", "probability": p,
+            "made_at": "2026-08-01T10:00:00", "resolves_on": "2026-08-10",
+            "context": {"short_strike": 100.0}, "status": "resolved",
+            "correct": correct, "resolved_at": "2026-08-10T16:00:00",
+            "resolution_note": "seeded",
+        })
+    pred.PREDICTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    pred.PREDICTIONS_FILE.write_text(
+        "\n".join(json.dumps(c) for c in claims) + "\n", encoding="utf-8")
+
+    gates = list(getattr(config, "REQUIRED_GATES", ()))
+    recs = []
+    for i in range(6):                      # qualified baseline, some touched
+        recs.append({"key": f"Q{i}", "ticker": f"Q{i}", "gates": {g: True for g in gates},
+                     "failed_gates": [], "qualified": True, "sole_failed_gate": None,
+                     "touched": i < 2, "horizon_complete": True, "horizon_days": 10})
+    for gate in gates:                      # one blocked cohort per gate
+        for i in range(6):
+            recs.append({"key": f"{gate}{i}", "ticker": f"B{i}",
+                         "gates": {g: (g != gate) for g in gates},
+                         "failed_gates": [gate], "qualified": False,
+                         "sole_failed_gate": gate, "touched": i < 4,
+                         "horizon_complete": True, "horizon_days": 10})
+    cf.LEDGER.parent.mkdir(parents=True, exist_ok=True)
+    cf.LEDGER.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    return claims, recs
+
+
 def _board(trades, **over):
     b = {"trades": trades, "source": "engine", "asof": "2026-08-05T16:00:00",
          "context": {"vix": {"current": 15.8, "label": "MODERATE", "trend": "falling"},
@@ -247,34 +300,34 @@ def test_view_today_publishes_context_for_the_drawers():
 # filtered claims to the BTC forecast cohort, so the 30 claims the TRADE engine has written were
 # invisible: made, stored, and shown nowhere. Counterfactuals had zero references.
 
-def test_track_grades_trade_claims_not_only_btc_ones():
+def test_track_grades_trade_claims_not_only_btc_ones(seeded_measurement_ledgers):
     txt = _txt(vega_app.view_track())
     assert "Forecast ledger" in txt
     assert "Resolution" in txt, "the column raw Brier cannot substitute for must be shown"
 
 
-def test_track_shows_whether_the_gates_earn_their_place():
+def test_track_shows_whether_the_gates_earn_their_place(seeded_measurement_ledgers):
     txt = _txt(vega_app.view_track())
     assert "Gate value" in txt
     for gate in ("earnings clear", "support shelter", "liquidity"):
         assert gate in txt, f"{gate} missing from the value-of-information table"
 
 
-def test_an_unresolved_ledger_says_so_rather_than_showing_an_empty_table():
+def test_an_unresolved_ledger_says_so_rather_than_showing_an_empty_table(seeded_measurement_ledgers):
     """An empty table under a live heading reads as 'measured, found nothing'. It is the
     opposite — nothing has come due yet, and the two are not the same claim."""
     txt = _txt(vega_app.view_track())
     assert "Nothing has resolved yet" in txt or "Correct" in txt
 
 
-def test_the_gate_panel_refuses_to_report_before_the_horizon_closes():
+def test_the_gate_panel_refuses_to_report_before_the_horizon_closes(seeded_measurement_ledgers):
     """Judging spreads that have not lived the full window would report that the gates avoid
     nothing, when what actually happened is that nothing has had time to happen."""
     txt = _txt(vega_app.view_track())
     assert "Not yet measurable" in txt or "Baseline" in txt
 
 
-def test_the_forecast_spread_ceiling_is_surfaced():
+def test_the_forecast_spread_ceiling_is_surfaced(seeded_measurement_ledgers):
     """Resolution is capped by how much the forecasts vary. A ledger whose claims all sit
     between 0.70 and 0.85 cannot demonstrate discrimination however right it is — that is a
     fact about the engine, not the sample size, and waiting will not fix it."""

@@ -41,6 +41,9 @@ try:
 except Exception:  # pragma: no cover
     _config = None
 
+import logging
+logger = logging.getLogger(__name__)
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 PREDICTIONS_FILE = BASE_DIR / "logs" / "vega_predictions.jsonl"
 
@@ -125,11 +128,25 @@ def record(trade_id: str, ticker: str, claim_type: str, claim: str,
     `probability` is what the engine believed at the time (0-1) — required for Brier scoring
     and the reason accuracy alone is not enough. `resolves_on` is the date the claim can first
     be marked; a claim with no resolution date is an opinion, not a prediction, and is
-    rejected.
+    rejected. A resolution date that is not a real DATE is rejected for the same reason: it can
+    never come due, so the claim can never be graded.
+
+    That last check is not hypothetical. `2026-13-18` sat in this ledger from 2026-08-20,
+    written through here without complaint and only caught downstream by the resolver, which
+    could do nothing with it but mark it unresolvable. Three audits then chased it as an
+    upstream quote-feed glitch. Refusing it at the point of writing turns a permanently
+    unreadable row into a logged rejection at the moment the caller can still be identified.
     """
     if not _cfg("PREDICTION_LEDGER_ENABLED", True):
         return None
     if not (trade_id and claim_type and resolves_on):
+        return None
+    try:
+        date.fromisoformat(str(resolves_on)[:10])
+    except (ValueError, TypeError):
+        logger.warning(
+            "[predictions] refusing claim %s on %s — resolution date %r is not a real date, so "
+            "the claim could never come due.", claim_type, ticker, resolves_on)
         return None
     pid = f"{trade_id}::{claim_type}"
     rows = _read()

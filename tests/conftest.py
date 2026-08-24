@@ -10,6 +10,52 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 
+# Every production ledger a test could reach, as (module, attribute, filename). Redirected for
+# EVERY test by _no_production_ledgers below.
+_PRODUCTION_LEDGERS = (
+    ("analysis.outcome_logger", "OUTCOMES_FILE", "vega_outcomes.jsonl"),
+    ("analysis.predictions", "PREDICTIONS_FILE", "vega_predictions.jsonl"),
+    ("analysis.shadow_book", "LEDGER", "vega_shadow_book.jsonl"),
+    ("analysis.counterfactuals", "LEDGER", "vega_counterfactuals.jsonl"),
+    ("clv_tracker", "OUTCOMES_FILE", "clv_outcomes.jsonl"),
+    ("auto_paper_cycle", "BOARD_FILE", "scan_latest.json"),
+    ("auto_paper_cycle", "LOCK_FILE", "auto_paper_cycle.lock"),
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_production_ledgers(tmp_path_factory, monkeypatch):
+    """Make this file's opening claim — "no real ledger" — structurally true.
+
+    It was not. `temp_ledger` covered outcome_logger.OUTCOMES_FILE and had to be requested by
+    name, so any test that reached a DIFFERENT ledger wrote to logs/ for real. The entry
+    diversification tests do exactly that: opening a paper trade calls
+    predictions.record_trade_predictions, which appends to logs/vega_predictions.jsonl. Running
+    the suite on 2026-08-20 put seven synthetic rows in the live ledger, and running it on
+    2026-08-24 put in seven more — tickers A, B, C and NEW, at strikes 100/95, from the
+    "ABCDEF" fixture loop.
+
+    Only one of the fourteen was ever noticed, because `2026-13-18` (the third letter of ABCDEF
+    at f"2026-1{i}-18") is not a real date and the grader flagged it unresolvable. Three prior
+    audits chased it as an upstream yfinance glitch on Citigroup. The other thirteen carry valid
+    dates, look exactly like real predictions, and would have been graded as such — quietly
+    contaminating the Brier score and calibration read that this ledger exists to produce.
+
+    Autouse, and covering every ledger rather than the one that broke: a test that has to
+    remember to ask for isolation is a test that will one day forget.
+    """
+    import importlib
+    d = tmp_path_factory.mktemp("ledgers")
+    for mod_name, attr, filename in _PRODUCTION_LEDGERS:
+        try:
+            mod = importlib.import_module(mod_name)
+        except Exception:
+            continue                      # module not importable in this env; nothing to leak
+        if hasattr(mod, attr):
+            monkeypatch.setattr(mod, attr, d / filename, raising=False)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _reset_process_caches():
     """Clear per-process caches between tests.

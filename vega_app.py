@@ -3019,6 +3019,15 @@ def score_composition(card):
 # Legacy paper-desk pieces (open/closed/portfolio/manual) — dark-themed
 # ─────────────────────────────────────────────────────────────────────────────
 def stat_cards(s):
+    """The headline numbers — the eligible cohort's, not the ledger's pooled average.
+
+    These cards used to read straight off every closed row in the ledger: 72 closed, 29% win
+    rate, −$3,352. That figure pools four cohorts the project's own contract says cannot be
+    compared, so the first number on the page described a population that never existed. The
+    honest one was already a function call away (see compute_stats). The pooled figure is
+    still shown, below and labelled, because "what has this desk ever done" is a fair
+    question — it is just not the answer to "does the edge hold."
+    """
     def c(l, v, sub=""):
         return f'<div class="card"><div class="lab">{l}</div><div class="val num">{v}</div><div class="s">{sub}</div></div>'
     wr = f'{s["win_rate"]*100:.0f}%' if s["win_rate"] is not None else "—"
@@ -3026,10 +3035,25 @@ def stat_cards(s):
     exp = f'${s["expectancy_per_contract"]:+.2f}' if s["expectancy_per_contract"] is not None else "—"
     pf = ("∞" if s["profit_factor"] == float("inf") else f'{s["profit_factor"]:.2f}') if s["profit_factor"] is not None else "—"
     cal = f'{s["calibration_gap"]*100:+.0f}pp' if s["calibration_gap"] is not None else "—"
-    return ('<div class="cards">'
-            + c("Closed", s["n_closed"], "of 30") + c("Win rate", wr, f'{s["wins"]}W/{s["losses"]}L/{s["scratch"]}S')
-            + c("Net P/L", net, "after RH fees") + c("Expectancy", exp, "net/ct/trade")
-            + c("Profit factor", pf, "&gt;1 winning") + c("Calibration", cal, "real−POP") + '</div>')
+    target = getattr(config, "COHORT_TARGET_CLOSED_TRADES", 30)
+    cards = ('<div class="cards">'
+             + c("Closed", s["n_closed"], f'of {target} · eligible only')
+             + c("Win rate", wr, f'{s["wins"]}W/{s["losses"]}L/{s["scratch"]}S')
+             + c("Net P/L", net, "after RH fees") + c("Expectancy", exp, "net/ct/trade")
+             + c("Profit factor", pf, "&gt;1 winning") + c("Calibration", cal, "real−POP") + '</div>')
+
+    p = s.get("pooled") or {}
+    excluded = s.get("n_closed_excluded") or 0
+    pwr = f'{p["win_rate"]*100:.0f}%' if p.get("win_rate") is not None else "—"
+    pnet = f'${p["net_total"]:+.0f}' if p.get("n_closed") else "—"
+    note = (f'<div class="dim" style="margin:-4px 0 14px;font-size:12px;line-height:1.5">'
+            f'Cards above count only trades that may inform a base rate '
+            f'(<b>{esc(s.get("cohort_label") or "—")}</b>). '
+            f'<b>{excluded}</b> other closed trade(s) are excluded — they were selected or filled '
+            f'on a basis the desk could not execute, so their outcomes measure the leak, not the '
+            f'strategy. Whole ledger, all cohorts pooled and NOT comparable: '
+            f'<b>{p.get("n_closed", 0)}</b> closed · {pwr} · {pnet}.</div>')
+    return cards + note
 
 
 def portfolio_strip(open_):

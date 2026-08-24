@@ -126,9 +126,28 @@ def test_close_logic_is_part_of_the_cohort_key():
     key. The frozen strategy label says this cohort holds to stop or expiry."""
     from analysis import outcome_logger as ol
     key = ol.cohort({"fill_model": "natural", "gate_basis": "natural",
-                     "close_logic": "ravens_v1"})
-    assert key.count("|") == 2, "cohort key must be fill|gate|close"
+                     "close_logic": "ravens_v1", "opened_at": "2026-08-10T09:38:00"})
+    assert key.count("|") == 3, "cohort key must be fill|gate|close|entry_epoch"
     assert "hold_to_stop_or_expiry" in config.COHORT_STRATEGY_LABEL
+
+
+def test_entry_rules_are_part_of_the_cohort_key():
+    """Same argument as close_logic, applied to the caps added 2026-08-20.
+
+    Those caps decide which trades are ALLOWED TO EXIST, so they select the population — a book
+    that may not put five spreads on one expiration is not the same population as one that did.
+    Before this was in the key, the first trade opened under the caps would have been counted
+    alongside the four opened in a single minute on 2026-08-10, and the cohort would have read
+    5 of 30 as though the rules had never changed.
+    """
+    from analysis import outcome_logger as ol
+    base = {"fill_model": "natural", "gate_basis": "natural", "close_logic": "ravens_v1"}
+    before = ol.cohort({**base, "opened_at": "2026-08-10T09:38:00"})
+    after = ol.cohort({**base, "opened_at": "2026-08-25T09:31:00"})
+    assert before != after, (
+        "a trade opened under the entry caps must not share a cohort key with one opened "
+        "before them")
+    assert config.ENTRY_RULES_EPOCH >= config.COHORT_FROZEN_AT
 
 
 def test_the_pop_gap_gate_is_hard_for_the_robot_and_declared():
