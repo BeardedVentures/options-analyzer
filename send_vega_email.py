@@ -19,7 +19,7 @@ ENVIRONMENT:
     EMAIL_SMTP_HOST   (default: smtp.gmail.com)
     EMAIL_SMTP_PORT   (default: 587)
     EMAIL_USER        (default: beardedventurestx@gmail.com)
-    EMAIL_PASSWORD    (your Gmail App Password — dyeq pfin vufl qajh)
+    EMAIL_PASSWORD    (your Gmail App Password — never write it here; set it in .env)
     EMAIL_RECIPIENTS  (default: beardedventurestx@gmail.com)
     JARVIS_HOST       (default: http://192.168.0.222:8000)
 
