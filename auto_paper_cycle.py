@@ -1250,6 +1250,43 @@ def _record_direction_forecasts() -> Dict:
         return {}
 
 
+def _record_counterfactuals() -> Dict:
+    """Re-resolve every candidate the scan snapshots hold, once a day near the close.
+
+    The cycle has been producing the raw material all along — `vega_candidates.py --no-open`
+    runs every hour precisely so every candidate's full gate results are recorded, including
+    the rejected ones — and then nothing ever called the recorder. The ledger's last write was
+    2026-08-10; the cockpit's Gate value panel has been telling the operator to run
+    `python analysis/counterfactuals.py` by hand ever since. Two weeks of snapshots sat
+    unresolved while the only measurement of whether the eleven gates earn their place went
+    stale.
+
+    DAILY, not hourly, and deliberately. build() fetches 6 months of price history per ticker;
+    at ~56 tickers that is the most expensive thing in the cycle, and it would buy nothing —
+    a counterfactual resolves against DAILY bars, so re-resolving at 09:35 and again at 10:35
+    produces the same answer twice. Same reasoning and the same gate hour as
+    _record_direction_forecasts.
+
+    build() merges rather than rewrites, so a missed day is caught up on the next run and a
+    pruned snapshot keeps its last resolution instead of vanishing.
+    """
+    if not getattr(config, "COUNTERFACTUAL_RECORD_ENABLED", True):
+        return {}
+    after = int(os.getenv("VEGA_COUNTERFACTUAL_AFTER_HOUR",
+                          str(getattr(config, "COUNTERFACTUAL_RECORD_AFTER_HOUR", 14))))
+    if datetime.now().hour < after:
+        return {}
+    try:
+        from analysis import counterfactuals as cf
+        n = cf.build()
+        _log(f"COUNTERFACTUALS resolved={n} spreads into {cf.LEDGER.name}")
+        return {"resolved": n}
+    except Exception as e:
+        # Advisory, like every other measurement panel: it must never take the cycle down.
+        _log(f"Counterfactual recording failed: {e}")
+        return {}
+
+
 def _grade_shadow_book() -> Dict:
     """Grade every trade the BOARD recommended, including the ones this desk declined to open.
 
@@ -1460,6 +1497,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         _record_btc_forecast()
         _resolve_predictions()
         _record_direction_forecasts()
+        _record_counterfactuals()
         _grade_shadow_book()
 
         _run([sys.executable, "paper_desk.py", "report"])

@@ -1067,6 +1067,15 @@ PREDICTION_TIMING_HORIZON_DAYS = 14 # how long an EARLY timing claim gets to pro
 # a fortnight, and a null result is a perfectly good result.
 DIRECTION_FORECAST_ENABLED = True
 DIRECTION_RECORD_AFTER_HOUR = 14   # local hour; claims anchor near the close, not at the open
+
+# Counterfactual recording — the only measurement of whether the eleven gates earn their place.
+# The hourly cycle has always produced the snapshots (vega_candidates.py --no-open exists for
+# exactly this) but nothing ever called the recorder, so the ledger's last write was 2026-08-10
+# and the cockpit told the operator to run it by hand. Wired into the cycle 2026-08-24.
+# DAILY, on the same gate hour as the direction forecast: a counterfactual resolves against
+# daily bars, so re-resolving hourly costs ~56 price-history fetches to produce the same answer.
+COUNTERFACTUAL_RECORD_ENABLED = True
+COUNTERFACTUAL_RECORD_AFTER_HOUR = 14
 DIRECTION_MAX_TILT_SIGMAS = 0.25   # hard cap on how far the signal may move the mean
 # Record a climatology twin (same band, mean pinned at zero) beside every live claim. Without it
 # the signal gets credited with the base rate and there is nothing to charge it against.
