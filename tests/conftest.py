@@ -20,6 +20,12 @@ _PRODUCTION_LEDGERS = (
     ("clv_tracker", "OUTCOMES_FILE", "clv_outcomes.jsonl"),
     ("auto_paper_cycle", "BOARD_FILE", "scan_latest.json"),
     ("auto_paper_cycle", "LOCK_FILE", "auto_paper_cycle.lock"),
+    # Not a trade ledger, and that is exactly why it was missed: it lives in data/ rather than
+    # logs/, so neither this list nor the "must not point inside logs/" assertion covered it.
+    # It is still a production record the system reasons from -- it is what a later calibration
+    # run asks whether a bad prediction came from bad reasoning or from a chain that was mostly
+    # absent -- and any test reaching fetcher.get_options_chain writes to it.
+    ("data.data_quality_log", "LOG_FILE", "data_quality_log.json"),
 )
 
 

@@ -120,11 +120,39 @@ def test_latest_scan_reports_the_worst_ticker_not_the_average(temp_log):
     assert s["sources"] == {"polygon": 2, "yfinance": 1}
 
 
-def test_latest_scan_ignores_the_previous_scan(temp_log):
+def test_latest_scan_ignores_an_earlier_cycle(temp_log):
+    """Yesterday's disaster must not pollute today's read."""
     dq.record("GDX", "yfinance", 100, 5, scan_id="old")     # 0.05, yesterday's disaster
+    rows = json.loads(temp_log.read_text(encoding="utf-8"))
+    rows[0]["timestamp"] = "2026-08-01T09:00:00"            # genuinely a previous cycle
+    temp_log.write_text(json.dumps(rows), encoding="utf-8")
     dq.record("SPY", "polygon", 100, 95, scan_id="new")
     s = dq.latest_scan(floor=0.30)
     assert s["count"] == 1 and s["worst_ticker"] == "SPY" and s["below_floor"] == 0
+
+
+def test_latest_scan_covers_the_whole_cycle_not_just_the_last_batch(temp_log):
+    """The regression that made the tile lie. One cycle writes several scan_ids: the wide
+    engine scan first, then a mark loop over only the tickers already holding positions. The
+    mark loop writes last and reads healthy by construction, so summarising the newest scan_id
+    reported a clean board while the same cycle had skipped tickers outright."""
+    dq.record("JNJ", "yfinance", 214, 85, scan_id="engine")   # 0.40 — skipped
+    dq.record("ABBV", "yfinance", 203, 83, scan_id="engine")  # 0.41 — skipped
+    dq.record("SPY", "yfinance", 200, 190, scan_id="marks")   # the mark loop, healthy
+    s = dq.latest_scan(floor=0.50)
+    assert s["below_floor"] == 2, "the engine scan's skipped tickers must still be counted"
+    assert s["below_floor_tickers"] == ["ABBV", "JNJ"]
+    assert s["worst_ticker"] == "JNJ"
+    assert set(s["scan_ids"]) == {"engine", "marks"}
+
+
+def test_a_ticker_is_represented_by_its_worst_reading_in_the_cycle(temp_log):
+    """A ticker is recorded once per DTE window. The floor asks whether it was skipped, so the
+    worst reading is the one that answers the question."""
+    dq.record("AMGN", "yfinance", 48, 16, scan_id="engine")   # 0.33
+    dq.record("AMGN", "yfinance", 331, 300, scan_id="engine")  # 0.91
+    s = dq.latest_scan(floor=0.50)
+    assert s["count"] == 1 and s["below_floor"] == 1 and s["worst_ratio"] == 0.3333
 
 
 def test_latest_scan_on_an_empty_log_is_empty_not_an_exception(temp_log):
@@ -198,3 +226,123 @@ def test_skew_scoring_stays_off_until_quality_is_proven():
     a leftover — assert it so re-enabling has to be a decision someone makes on purpose."""
     assert config.SKEW_SCORING_ENABLED is False
     assert config.CHAIN_QUALITY_MIN_RATIO > 0
+
+
+# ── Surviving a concurrent writer ─────────────────────────────────────────────────────────────
+#
+# On 2026-08-25 this log went from 886 KB to 10 KB in one cycle, and it was the fifth such wipe
+# since 2026-08-13. Two failures compounded. `record` wrote through a temp path with a FIXED
+# name, so two processes recording at once truncated and flushed over each other and left a
+# complete JSON array with a longer document's tail attached ("Extra data: line N column 2").
+# `_read_all` then caught the decode error, returned [], and the caller appended its handful of
+# new rows to that empty list and wrote it back — destroying every reading ever taken. The file
+# is gitignored and unbacked, so none of it was recoverable.
+#
+# These tests pin both halves: the corrupt shape must be salvaged rather than discarded, and
+# two writers must not be able to produce that shape in the first place.
+
+def _corrupt_like_the_real_incident(path, rows):
+    """Write the exact byte pattern the incident produced: a valid array, then a longer
+    document's tail. Reproduced from the logged error rather than invented."""
+    path.write_text(json.dumps(rows, indent=2) + '\n  {"ticker": "LEFTOVER"}\n]',
+                    encoding="utf-8")
+
+
+def test_a_corrupt_log_is_salvaged_not_silently_emptied(temp_log):
+    _corrupt_like_the_real_incident(temp_log, [{"ticker": f"T{i}", "usable_ratio": 0.9}
+                                               for i in range(40)])
+    assert len(dq._read_all()) == 40, "the leading array is intact and must be recovered"
+
+
+def test_recording_onto_a_corrupt_log_keeps_the_history(temp_log):
+    """The actual data-loss path: append after a failed read. This returned a 1-row file."""
+    _corrupt_like_the_real_incident(temp_log, [{"ticker": f"T{i}", "usable_ratio": 0.9}
+                                               for i in range(40)])
+    dq.record("NEW", "yfinance", 100, 80)
+    assert len(json.loads(temp_log.read_text(encoding="utf-8"))) == 41
+
+
+def test_an_unsalvageable_log_is_quarantined_rather_than_overwritten(temp_log, monkeypatch):
+    temp_log.write_text("this is not json at all", encoding="utf-8")
+    assert dq._read_all() == []
+    dq.record("NEW", "yfinance", 100, 80)
+    saved = list(temp_log.parent.glob("data_quality_log.json.corrupt-*"))
+    assert len(saved) == 1, "the unreadable bytes must be kept for inspection"
+    assert saved[0].read_text(encoding="utf-8") == "this is not json at all"
+
+
+def test_the_temp_path_is_unique_per_process(temp_log, monkeypatch):
+    """A shared temp name is the mechanism behind every wipe above. Two processes must never
+    be able to select the same one."""
+    seen = []
+    real_open = dq.open if hasattr(dq, "open") else open
+
+    def spy(path, *a, **k):
+        if str(path).endswith(".tmp"):
+            seen.append(str(path))
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr("builtins.open", spy)
+    monkeypatch.setattr(dq.os, "getpid", lambda: 1111)
+    dq.record("A", "yfinance", 10, 9)
+    monkeypatch.setattr(dq.os, "getpid", lambda: 2222)
+    dq.record("B", "yfinance", 10, 9)
+    assert len(set(seen)) == 2, f"both writers used the same temp path: {seen}"
+
+
+def test_a_locked_destination_is_retried_not_dropped(temp_log, monkeypatch):
+    """Windows refuses os.replace while any other process holds the destination open — even
+    for reading. Those collisions were silently losing readings."""
+    calls = {"n": 0}
+    real_replace = dq.os.replace
+
+    def flaky(src, dst):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise OSError(32, "The process cannot access the file")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(dq.os, "replace", flaky)
+    dq.record("RETRY", "yfinance", 10, 9)
+    assert calls["n"] == 3
+    assert json.loads(temp_log.read_text(encoding="utf-8"))[-1]["ticker"] == "RETRY"
+
+
+def test_no_temp_files_are_left_behind(temp_log):
+    dq.record("A", "yfinance", 10, 9)
+    assert not list(temp_log.parent.glob("*.tmp"))
+
+
+def test_two_writers_cannot_hold_the_lock_at_once(temp_log):
+    """Per-process temp paths stopped the corruption; only the lock stops the LOSSES. A
+    five-writer stress run still dropped about a fifth of its readings to WinError 5 before
+    this existed, because os.replace fails while another process holds the destination open."""
+    with dq._exclusive():
+        with pytest.raises(TimeoutError):
+            with dq._exclusive(timeout=0.2):
+                pass
+
+
+def test_the_lock_is_released_even_when_the_write_raises(temp_log, monkeypatch):
+    monkeypatch.setattr(dq, "_append_locked", lambda row: (_ for _ in ()).throw(IOError("boom")))
+    dq.record("A", "yfinance", 10, 9)          # must not propagate
+    with dq._exclusive(timeout=0.2):           # and must not still be held
+        pass
+
+
+def test_a_stale_lock_is_broken_not_waited_on(temp_log, monkeypatch):
+    """A killed scan must not wedge instrumentation for every run that follows."""
+    lock = str(temp_log) + ".lock"
+    open(lock, "w").close()
+    monkeypatch.setattr(dq, "LOCK_STALE_SECONDS", -1)   # i.e. already stale
+    with dq._exclusive(timeout=0.5):
+        pass
+    dq.record("A", "yfinance", 10, 9)
+    assert len(dq._read_all()) == 1
+
+
+def test_a_held_lock_does_not_lose_the_reading_it_blocks(temp_log):
+    """The lock must serialise, not discard: a writer that waits still lands its row."""
+    dq.record("FIRST", "yfinance", 10, 9)
+    dq.record("SECOND", "yfinance", 10, 9)
+    assert [r["ticker"] for r in dq._read_all()] == ["FIRST", "SECOND"]
