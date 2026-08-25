@@ -230,8 +230,15 @@ CHAIN_QUALITY_GATE_ENABLED = True # Below the floor, return an empty chain inste
 # discarded during market hours); scoring a ticker off a third of its chain is how a gate ends
 # up evaluating a name it cannot see. Set to where it should be for good data, accepting fewer
 # names in the interim.
-CHAIN_QUALITY_MIN_RATIO = 0.50    # Floor. Under 30% quotable, skip the ticker for this scan.
+CHAIN_QUALITY_MIN_RATIO = 0.50    # Floor. Under 50% quotable, skip the ticker for this scan.
 CHAIN_QUALITY_GOOD_RATIO = 0.70   # At or above this the chain reads green in the cockpit tile.
+# How wide a window counts as "the last scan" when the cockpit summarises chain quality.
+# scan_id is per PROCESS, and one cycle runs several — the engine scan, vega_candidates, then a
+# mark loop over only the tickers already holding positions. Summarising the newest scan_id
+# alone therefore described the mark loop, which is healthy by construction, and the tile read
+# green on 2026-08-25 while that cycle skipped ten tickers. 30 minutes covers one cycle
+# (they run 11-16 min) without reaching the previous hour's.
+CHAIN_QUALITY_SCAN_WINDOW_MIN = 30
 
 # ─────────────────────────────────────────────
 # GATE ENFORCEMENT CONTRACT

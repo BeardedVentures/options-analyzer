@@ -40,20 +40,45 @@ def _hdr(t):
 
 
 def _age(ts):
+    """Age of a timestamp, whether or not it carries a UTC offset.
+
+    scan_latest.json is written with an Eastern offset while every other artefact read here is
+    naive local time. Subtracting an aware datetime from a naive datetime.now() raises
+    TypeError, which this caught and turned into None — and the engine-scan caller rendered
+    None as the literal sentinel 99. So the board reported "last engine scan 99.0h ago" on
+    every single run, in amber, while the scan was in fact minutes old, and the number was
+    indistinguishable from a genuine four-day-old board. Normalise to local wall time instead.
+    """
     try:
-        return datetime.now() - datetime.fromisoformat(str(ts))
-    except Exception:
+        t = datetime.fromisoformat(str(ts))
+    except (TypeError, ValueError):
         return None
+    if t.tzinfo is not None:
+        t = t.astimezone().replace(tzinfo=None)
+    return datetime.now() - t
+
+
+def _age_hours(ts):
+    """Hours since `ts`, or None if it cannot be read. Never a sentinel: a magic number here
+    is a number the reader will believe."""
+    age = _age(ts)
+    return age.total_seconds() / 3600 if age is not None else None
+
+
+def _freshness(ts, good=4.0, warn=24.0):
+    """Render an age the same way everywhere, and say so plainly when it is unknown."""
+    h = _age_hours(ts)
+    if h is None:
+        return _c("age unreadable", R)
+    return _c(f"{h:.1f}h ago", G if h < good else (Y if h < warn else R))
 
 
 def health():
     _hdr("1 · MACHINERY")
     cands = sorted(glob.glob(str(BASE / "output" / "candidates" / "candidates_*.json")))
     if cands:
-        age = _age(datetime.fromtimestamp(Path(cands[-1]).stat().st_mtime).isoformat())
-        h = age.total_seconds() / 3600 if age else 99
         print(f"  last candidate scan   {Path(cands[-1]).name}  "
-              f"{_c(f'{h:.1f}h ago', G if h < 4 else (Y if h < 24 else R))}")
+              f"{_freshness(datetime.fromtimestamp(Path(cands[-1]).stat().st_mtime).isoformat())}")
     else:
         print(f"  last candidate scan   {_c('NONE — the cycle has never produced candidates', R)}")
 
@@ -61,10 +86,8 @@ def health():
     if scan.exists():
         try:
             d = json.loads(scan.read_text(encoding="utf-8"))
-            age = _age(d.get("timestamp"))
-            h = age.total_seconds() / 3600 if age else 99
             print(f"  last engine scan      {len(d.get('qualified_trades') or [])} qualified  "
-                  f"{_c(f'{h:.1f}h ago', G if h < 24 else Y)}")
+                  f"{_freshness(d.get('timestamp'))}")
         except Exception:
             print(f"  last engine scan      {_c('unreadable', R)}")
 
@@ -114,9 +137,14 @@ def data_quality():
     print(f"  last scan             {s['count']} tickers · "
           f"{_c(f'{hrs:.1f}h ago', G if hrs < 4 else Y) if hrs is not None else _c('age unknown', D)}")
     print(f"  worst chain           {_c(f'{worst:.0%}', col)} quotable  ({s['worst_ticker']})")
+    skipped = s.get("below_floor_tickers") or []
     print(f"  below the {floor:.0%} floor    "
           f"{_c(str(s['below_floor']), R if s['below_floor'] else G)} "
-          f"{'ticker skipped' if s['below_floor'] == 1 else 'tickers skipped'}")
+          f"{'ticker skipped' if s['below_floor'] == 1 else 'tickers skipped'}"
+          # Name them. A bare count invites the reading that the board simply found nothing
+          # today, when the truth is that these names were never looked at.
+          + (f"  {_c(', '.join(skipped[:10]) + ('...' if len(skipped) > 10 else ''), D)}"
+             if skipped else ""))
     if s["sources"]:
         print(f"  sources               "
               f"{', '.join(f'{k} {v}' for k, v in sorted(s['sources'].items()))}")
@@ -303,12 +331,103 @@ def learning():
     need = getattr(config, "MUNINN_MIN_COMPARABLE", 5)
     print(f"\n  memory        {snaps} stress snapshots recorded "
           f"({need} comparable needed before Muninn can speak)")
+    # One alert is appended per position PER CYCLE, so a position that has been flagged all
+    # week contributes dozens of identical rows. Showing the raw tail meant the same ARKK
+    # position printed five times and the nine other positions needing a decision printed
+    # none. Collapse to the latest alert per (position, recommendation).
     alerts = [(r.get("id"), a) for r in rows for a in (r.get("raven_alerts") or [])]
-    if alerts:
-        print(f"\n  {_c('RAVEN ALERTS NEEDING YOUR DECISION:', Y)}")
-        for tid, a in alerts[-5:]:
-            print(f"    {a.get('recommendation')} · {tid}")
+    latest = {}
+    for tid, a in alerts:
+        key = (tid, a.get("recommendation"))
+        prev = latest.get(key)
+        if prev is None or str(a.get("at") or "") >= str(prev[0].get("at") or ""):
+            latest[key] = (a, latest.get(key, (None, 0))[1] + 1)
+        else:
+            latest[key] = (prev[0], prev[1] + 1)
+    if latest:
+        standing = sorted(latest.items(), key=lambda kv: str(kv[1][0].get("at") or ""),
+                          reverse=True)
+        print(f"\n  {_c('RAVEN ALERTS NEEDING YOUR DECISION:', Y)}"
+              f"  {_c(f'{len(standing)} standing, {len(alerts)} raw', D)}")
+        for (tid, rec), (a, n) in standing[:5]:
+            since = str(a.get("at") or "")[:16].replace("T", " ")
+            repeat = _c(f"  x{n} since {since}", D) if n > 1 else ""
+            print(f"    {rec} · {tid}{repeat}")
             print(f"      {a.get('plain_english', '')[:110]}")
+        if len(standing) > 5:
+            print(f"    {_c(f'... and {len(standing) - 5} more', D)}")
+
+
+def why_empty():
+    """Where the board lost every candidate, read off the scan's own diagnostics.
+
+    The engine already records this -- select_bull_put_pair counts each reason it discards a
+    leg, and each enumerated pair carries the floor that killed it -- and it has been writing
+    it into scan_latest.json all along. Nothing read it back. Diagnosing an eighteen-day entry
+    drought on 2026-08-25 meant re-running pair selection by hand against live chains to
+    recover numbers that were already sitting on disk.
+
+    An empty board is the system's most common output and its least self-explanatory. It looks
+    identical whether the gates are working correctly in a low-premium regime or a data feed
+    has quietly stopped returning quotes, and the difference is the whole question.
+    """
+    _hdr("7 - WHY THE BOARD IS EMPTY")
+    scan = BASE / "logs" / "scan_latest.json"
+    if not scan.exists():
+        print("  " + _c("no scan on disk yet", D))
+        return
+    try:
+        d = json.loads(scan.read_text(encoding="utf-8"))
+    except Exception as e:
+        print("  " + _c("scan unreadable: %s" % e, R))
+        return
+
+    qualified = d.get("qualified_trades") or []
+    rejected = d.get("rejected_trades") or []
+    if qualified:
+        print("  " + _c("%d qualified" % len(qualified), G) + " - the board is not empty.")
+
+    by_category, legs, pairs = {}, {}, {}
+    enumerated = 0
+    for t in rejected:
+        cat = t.get("category") or "UNKNOWN"
+        by_category[cat] = by_category.get(cat, 0) + 1
+        pd = t.get("pair_selection_diagnostics") or {}
+        for reason, n in (pd.get("top_reasons") or []):
+            legs[reason] = legs.get(reason, 0) + n
+        for e in (pd.get("enumerated") or []):
+            enumerated += 1
+            if e.get("dropped_for"):
+                pairs[e["dropped_for"]] = pairs.get(e["dropped_for"], 0) + 1
+
+    print("  %d tickers rejected, by stage:" % len(rejected))
+    for cat, n in sorted(by_category.items(), key=lambda kv: -kv[1])[:6]:
+        print("      %4d  %s" % (n, cat))
+
+    if legs:
+        print("\n  Legs discarded before any spread could form:")
+        for reason, n in sorted(legs.items(), key=lambda kv: -kv[1])[:6]:
+            print("      %4d  %s" % (n, reason))
+
+    if enumerated:
+        survived = enumerated - sum(pairs.values())
+        col = G if survived else R
+        print("\n  %d spreads did form; %s"
+              % (enumerated, _c("%d survived the credit floors" % survived, col)))
+        for reason, n in sorted(pairs.items(), key=lambda kv: -kv[1])[:6]:
+            print("      %4d  %s" % (n, reason))
+        if not survived:
+            # The distinction that matters. Legs dying is usually thin data; every FORMED
+            # spread dying on a credit floor is a statement about premium, and no amount of
+            # data repair changes it.
+            print("\n  " + _c("Every spread that formed died on a credit floor.", Y))
+            print("  That is a premium problem, not a data problem - the chains were good")
+            print("  enough to price a spread, and the spread was not worth selling here.")
+    elif legs:
+        print("\n  " + _c("No spread ever formed.", Y))
+        print("  The legs are filtered out before pairing, which points at the liquidity")
+        print("  and quote floors or the strike band, not at premium.")
+    print()
 
 
 def next_steps():
@@ -340,4 +459,5 @@ if __name__ == "__main__":
     btc()
     record()
     learning()
+    why_empty()
     next_steps()
