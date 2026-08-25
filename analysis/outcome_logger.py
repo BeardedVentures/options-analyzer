@@ -18,6 +18,7 @@ This module is dependency-free (stdlib only) and never raises into the scan path
 import json
 import logging
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -50,29 +51,75 @@ def _same_strike(a, b) -> bool:
 
 
 def _read_all() -> List[Dict]:
+    """Every record in the ledger. An unreadable line is LOUD, never quietly dropped.
+
+    This used to `continue` past any line it could not parse. Every write here is a full
+    rewrite of the file from what this returns, so a silently skipped line is a deleted trade,
+    and the only symptom would be a position that stopped existing. If a line is damaged the
+    right outcome is a noisy log and a preserved copy, not a smaller ledger.
+    """
     if not OUTCOMES_FILE.exists():
         return []
-    rows = []
-    for line in OUTCOMES_FILE.read_text(encoding="utf-8").splitlines():
+    rows, damaged = [], []
+    for n, line in enumerate(OUTCOMES_FILE.read_text(encoding="utf-8").splitlines(), 1):
         line = line.strip()
         if not line:
             continue
         try:
             rows.append(json.loads(line))
-        except Exception:
-            continue
+        except Exception as e:
+            damaged.append((n, line, e))
+    if damaged:
+        stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+        salvage = Path(str(OUTCOMES_FILE) + ".damaged-" + stamp)
+        try:
+            salvage.write_text("\n".join(l for _, l, _ in damaged), encoding="utf-8")
+        except Exception:                            # pragma: no cover - defensive
+            salvage = None
+        logger.error("[outcome_logger] %d unreadable line(s) in %s (first: line %d, %s). They "
+                     "are NOT among the %d records returned, so the next write will drop them "
+                     "from the ledger. Copy saved to %s",
+                     len(damaged), OUTCOMES_FILE, damaged[0][0], damaged[0][2],
+                     len(rows), salvage or "<could not save>")
     return rows
 
 
 def _write_all(rows: List[Dict]) -> None:
     OUTCOMES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic write — serialize to a temp file then os.replace so an interrupted write can
-    # never truncate the ledger (the failure mode that corrupted scan_log.json).
-    tmp = OUTCOMES_FILE.with_suffix(".jsonl.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r) + "\n")
-    os.replace(tmp, OUTCOMES_FILE)
+    # Atomic write: serialise to a temp file then os.replace, so an interrupted write can never
+    # truncate the ledger (the failure mode that corrupted scan_log.json).
+    #
+    # The temp path is PER PROCESS. A shared one is not merely untidy: two writers open the same
+    # path with "w", the shorter truncates and writes while the longer still holds a handle at a
+    # high offset, and its flush lands past the end, leaving a file that is valid up to a point
+    # and garbage after. That is exactly what destroyed data/data_quality_log.json five times
+    # between 2026-08-13 and 2026-08-25. Nothing about this ledger made it immune; it was spared
+    # only because the cycle lock happens to serialise today's writers, which is a property of
+    # the scheduler and not of this function.
+    tmp = OUTCOMES_FILE.with_suffix(".jsonl.%d.tmp" % os.getpid())
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps(r) + "\n")
+        _replace_with_retry(tmp, OUTCOMES_FILE)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:                              # pragma: no cover - defensive
+            pass
+
+
+def _replace_with_retry(src: Path, dst: Path, attempts: int = 5) -> None:
+    """os.replace, retried. Windows refuses it outright while any other process holds the
+    destination open, even for reading, and a cockpit render mid-cycle is enough."""
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except OSError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 def _round_trip_cost_per_contract() -> float:

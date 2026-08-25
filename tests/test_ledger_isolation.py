@@ -50,10 +50,12 @@ def test_every_production_ledger_is_redirected_during_tests():
             continue
         checked += 1
         target = Path(str(getattr(mod, attr))).resolve()
-        assert REPO / "logs" not in target.parents, (
-            f"{mod_name}.{attr} points at {target} — a test writing through it would hit the "
-            f"real ledger.")
-    assert checked >= 4, f"only {checked} ledgers checked; the isolation list has gone stale"
+        # The whole repo, not just logs/. The chain-quality log lives in data/, so a check
+        # scoped to logs/ declared it isolated while it was being written to for real.
+        assert REPO not in target.parents, (
+            f"{mod_name}.{attr} points at {target}, inside the repo - a test writing through "
+            f"it would hit the real file.")
+    assert checked >= 5, f"only {checked} ledgers checked; the isolation list has gone stale"
 
 
 def test_opening_trades_does_not_touch_the_real_predictions_ledger(tmp_path, monkeypatch, temp_ledger):
@@ -115,3 +117,83 @@ def test_the_guard_can_actually_fail(tmp_path):
     with p.open("a", encoding="utf-8") as fh:
         fh.write('{"a": 2}\n')
     assert _fingerprint(p) != before
+
+
+# -- Ledger durability -------------------------------------------------------------------------
+#
+# Separate concern from isolation above, same consequence: the ledger quietly getting smaller.
+#
+# `_write_all` rewrites the WHOLE file from whatever `_read_all` returned, so anything _read_all
+# drops is deleted on the next write. It used to `continue` past any line it could not parse,
+# which made a single damaged byte a silent trade deletion whose only symptom is a position that
+# stopped existing.
+#
+# The write path had the same shared-temp-path defect that destroyed data/data_quality_log.json
+# five times between 2026-08-13 and 2026-08-25. It has never fired here, because the cycle lock
+# happens to serialise today's writers -- a property of the scheduler, not of this module.
+
+def _ledger(monkeypatch, tmp_path, rows):
+    from analysis import outcome_logger as ol
+    f = tmp_path / "vega_outcomes.jsonl"
+    f.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    monkeypatch.setattr(ol, "OUTCOMES_FILE", f)
+    return ol, f
+
+
+def test_a_damaged_line_is_reported_not_silently_dropped(tmp_path, monkeypatch, caplog):
+    ol, f = _ledger(monkeypatch, tmp_path, [{"trade_id": "a"}, {"trade_id": "b"}])
+    f.write_text(f.read_text(encoding="utf-8") + "{not json\n", encoding="utf-8")
+    with caplog.at_level("ERROR"):
+        rows = ol._read_all()
+    assert len(rows) == 2
+    assert "unreadable line" in caplog.text, "a dropped trade must never be silent"
+
+
+def test_a_damaged_line_is_preserved_on_disk(tmp_path, monkeypatch):
+    ol, f = _ledger(monkeypatch, tmp_path, [{"trade_id": "a"}])
+    f.write_text(f.read_text(encoding="utf-8") + "{not json\n", encoding="utf-8")
+    ol._read_all()
+    saved = list(tmp_path.glob("vega_outcomes.jsonl.damaged-*"))
+    assert len(saved) == 1 and "not json" in saved[0].read_text(encoding="utf-8")
+
+
+def test_the_ledger_temp_path_is_unique_per_process(tmp_path, monkeypatch):
+    """A shared temp name is what corrupted the chain-quality log. Two writers must never be
+    able to choose the same one here."""
+    ol, f = _ledger(monkeypatch, tmp_path, [{"trade_id": "a"}])
+    seen = []
+    real_replace = ol.os.replace
+
+    def spy(src, dst):
+        seen.append(str(src))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(ol.os, "replace", spy)
+    monkeypatch.setattr(ol.os, "getpid", lambda: 1111)
+    ol._write_all([{"trade_id": "a"}])
+    monkeypatch.setattr(ol.os, "getpid", lambda: 2222)
+    ol._write_all([{"trade_id": "a"}])
+    assert len(set(seen)) == 2, f"both writers used the same temp path: {seen}"
+
+
+def test_a_locked_ledger_is_retried_not_lost(tmp_path, monkeypatch):
+    ol, f = _ledger(monkeypatch, tmp_path, [{"trade_id": "a"}])
+    calls = {"n": 0}
+    real_replace = ol.os.replace
+
+    def flaky(src, dst):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise OSError(32, "The process cannot access the file")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(ol.os, "replace", flaky)
+    ol._write_all([{"trade_id": "a"}, {"trade_id": "b"}])
+    assert calls["n"] == 3
+    assert len(ol._read_all()) == 2
+
+
+def test_a_write_leaves_no_temp_file_behind(tmp_path, monkeypatch):
+    ol, f = _ledger(monkeypatch, tmp_path, [{"trade_id": "a"}])
+    ol._write_all([{"trade_id": "a"}])
+    assert not list(tmp_path.glob("*.tmp"))
