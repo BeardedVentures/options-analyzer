@@ -1167,13 +1167,42 @@ EOD_MIN_VOLUME_RATIO = 1.5        # Volume must be 1.5x 20-day average
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY    = os.environ.get("OPENAI_API_KEY", "")
 NEWS_API_KEY      = os.environ.get("NEWS_API_KEY", "")
-POLYGON_API_KEY   = os.environ.get("POLYGON_API_KEY", "")   # Free tier — 15-min delayed options data
+POLYGON_API_KEY   = os.environ.get("POLYGON_API_KEY", "")   # Starter plan ($29/mo) — unlimited calls, still 15-min delayed
 
 # ── Tradier (legacy — inactive; kept for reference) ──────────────────────
 # Tradier requires a funded brokerage account for live API access.
 # VEGA now uses Polygon.io as primary data source.
 TRADIER_API_KEY   = os.environ.get("TRADIER_API_KEY", "")
 TRADIER_SANDBOX   = os.environ.get("TRADIER_SANDBOX", "true").lower() == "true"
+
+# ── Robinhood Agentic Trading MCP (2026-08-27) ────────────────────────────
+# Official Robinhood MCP server (agent.robinhood.com/mcp/trading) -- read-only
+# options chain/quote/Greeks access through the brokerage account VEGA already
+# trades on. One-time browser OAuth approval; token cached to
+# data/.robinhood_mcp_tokens.json and reused on later runs. See
+# data/robinhood_mcp.py and test_robinhood_mcp_connection.py.
+# Not yet confirmed against a live response -- run test_robinhood_mcp_connection.py
+# before relying on this in a real scan.
+# Robinhood Agentic Trading MCP. The server is real and live -- verified 2026-08-27:
+#   POST /mcp/trading -> 401 + WWW-Authenticate: Bearer resource_metadata=...
+#   /.well-known/oauth-authorization-server -> PKCE S256, grant_types
+#   ["authorization_code", "refresh_token"], token endpoint api.robinhood.com/oauth2/token/
+#
+# DEFAULT OFF, deliberately. The response field mapping in fetcher._parse_robinhood_options
+# was written from published tool NAMES, not from an observed response, and this sits at
+# TIER 1 of the chain used by an unattended hourly cycle. An untested parser is not something
+# to switch on by default in the path of a running engine; turn it on once
+# test_robinhood_mcp_connection.py has produced a real chain.
+ROBINHOOD_MCP_ENABLED = os.environ.get("ROBINHOOD_MCP_ENABLED", "false").lower() == "true"
+ROBINHOOD_MCP_URL     = os.environ.get("ROBINHOOD_MCP_URL", "https://agent.robinhood.com/mcp/trading")
+# Browser-based OAuth approval requires a human at the keyboard. The scheduled cycle runs
+# hidden and non-interactive, so it must NEVER reach that path: it would open a tab nobody
+# sees and block for the callback timeout, per ticker. Only the standalone connection test
+# sets this.
+ROBINHOOD_MCP_ALLOW_BROWSER = os.environ.get("ROBINHOOD_MCP_ALLOW_BROWSER", "false").lower() == "true"
+# Seconds to wait for the OAuth callback when browser auth IS allowed. 300 was long enough
+# to blow the cycle timeout on its own.
+ROBINHOOD_MCP_CALLBACK_TIMEOUT = float(os.environ.get("ROBINHOOD_MCP_CALLBACK_TIMEOUT", "120"))
 
 # AI Model settings
 CLAUDE_MODEL = "claude-sonnet-4-6"

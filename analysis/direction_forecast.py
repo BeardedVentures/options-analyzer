@@ -335,20 +335,23 @@ def record_watchlist(today: Optional[date] = None, tickers: Optional[Sequence[st
         price_lookup = lambda tk: fetcher.get_price_data(tk, period="1y")  # noqa: E731
 
     stats = {"tickers": len(tickers), "recorded": 0, "abstained": 0, "failed": 0}
-    for tk in tickers:
-        try:
-            df = price_lookup(tk)
-            if df is None or getattr(df, "empty", True):
+    # One read and one write for the whole sweep. Un-batched, record() re-read and re-wrote the
+    # entire ledger for each of the ~449 claims this produces; see predictions.batch().
+    with pred.batch():
+        for tk in tickers:
+            try:
+                df = price_lookup(tk)
+                if df is None or getattr(df, "empty", True):
+                    stats["failed"] += 1
+                    continue
+                closes = [float(c) for c in df["Close"].tolist()]
+                ids = record_ticker(tk, closes, today=today)
+                stats["recorded"] += len(ids)
+                if not ids:
+                    stats["abstained"] += 1
+            except Exception as e:
+                logger.debug("[direction] %s failed: %s", tk, e)
                 stats["failed"] += 1
-                continue
-            closes = [float(c) for c in df["Close"].tolist()]
-            ids = record_ticker(tk, closes, today=today)
-            stats["recorded"] += len(ids)
-            if not ids:
-                stats["abstained"] += 1
-        except Exception as e:
-            logger.debug("[direction] %s failed: %s", tk, e)
-            stats["failed"] += 1
     return stats
 
 

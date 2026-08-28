@@ -63,6 +63,30 @@ def _no_production_ledgers(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_broker(monkeypatch):
+    """Keep the suite offline now that a real brokerage data source is wired in.
+
+    ROBINHOOD_MCP_ENABLED became true in .env on 2026-08-27. That flag sits at Tier 1 of
+    get_options_chain, so from that moment any test touching a chain would have opened an
+    authenticated MCP session against Robinhood -- real network, real account, real rate
+    limits -- and three chain-quality tests started failing precisely because the yfinance path
+    they exercise was no longer being reached.
+
+    Failing was the lucky outcome; silently passing while calling a broker would have been
+    worse. This file's opening line promises every test is offline, so make that structurally
+    true for this source the way _no_production_ledgers does for the ledgers. A test that
+    genuinely wants the Robinhood path re-enables it explicitly.
+    """
+    try:
+        import config
+        monkeypatch.setattr(config, "ROBINHOOD_MCP_ENABLED", False, raising=False)
+        monkeypatch.setattr(config, "ROBINHOOD_MCP_ALLOW_BROWSER", False, raising=False)
+    except Exception:
+        pass
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_process_caches():
     """Clear per-process caches between tests.
 

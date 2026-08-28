@@ -346,3 +346,122 @@ def test_a_held_lock_does_not_lose_the_reading_it_blocks(temp_log):
     dq.record("FIRST", "yfinance", 10, 9)
     dq.record("SECOND", "yfinance", 10, 9)
     assert [r["ticker"] for r in dq._read_all()] == ["FIRST", "SECOND"]
+
+
+# ── NewsAPI rate limiting ─────────────────────────────────────────────────────────────────
+#
+# The free tier allows ~100 requests/day. One scan makes 56, and the cycle runs 7 times a day,
+# so the quota is gone inside the first cycle or two and every later call is a guaranteed
+# round trip to a refusal. run.log held 3,688 of them on 2026-08-27. Sentiment silently
+# dropped to keyword matching for the whole session either way; what the breaker changes is
+# that it stops paying 55 more round trips per cycle and stops burying real errors.
+
+def test_a_429_stops_newsapi_for_the_rest_of_the_run(monkeypatch, caplog):
+    import requests
+    from data import fetcher
+
+    class _Resp:
+        status_code = 429
+
+    def rate_limited(*a, **k):
+        err = requests.exceptions.HTTPError("429 Client Error: Too Many Requests")
+        err.response = _Resp()
+        raise err
+
+    monkeypatch.setattr(fetcher.requests, "get", rate_limited)
+    monkeypatch.setattr(fetcher, "_parse_yfinance_options", lambda *a, **k: [])
+    fetcher._newsapi_rate_limited.clear()
+    fetcher._cache.clear()
+
+    with caplog.at_level("WARNING"):
+        for tk in ["SPY", "QQQ", "IWM", "AAPL", "MSFT"]:
+            try:
+                fetcher.get_news(tk)
+            except Exception:
+                pass
+
+    assert fetcher._newsapi_rate_limited, "the breaker never engaged"
+    assert caplog.text.count("rate-limited") == 1, (
+        "one line per run, not one per ticker: %d" % caplog.text.count("rate-limited"))
+
+
+def test_a_non_429_error_is_still_reported_per_ticker(monkeypatch, caplog):
+    """The breaker must not swallow ordinary failures -- a timeout on one ticker says nothing
+    about the next one."""
+    import requests
+    from data import fetcher
+
+    def boom(*a, **k):
+        raise requests.exceptions.Timeout("connection timed out")
+
+    monkeypatch.setattr(fetcher.requests, "get", boom)
+    fetcher._newsapi_rate_limited.clear()
+    fetcher._cache.clear()
+
+    with caplog.at_level("WARNING"):
+        for tk in ["SPY", "QQQ"]:
+            try:
+                fetcher.get_news(tk)
+            except Exception:
+                pass
+    assert not fetcher._newsapi_rate_limited, "a timeout is not a rate limit"
+
+
+def test_the_breaker_resets_between_scans(monkeypatch):
+    from data import fetcher
+    fetcher._newsapi_rate_limited.add("429")
+    fetcher.clear_cache()
+    assert not fetcher._newsapi_rate_limited
+
+
+def test_macro_news_falls_back_instead_of_returning_empty(monkeypatch):
+    """get_news() has had a yfinance tier since it was written; get_macro_news() never did.
+
+    So a single 429 on the macro query left market_context.macro_events an EMPTY LIST -- not
+    degraded, absent. Regime context then scored with no macro input at all, and nothing said
+    so. That is the same shape as every other silent-degradation bug in this system: the number
+    looked like an answer.
+    """
+    import requests
+    from data import fetcher
+
+    class _Resp:
+        status_code = 429
+
+    def rate_limited(*a, **k):
+        err = requests.exceptions.HTTPError("429 Client Error: Too Many Requests")
+        err.response = _Resp()
+        raise err
+
+    monkeypatch.setattr(fetcher.requests, "get", rate_limited)
+    monkeypatch.setattr(fetcher, "get_news",
+                        lambda t, hours=24: [{"title": f"{t} headline", "source": "x",
+                                              "published_at": "", "url": "",
+                                              "description": ""}])
+    fetcher._newsapi_rate_limited.clear()
+    fetcher._cache.clear()
+
+    out = fetcher.get_macro_news()
+    assert out, "macro_events came back empty on a 429 -- the original regression"
+    assert any(a.get("macro_proxy") for a in out), "fallback articles should be marked as proxies"
+
+
+def test_macro_fallback_is_not_used_when_newsapi_works(monkeypatch):
+    """The fallback must not mask a working primary."""
+    from data import fetcher
+
+    class _OK:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"articles": [{"title": "real macro", "source": {"name": "NewsAPI"},
+                                  "publishedAt": "", "url": ""}]}
+
+    monkeypatch.setattr(fetcher.requests, "get", lambda *a, **k: _OK())
+    fetcher._newsapi_rate_limited.clear()
+    fetcher._cache.clear()
+    out = fetcher.get_macro_news()
+    assert out and not any(a.get("macro_proxy") for a in out)
