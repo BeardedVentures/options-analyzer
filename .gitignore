@@ -66,3 +66,9 @@ backups/ledgers/
 .env.bak*
 *.env.bak*
 .env.*.bak
+
+# durable_write's transient files: a per-process temp (".<pid>.tmp") and an O_CREAT|O_EXCL
+# lock, both live only for the duration of one write. They appear in `git status` whenever a
+# cycle is mid-write, which is most of the trading day.
+*.tmp
+*.lock
