@@ -640,3 +640,46 @@ def test_the_strike_window_still_covers_the_usable_delta_band():
         "the short strike can sit at the money; do not cut below spot")
     assert robinhood_mcp._STRIKE_HI_PCT <= 1.10, (
         "strikes well above spot are ITM puts this strategy never sells")
+
+
+def test_a_wide_dte_range_still_sends_a_date_filter(monkeypatch):
+    """Omitting the expiration filter past the cap silently returned nothing.
+
+    get_option_instruments paginates by ASCENDING STRIKE across every expiration it can see.
+    With no date filter the first pages are the lowest strikes of the whole chain; against the
+    narrowed 75-102%-of-spot window none qualify, and the early-stop never fires because those
+    strikes are BELOW the window rather than above it. The walk burns its page budget having
+    kept nothing.
+
+    Live on 2026-08-28: "no put instruments for SPY in DTE 5-120", which sent that whole scan
+    to Polygon and yfinance. Chunking keeps the server-side filter -- the thing that makes
+    pagination tractable -- at any width.
+    """
+    captured = []
+
+    async def fake_call(session, name, args):
+        if name == "get_option_instruments":
+            captured.append(args)
+        return {"data": {"instruments": [], "next": None}}
+
+    import contextlib
+
+    class _S:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+
+    @contextlib.asynccontextmanager
+    async def fake_session(url):
+        yield _S()
+
+    monkeypatch.setattr(robinhood_mcp, "_call_read_tool", fake_call)
+    monkeypatch.setattr(robinhood_mcp, "_robinhood_session", fake_session)
+
+    _run(robinhood_mcp.afetch_chain("https://x", "SPY", "put", spot=100.0,
+                                    min_dte=0, max_dte=200))
+    assert captured, "no instrument request was made at all"
+    assert all(a.get("expiration_dates") for a in captured), (
+        "a request went out with NO date filter -- that is the failure mode")
+    assert all(len(a["expiration_dates"]) < 1000 for a in captured), (
+        "a chunk is still large enough to break the server's parser")
+    assert len(captured) > 1, "a 201-day range should have been split into chunks"

@@ -420,7 +420,18 @@ async def afetch_chain(server_url: str, ticker: str, option_type: str = "put",
     # the strike window bound the walk, with the DTE filter applied client-side in the parser.
     span = [(today + timedelta(days=d)).isoformat()
             for d in range(max(min_dte, 0), max_dte + 1)]
-    window = span if len(span) <= _MAX_EXPIRATION_DATES else None
+    # CHUNK the window rather than dropping the filter past the cap. Omitting it looks
+    # equivalent -- the parser filters DTE client-side anyway -- and is not:
+    # get_option_instruments paginates by ASCENDING STRIKE across every expiration it can see,
+    # so with no date filter the first pages are the lowest strikes of the entire chain.
+    # Against the narrowed strike window (75-102% of spot) none of them qualify, the early-stop
+    # never fires because those strikes are BELOW the window rather than above it, and the walk
+    # exhausts its page budget having kept nothing. SPY DTE 5-120 returned 0 instruments in the
+    # 09:08 scan on 2026-08-28 for exactly this reason, which then sent the run to Polygon and
+    # yfinance. Chunking keeps the server-side filter -- which is what makes pagination
+    # tractable -- for any width of DTE range.
+    date_chunks = [span[i:i + _MAX_EXPIRATION_DATES]
+                   for i in range(0, len(span), _MAX_EXPIRATION_DATES)] or [None]
 
     # The useful strike band is on opposite sides for the two option types. A put seller works
     # below spot; a call seller works above it. Using the put window for calls would fetch
@@ -441,48 +452,49 @@ async def afetch_chain(server_url: str, ticker: str, option_type: str = "put",
         # delta band, which looks exactly like "this underlying has nothing to sell" rather
         # than like a truncated fetch.
         instruments = []
-        cursor = None
-        for _page in range(_MAX_INSTRUMENT_PAGES):
-            args = {
-                "chain_symbol": ticker.upper(),
-                "type": option_type,
-                "state": "active",
-                "tradability": "tradable",
-            }
-            if window:
-                args["expiration_dates"] = ",".join(window)
-            if cursor:
-                args["cursor"] = cursor
-            inst_result = await _call_read_tool(session, "get_option_instruments", args)
-            raw = _extract_tool_json(inst_result)
-            if not isinstance(raw, dict):
-                # The server answers errors as text, not JSON. Treating that as a dict raised
-                # "AttributeError: 'str' object has no attribute 'get'" from inside the anyio
-                # task group, which surfaced as an opaque ExceptionGroup.
-                logger.warning("[robinhood_mcp] %s: non-JSON response from "
-                               "get_option_instruments: %s", ticker, str(raw)[:200])
-                break
-            payload = (raw.get("data") or {})
-            page = payload.get("instruments") or []
-            if not page:
-                break
+        for chunk in date_chunks:
+            cursor = None
+            for _page in range(_MAX_INSTRUMENT_PAGES):
+                args = {
+                    "chain_symbol": ticker.upper(),
+                    "type": option_type,
+                    "state": "active",
+                    "tradability": "tradable",
+                }
+                if chunk:
+                    args["expiration_dates"] = ",".join(chunk)
+                if cursor:
+                    args["cursor"] = cursor
+                inst_result = await _call_read_tool(session, "get_option_instruments", args)
+                raw = _extract_tool_json(inst_result)
+                if not isinstance(raw, dict):
+                    # The server answers errors as text, not JSON. Treating that as a dict raised
+                    # "AttributeError: 'str' object has no attribute 'get'" from inside the anyio
+                    # task group, which surfaced as an opaque ExceptionGroup.
+                    logger.warning("[robinhood_mcp] %s: non-JSON response from "
+                                   "get_option_instruments: %s", ticker, str(raw)[:200])
+                    break
+                payload = (raw.get("data") or {})
+                page = payload.get("instruments") or []
+                if not page:
+                    break
 
-            page_strikes = []
-            for i in page:
-                try:
-                    page_strikes.append(float(i.get("strike_price")))
-                except (TypeError, ValueError):
-                    continue
-                if lo is None or lo <= page_strikes[-1] <= hi:
-                    instruments.append(i)
+                page_strikes = []
+                for i in page:
+                    try:
+                        page_strikes.append(float(i.get("strike_price")))
+                    except (TypeError, ValueError):
+                        continue
+                    if lo is None or lo <= page_strikes[-1] <= hi:
+                        instruments.append(i)
 
-            # Ascending order lets us stop as soon as a page opens above the useful range,
-            # instead of walking every LEAPS strike to the top of the chain.
-            if hi is not None and page_strikes and min(page_strikes) > hi:
-                break
-            cursor = _next_cursor(payload.get("next"))
-            if not cursor:
-                break
+                # Ascending order lets us stop as soon as a page opens above the useful range,
+                # instead of walking every LEAPS strike to the top of the chain.
+                if hi is not None and page_strikes and min(page_strikes) > hi:
+                    break
+                cursor = _next_cursor(payload.get("next"))
+                if not cursor:
+                    break
 
         if not instruments:
             logger.warning("[robinhood_mcp] no %s instruments for %s in DTE %s-%s",
