@@ -218,25 +218,74 @@ def _cfg(name, default):
     return getattr(config, name, default)
 
 
-def _plausible_iv_samples(iv_values: List[float], close: pd.Series) -> Tuple[List[float], int]:
+def _plausible_iv_samples(iv_values, close, samples=None):
     """Split stored IV observations into (plausible, dropped_count).
 
     Judged against the ticker's OWN realised vol rather than an absolute ceiling, because 90%
     IV is normal for a meme name and impossible for TLT. An implied vol more than
     IV_PLAUSIBLE_MAX_MULT times realised is not a volatility regime, it is a bad quote.
 
-    Fails OPEN: if realised vol cannot be computed there is nothing to judge against, so every
-    sample is kept. A filter that cannot see must not censor.
+    CONTEMPORANEOUS realised vol, not today's. The ceiling used to be 3x whatever realised vol
+    happened to be on the day the check RAN, applied to samples from every past date -- so a
+    sample's validity changed depending on when you asked. In the low-vol regime of 2026-08-28
+    (SPY rv30 11.9%, ceiling 35.6%) that censored real observations taken weeks earlier when
+    realised vol was higher, and it pushed SPY to 29 clean samples against the 30 needed. One
+    sample short, so IV rank silently dropped to the HV approximation -- and MIN_IV_RANK is a
+    hard block ONLY under the HISTORY method, so the gate stopped being enforced at all on the
+    most liquid ticker on the watchlist. Nothing said so beyond one INFO line.
+
+    Judging each sample against the realised vol of its own date makes the verdict stable: a
+    stored observation is either a bad quote or it isn't, and that does not change with the
+    weather. Most drops survive this -- AAPL's 136-255% prints are absurd against any ceiling --
+    but the handful that don't are exactly the ones that matter at the 30-sample boundary.
+
+    Fails OPEN throughout: no realised vol, no date, or no price history covering that date all
+    mean the sample is KEPT. A filter that cannot see must not censor.
     """
     mult = float(_cfg("IV_PLAUSIBLE_MAX_MULT", 3.0))
     try:
-        rv = float(_historical_vol(close, 30) or 0)
+        today_rv = float(_historical_vol(close, 30) or 0)
     except Exception:
-        rv = 0.0
-    if rv <= 0:
-        return list(iv_values), 0
-    ceiling = rv * mult
-    clean = [v for v in iv_values if v <= ceiling]
+        today_rv = 0.0
+
+    # Realised vol as of each past date, so a sample can be judged against its own conditions.
+    rv_series = None
+    if samples is not None:
+        try:
+            import numpy as _np
+            import pandas as _pd
+            c = _pd.Series(close).dropna()
+            c.index = _pd.to_datetime(c.index)
+            try:
+                c.index = c.index.tz_localize(None)
+            except (TypeError, AttributeError):
+                pass
+            lr = _np.log(c / c.shift(1))
+            rv_series = lr.rolling(30).std() * _np.sqrt(252)
+            rv_series = rv_series.dropna()
+            if rv_series.empty:
+                rv_series = None
+        except Exception:
+            rv_series = None
+
+    def _ceiling_for(idx):
+        if rv_series is not None and samples is not None and idx < len(samples):
+            d = (samples[idx] or {}).get("date")
+            if d:
+                try:
+                    import pandas as _pd
+                    prior = rv_series[rv_series.index <= _pd.Timestamp(d)]
+                    if len(prior):
+                        return float(prior.iloc[-1]) * mult
+                except Exception:
+                    pass
+        return today_rv * mult if today_rv > 0 else None
+
+    clean = []
+    for i, v in enumerate(iv_values):
+        ceil = _ceiling_for(i)
+        if ceil is None or v <= ceil:      # fails open when there is nothing to judge against
+            clean.append(v)
     return clean, len(iv_values) - len(clean)
 
 
@@ -324,7 +373,7 @@ def calculate_iv_rank(ticker: str, current_iv: float, close: pd.Series) -> dict:
     # Filtered at READ time, deliberately. The files are left intact as the audit trail — a
     # dedup script that rewrote a ledger in place once reverted a day of closes here while the
     # line count still looked right. Nothing is deleted; bad points simply do not vote.
-    clean, dropped = _plausible_iv_samples(iv_values, close)
+    clean, dropped = _plausible_iv_samples(iv_values, close, samples=samples)
     if len(clean) < min_samples:
         approx = _iv_rank_hv_approx(close, current_iv, ticker)
         logger.warning(

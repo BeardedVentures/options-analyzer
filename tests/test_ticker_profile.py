@@ -327,3 +327,64 @@ def test_a_broken_profile_lookup_falls_back_to_the_global(monkeypatch):
     from data import technicals as t
     monkeypatch.setattr(tp, "declared", lambda x: (_ for _ in ()).throw(RuntimeError("boom")))
     assert t.iv_hv_inflator("IBIT") == config.IV_HV_INFLATOR
+
+
+# ── IV plausibility must not depend on when you ask ──────────────────────────────────────
+#
+# The ceiling was 3x whatever realised vol happened to be on the day the CHECK RAN, applied to
+# samples from every past date. So a stored observation's validity changed with the weather.
+#
+# On 2026-08-28 (SPY rv30 11.9%, ceiling 35.6%) that censored real observations taken weeks
+# earlier under higher realised vol, leaving SPY with 29 clean samples against the 30 needed.
+# One short -- so IV rank fell back to the HV approximation, and MIN_IV_RANK is a hard block
+# ONLY under the HISTORY method. The gate silently stopped being enforced on the most liquid
+# ticker on the watchlist, announced by a single INFO line.
+
+def test_a_samples_verdict_does_not_move_with_todays_volatility():
+    """THE regression: the same stored sample, judged twice under different current regimes."""
+    import numpy as np
+    import pandas as pd
+    from data import technicals as t
+
+    # A price path that was volatile early and calm recently.
+    idx = pd.bdate_range("2026-05-01", periods=120)
+    rng = np.random.default_rng(0)
+    rets = np.concatenate([rng.normal(0, 0.030, 60), rng.normal(0, 0.004, 60)])
+    close = pd.Series(100 * np.exp(np.cumsum(rets)), index=idx)
+
+    # An observation taken during the volatile stretch, plausible for its own conditions.
+    early = idx[45].strftime("%Y-%m-%d")
+    samples = [{"date": early, "iv": 0.55}]
+
+    kept, dropped = t._plausible_iv_samples([0.55], close, samples=samples)
+    assert kept == [0.55] and dropped == 0, (
+        "a sample plausible against its OWN date's realised vol was censored by today's calm")
+
+
+def test_genuinely_absurd_quotes_are_still_dropped():
+    """The filter must keep working -- AAPL stored 136-255% prints against ~31% realised."""
+    import numpy as np
+    import pandas as pd
+    from data import technicals as t
+
+    idx = pd.bdate_range("2026-05-01", periods=120)
+    rng = np.random.default_rng(1)
+    close = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.005, 120))), index=idx)
+    samples = [{"date": idx[60].strftime("%Y-%m-%d"), "iv": 2.55}]
+    kept, dropped = t._plausible_iv_samples([2.55], close, samples=samples)
+    assert kept == [] and dropped == 1, "a 255% print is a bad quote under any ceiling"
+
+
+def test_the_filter_fails_open_without_dates():
+    """Legacy samples carry no date. A filter that cannot see must not censor."""
+    import numpy as np
+    import pandas as pd
+    from data import technicals as t
+
+    idx = pd.bdate_range("2026-05-01", periods=120)
+    rng = np.random.default_rng(2)
+    close = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.02, 120))), index=idx)
+    kept, dropped = t._plausible_iv_samples([0.30], close, samples=[{"iv": 0.30}])
+    assert len(kept) + dropped == 1        # judged somehow, not crashed
+    kept2, _ = t._plausible_iv_samples([0.30], pd.Series(dtype=float), samples=None)
+    assert kept2 == [0.30], "no realised vol to judge against -> keep everything"
