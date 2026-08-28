@@ -1049,9 +1049,22 @@ def _reprice_and_close_open() -> Tuple[int, int]:
         # and because the close rules run inside this same lookup, they were never managed
         # either. Whether THIS position's two legs quote is asked per-leg below, which is the
         # question marking actually has.
+        # Ask for exactly the contracts these positions are made of. Marking already knows
+        # every strike and expiry it needs, so pulling a 200-day chain to use two rows of it
+        # cost ~75 s across the open book and, worse, ran the legs through the SELECTION strike
+        # window (75-102% of spot). A put spread that is winning has watched the underlying
+        # rally away from it, so its strikes drift toward the bottom of that band and
+        # eventually out: the better the position, the likelier the fetch would stop seeing it.
+        # An explicit strike list bypasses the band entirely.
+        _exp = sorted({r.get("expiration") for r in positions if r.get("expiration")})
+        _strikes = sorted({float(v) for r in positions
+                           for v in (r.get("short_strike"), r.get("long_strike"))
+                           if v is not None})
         try:
             chain = list(fetcher.get_options_chain(ticker, 0, 200,
-                                                   apply_quality_gate=False))  # wide window
+                                                   apply_quality_gate=False,
+                                                   expirations=_exp or None,
+                                                   strikes=_strikes or None))
         except Exception as exc:
             _log(f"Reprice: chain fetch failed for {ticker}: {exc}")
             for r in positions:
@@ -1060,7 +1073,9 @@ def _reprice_and_close_open() -> Tuple[int, int]:
         if any(_is_call_side(r) for r in positions):
             try:
                 chain += list(fetcher.get_call_options_chain(ticker, 0, 200,
-                                                             apply_quality_gate=False))
+                                                             apply_quality_gate=False,
+                                                             expirations=_exp or None,
+                                                             strikes=_strikes or None))
             except Exception as exc:
                 _log(f"Reprice: call chain fetch failed for {ticker}: {exc}")
         _level_breach_alerts(ticker, positions)

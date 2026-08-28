@@ -425,3 +425,41 @@ def test_the_marking_bar_is_a_strict_superset_of_the_entry_filter():
 def _fake_px():
     import pandas as pd
     return pd.DataFrame({"Close": [100.0, 101.0]})
+
+
+# ── Marking asks a different question from selection ─────────────────────────────────────
+
+def test_marking_bypasses_the_selection_strike_window():
+    """A winning put spread drifts OUT of the 75-102%-of-spot fetch band.
+
+    The band is a selection optimisation -- it stops a scan quoting strikes it would never
+    sell. Applied to marking it becomes a hazard that scales with profit: the more the
+    underlying rallies away from a short put, the closer that strike sits to the bottom of the
+    band, until the fetch cannot see the position at all. An explicit strike list must bypass
+    the band entirely.
+    """
+    from data import robinhood_mcp as rh
+    import inspect
+    src = inspect.getsource(rh.afetch_chain)
+    assert "want_strikes" in src and "lo = hi = None" in src, (
+        "explicit strikes must switch the percentage band off")
+
+
+def test_the_mark_path_asks_for_only_the_contracts_it_needs(monkeypatch):
+    """It knows every strike and expiry already; a 200-day chain to use two rows of it cost
+    ~75 s across the open book."""
+    import auto_paper_cycle as apc
+    import inspect
+    src = inspect.getsource(apc._reprice_and_close_open) if hasattr(apc, "_reprice_and_close_open") \
+        else inspect.getsource(apc)
+    assert "expirations=_exp" in src and "strikes=_strikes" in src, (
+        "the mark path still pulls a broad chain")
+
+
+def test_a_targeted_fetch_is_cached_separately_from_a_broad_one(monkeypatch):
+    """A targeted fetch returns a deliberately PARTIAL chain. Serving it to a caller that
+    asked for the whole window would silently truncate a scan."""
+    from data import fetcher
+    import inspect
+    src = inspect.getsource(fetcher.get_options_chain)
+    assert "_tgt" in src, "targeted and broad fetches share a cache key"

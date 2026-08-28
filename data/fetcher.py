@@ -506,7 +506,8 @@ def _find_contract_list(blob) -> List[Dict]:
 
 def _parse_robinhood_options(ticker: str, current_price: float,
                              min_dte: int, max_dte: int,
-                             option_type: str = "put") -> List[Dict]:
+                             option_type: str = "put",
+                             expirations=None, strikes=None) -> List[Dict]:
     """Put contracts with real broker Greeks, from Robinhood's Agentic Trading MCP server.
 
     Field mapping is READ OFF A LIVE RESPONSE (2026-08-27), not inferred from tool names. The
@@ -539,7 +540,8 @@ def _parse_robinhood_options(ticker: str, current_price: float,
         from data import robinhood_mcp
         result = robinhood_mcp.fetch_chain(ticker, config.ROBINHOOD_MCP_URL, option_type,
                                            spot=current_price,
-                                           min_dte=min_dte, max_dte=max_dte)
+                                           min_dte=min_dte, max_dte=max_dte,
+                                           expirations=expirations, strikes=strikes)
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException as e:
@@ -890,7 +892,9 @@ def get_options_chain(ticker: str,
                       min_dte: int = None,
                       max_dte: int = None,
                       *,
-                      apply_quality_gate: bool = True) -> List[Dict]:
+                      apply_quality_gate: bool = True,
+                      expirations=None,
+                      strikes=None) -> List[Dict]:
     """
     Get options chain for a ticker within the DTE range.
 
@@ -918,7 +922,12 @@ def get_options_chain(ticker: str,
     if max_dte is None:
         max_dte = config.MAX_DTE
 
-    cache_key = f"options_{ticker}_{min_dte}_{max_dte}_{'gated' if apply_quality_gate else 'raw'}"
+    # A targeted fetch returns a DELIBERATELY partial chain -- only the strikes and
+    # expirations a caller named. It must never be served to, or from, a caller that asked
+    # for the whole window.
+    _tgt = ("_t%s" % hash((tuple(sorted(map(str, expirations or ()))),
+                           tuple(sorted(map(float, strikes or ())))))) if (expirations or strikes) else ""
+    cache_key = f"options_{ticker}_{min_dte}_{max_dte}_{'gated' if apply_quality_gate else 'raw'}{_tgt}"
     if cache_key in _cache:
         return _cache[cache_key]
 
@@ -934,7 +943,8 @@ def get_options_chain(ticker: str,
     records: List[Dict] = []
     chain_source = "none"
     if getattr(config, "ROBINHOOD_MCP_ENABLED", True):
-        records = _parse_robinhood_options(ticker, current_price, min_dte, max_dte)
+        records = _parse_robinhood_options(ticker, current_price, min_dte, max_dte,
+                                           expirations=expirations, strikes=strikes)
         if records:
             chain_source = "robinhood"
 
@@ -1403,7 +1413,8 @@ def _parse_yfinance_calls(ticker: str, current_price: float,
 
 
 def get_call_options_chain(ticker: str, min_dte: int = None, max_dte: int = None,
-                           *, apply_quality_gate: bool = True) -> List[Dict]:
+                           *, apply_quality_gate: bool = True,
+                           expirations=None, strikes=None) -> List[Dict]:
     """Live call chain within DTE. Session-cached.
 
     Source tiering matches get_options_chain: Robinhood first (real broker Greeks), yfinance
@@ -1417,7 +1428,12 @@ def get_call_options_chain(ticker: str, min_dte: int = None, max_dte: int = None
         min_dte = config.MIN_DTE
     if max_dte is None:
         max_dte = config.MAX_DTE
-    cache_key = f"calls_{ticker}_{min_dte}_{max_dte}_{'gated' if apply_quality_gate else 'raw'}"
+    # A targeted fetch returns a DELIBERATELY partial chain -- only the strikes and
+    # expirations a caller named. It must never be served to, or from, a caller that asked
+    # for the whole window.
+    _tgt = ("_t%s" % hash((tuple(sorted(map(str, expirations or ()))),
+                           tuple(sorted(map(float, strikes or ())))))) if (expirations or strikes) else ""
+    cache_key = f"calls_{ticker}_{min_dte}_{max_dte}_{'gated' if apply_quality_gate else 'raw'}{_tgt}"
     if cache_key in _cache:
         return _cache[cache_key]
     price_data = get_price_data(ticker, period="5d")
@@ -1433,7 +1449,8 @@ def get_call_options_chain(ticker: str, min_dte: int = None, max_dte: int = None
     chain_source = "none"
     if getattr(config, "ROBINHOOD_MCP_ENABLED", False):
         records = _parse_robinhood_options(ticker, current_price, min_dte, max_dte,
-                                           option_type="call")
+                                           option_type="call",
+                                           expirations=expirations, strikes=strikes)
         if records:
             chain_source = "robinhood"
 

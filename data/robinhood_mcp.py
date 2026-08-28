@@ -384,7 +384,8 @@ def _next_cursor(next_url):
 
 async def afetch_chain(server_url: str, ticker: str, option_type: str = "put",
                        spot: float = None,
-                       min_dte: int = None, max_dte: int = None) -> Dict[str, Any]:
+                       min_dte: int = None, max_dte: int = None,
+                       expirations=None, strikes=None) -> Dict[str, Any]:
     """Fetch contracts of `option_type` and their quotes for `ticker`.
 
     THREE calls, not two, because that is what the server implements. The original code called
@@ -430,13 +431,33 @@ async def afetch_chain(server_url: str, ticker: str, option_type: str = "put",
     # 09:08 scan on 2026-08-28 for exactly this reason, which then sent the run to Polygon and
     # yfinance. Chunking keeps the server-side filter -- which is what makes pagination
     # tractable -- for any width of DTE range.
+    # An explicit expiration list beats the computed span. Marking an open position knows the
+    # exact expiry, so asking for a 200-day window to price a single known contract fetched
+    # 1,541 instruments and ~40 s per ticker to use two of them.
+    if expirations:
+        span = sorted({str(e)[:10] for e in expirations if e})
     date_chunks = [span[i:i + _MAX_EXPIRATION_DATES]
                    for i in range(0, len(span), _MAX_EXPIRATION_DATES)] or [None]
 
     # The useful strike band is on opposite sides for the two option types. A put seller works
     # below spot; a call seller works above it. Using the put window for calls would fetch
     # deep-ITM calls and miss every strike a bear-call or condor could actually use.
-    if spot:
+    # Explicit strikes bypass the percentage band ENTIRELY. The band is a selection
+    # optimisation -- it exists so a scan does not quote strikes it would never sell -- and it
+    # must never decide whether an already-open position can be priced. A put spread that is
+    # winning has seen the underlying rally AWAY from it, so its strikes drift toward the
+    # bottom of the band and eventually out of it: the better the position, the more likely the
+    # window would stop being able to see it. Marking asks a different question from selection
+    # and gets a different filter.
+    want_strikes = None
+    if strikes:
+        try:
+            want_strikes = {round(float(k), 2) for k in strikes}
+        except (TypeError, ValueError):
+            want_strikes = None
+    if want_strikes:
+        lo = hi = None
+    elif spot:
         if option_type == "call":
             lo, hi = spot * (2 - _STRIKE_HI_PCT), spot * (2 - _STRIKE_LO_PCT)
         else:
@@ -485,7 +506,10 @@ async def afetch_chain(server_url: str, ticker: str, option_type: str = "put",
                         page_strikes.append(float(i.get("strike_price")))
                     except (TypeError, ValueError):
                         continue
-                    if lo is None or lo <= page_strikes[-1] <= hi:
+                    if want_strikes is not None:
+                        if round(page_strikes[-1], 2) in want_strikes:
+                            instruments.append(i)
+                    elif lo is None or lo <= page_strikes[-1] <= hi:
                         instruments.append(i)
 
                 # Ascending order lets us stop as soon as a page opens above the useful range,
@@ -574,8 +598,8 @@ async def _call_read_tool(session, name: str, args: dict):
 # ─────────────────────────────────────────────
 
 def fetch_chain(ticker: str, server_url: str, option_type: str = "put",
-                spot: float = None, min_dte: int = None,
-                max_dte: int = None) -> Optional[Dict[str, Any]]:
+                spot: float = None, min_dte: int = None, max_dte: int = None,
+                expirations=None, strikes=None) -> Optional[Dict[str, Any]]:
     """Sync entry point for fetcher.py. Returns None on any failure -- never raises,
     matching the graceful-degradation contract of every other parser in fetcher.py.
 
@@ -592,7 +616,8 @@ def fetch_chain(ticker: str, server_url: str, option_type: str = "put",
     """
     try:
         return asyncio.run(afetch_chain(server_url, ticker, option_type, spot=spot,
-                                        min_dte=min_dte, max_dte=max_dte))
+                                        min_dte=min_dte, max_dte=max_dte,
+                                        expirations=expirations, strikes=strikes))
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException as exc:
