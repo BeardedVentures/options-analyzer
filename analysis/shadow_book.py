@@ -50,6 +50,7 @@ from typing import Dict, Iterable, List, Optional, Sequence
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config  # noqa: E402
+import durable_write  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -329,11 +330,8 @@ def build(records: Optional[Sequence[Dict]] = None,
         if grade.get("priced"):
             stats["priced"] += 1
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text("\n".join(json.dumps(r) for r in rows) + ("\n" if rows else ""),
-                   encoding="utf-8")
-    tmp.replace(path)
+    durable_write.atomic_write_text(
+        path, "\n".join(json.dumps(r) for r in rows) + ("\n" if rows else ""))
     logger.info("[shadow] graded %(resolved)s/%(total)s recommendations "
                 "(%(expired)s expired, %(priced)s priced)", stats)
     return stats

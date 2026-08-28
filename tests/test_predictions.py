@@ -454,3 +454,88 @@ def test_the_verdict_credits_a_type_that_does_discriminate():
              "probability": 0.95 if i < 15 else 0.05, "context": {}} for i in range(20)]
     v = P.grade(rows)["by_type"]["strike_holds"]["verdict"]
     assert "DISCRIMINATES" in v
+
+
+# -- The daily sweep -----------------------------------------------------------------------------
+#
+# record() re-read and re-wrote the ENTIRE ledger per claim. Invisible at 43 rows; not invisible
+# from 2026-08-25, when fixing the close scan let the daily direction sweep complete for the first
+# time and write 449 claims in one run (56 tickers x 4 horizons x forecast+baseline). Measured:
+# 10.5 s per sweep at 491 rows, 396 s at 50,000 rows. The cycle's Task Scheduler
+# ExecutionTimeLimit is 30 minutes and a cycle already runs 11-16, so the quadratic term would
+# have started killing the close scan again within months -- the same daily failure that had just
+# been fixed, arriving from a different direction and looking nothing like a regression.
+
+def test_batch_writes_once_regardless_of_claim_count(tmp_path, monkeypatch):
+    monkeypatch.setattr(P, "PREDICTIONS_FILE", tmp_path / "p.jsonl")
+    writes = {"n": 0}
+    real = P._write
+
+    def counting(rows):
+        writes["n"] += 1
+        return real(rows)
+
+    monkeypatch.setattr(P, "_write", counting)
+    with P.batch():
+        for i in range(50):
+            P.record("t%d" % i, "SPY", "direction_1d", "c", 0.5, "2026-09-01")
+    assert writes["n"] == 1, "the sweep wrote %d times, not once" % writes["n"]
+    assert len(P.load()) == 50
+
+
+def test_batch_still_refuses_duplicate_claims(tmp_path, monkeypatch):
+    monkeypatch.setattr(P, "PREDICTIONS_FILE", tmp_path / "p.jsonl")
+    with P.batch():
+        for _ in range(5):
+            P.record("t1", "SPY", "direction_1d", "c", 0.5, "2026-09-01")
+    assert len(P.load()) == 1
+
+
+def test_batch_does_not_drop_rows_written_by_someone_else_meanwhile(tmp_path, monkeypatch):
+    """The flush re-reads under the lock, so a concurrent writer is merged, not clobbered.
+
+    The sweep fetches a year of prices per ticker between claims, so the batch stays open for
+    minutes. Holding the lock across it would block every other writer; keeping the in-memory
+    copy and overwriting at the end would silently delete whatever landed in between.
+    """
+    monkeypatch.setattr(P, "PREDICTIONS_FILE", tmp_path / "p.jsonl")
+    P.record("early", "SPY", "direction_1d", "c", 0.5, "2026-09-01")
+    with P.batch():
+        P.record("mine", "SPY", "direction_1d", "c", 0.5, "2026-09-01")
+        rows = P._read()                      # another process appends mid-batch
+        rows.append({"id": "interloper::direction_1d", "trade_id": "interloper",
+                     "ticker": "QQQ", "claim_type": "direction_1d", "status": "open"})
+        P._write(rows)
+    assert {r["id"] for r in P.load()} == {
+        "early::direction_1d", "mine::direction_1d", "interloper::direction_1d"}
+
+
+def test_record_outside_a_batch_still_writes_immediately(tmp_path, monkeypatch):
+    monkeypatch.setattr(P, "PREDICTIONS_FILE", tmp_path / "p.jsonl")
+    P.record("t1", "SPY", "direction_1d", "c", 0.5, "2026-09-01")
+    assert len(P.load()) == 1
+
+
+def test_a_sweep_that_dies_partway_keeps_the_claims_it_made(tmp_path, monkeypatch):
+    monkeypatch.setattr(P, "PREDICTIONS_FILE", tmp_path / "p.jsonl")
+    with pytest.raises(ValueError):
+        with P.batch():
+            P.record("t1", "SPY", "direction_1d", "c", 0.5, "2026-09-01")
+            raise ValueError("ticker fetch blew up mid-sweep")
+    assert len(P.load()) == 1
+
+
+def test_batch_state_is_cleared_after_use(tmp_path, monkeypatch):
+    """A leaked buffer would make every later record() a silent no-op."""
+    monkeypatch.setattr(P, "PREDICTIONS_FILE", tmp_path / "p.jsonl")
+    with P.batch():
+        pass
+    assert P._BUFFER is None and P._BUFFER_IDS is None
+
+
+def test_a_bad_resolution_date_is_still_refused_inside_a_batch(tmp_path, monkeypatch):
+    """The 2026-13-18 guard must not be bypassed by the fast path."""
+    monkeypatch.setattr(P, "PREDICTIONS_FILE", tmp_path / "p.jsonl")
+    with P.batch():
+        assert P.record("t1", "C", "direction_1d", "c", 0.5, "2026-13-18") is None
+    assert P.load() == []

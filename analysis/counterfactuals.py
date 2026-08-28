@@ -46,6 +46,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+import durable_write
 
 logger = logging.getLogger(__name__)
 
@@ -253,11 +254,8 @@ def build(snapshot_dir: Optional[Path] = None, ledger: Optional[Path] = None,
             "[counterfactuals] %d spread(s) kept from the ledger with no surviving snapshot. "
             "A scan cannot be re-run, so these observations exist nowhere else.", orphaned)
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".jsonl.tmp")
-    tmp.write_text("".join(json.dumps(r, default=str) + "\n" for r in fresh.values()),
-                   encoding="utf-8")
-    tmp.replace(path)
+    durable_write.atomic_write_text(
+        path, "".join(json.dumps(r, default=str) + "\n" for r in fresh.values()))
     return len(fresh)
 
 

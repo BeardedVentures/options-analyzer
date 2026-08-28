@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple
 import pytz
 
 import config
+import durable_write
 from data import fetcher, technicals, fundamentals, news
 from analysis import edge_calculator, strike_validator, synthesizer
 from output import renderer, emailer
@@ -97,17 +98,13 @@ def append_scan_log(log_dir: Path, entry: Dict) -> None:
     data.append(entry)
     # Atomic write: serialize to a temp file in the same dir, then os.replace (atomic on
     # Windows + POSIX). An interrupted write can no longer truncate scan_log.json.
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    durable_write.atomic_write_text(path, json.dumps(data, indent=2))
 
 
 def write_scan_latest(log_dir: Path, entry: Dict) -> None:
     """Write the latest full scan payload atomically for cockpit consumers."""
     path = log_dir / "scan_latest.json"
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(entry, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    durable_write.atomic_write_text(path, json.dumps(entry, indent=2))
 
 
 def build_market_context() -> Dict:

@@ -27,6 +27,7 @@ Storage is a JSONL ledger beside the outcomes ledger, keyed by trade id.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import random
@@ -36,6 +37,7 @@ from typing import Dict, List, Optional, Sequence
 
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import durable_write  # noqa: E402  (needs the path insert above)
 try:
     import config as _config
 except Exception:  # pragma: no cover
@@ -108,16 +110,61 @@ def _read() -> List[Dict]:
 
 
 def _write(rows: Sequence[Dict]) -> None:
-    PREDICTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = PREDICTIONS_FILE.with_suffix(".jsonl.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r) + "\n")
-    os.replace(tmp, PREDICTIONS_FILE)
+    durable_write.atomic_write_text(
+        PREDICTIONS_FILE, "".join(json.dumps(r) + "\n" for r in rows))
 
 
 def load() -> List[Dict]:
     return _read()
+
+
+# Set by batch(). While it holds a list, record() reads and appends to it instead of touching
+# the file, and writes once at the end.
+_BUFFER = None
+_BUFFER_IDS = None
+
+
+@contextlib.contextmanager
+def batch():
+    """Hold the ledger in memory for a burst of record() calls and write it once.
+
+    record() re-read and re-wrote the ENTIRE ledger per claim. That was invisible while this
+    file held 43 rows. It stopped being invisible on 2026-08-25, when fixing the close scan let
+    the daily direction sweep complete for the first time and write 449 claims in one run --
+    56 watchlist tickers x 4 horizons x (forecast + climatology baseline).
+
+    Measured cost of the un-batched path, per 449-claim sweep:
+
+        491 rows on disk (2026-08-26)   ~10.5 s
+        50,000 rows (about 4 months)    ~396 s
+
+    The cycle's Task Scheduler ExecutionTimeLimit is 30 minutes and a cycle already runs 11-16.
+    Left alone, the quadratic term would have started killing the close scan again within
+    months -- the same daily failure that was just fixed, arriving from a different direction
+    and looking nothing like a regression.
+
+    Batched, the sweep is one read and one write regardless of ledger size.
+    """
+    global _BUFFER, _BUFFER_IDS
+    if _BUFFER is not None:                  # already batching; let the outermost own the write
+        yield
+        return
+    # Buffer only the NEW rows, and take the lock at flush rather than for the whole batch. A
+    # sweep fetches a year of prices for 56 tickers between claims, so holding the lock across
+    # it would block every other writer for minutes. Re-reading at flush is what makes that
+    # safe: anything another process appended meanwhile is still there when we merge.
+    _BUFFER = []
+    _BUFFER_IDS = {r.get("id") for r in _read()}
+    try:
+        yield
+    finally:
+        fresh, _BUFFER, _BUFFER_IDS = _BUFFER, None, None
+        if fresh:
+            with durable_write.exclusive(PREDICTIONS_FILE):
+                rows = _read()
+                have = {r.get("id") for r in rows}
+                rows.extend(r for r in fresh if r.get("id") not in have)
+                _write(rows)
 
 
 def record(trade_id: str, ticker: str, claim_type: str, claim: str,
@@ -149,10 +196,16 @@ def record(trade_id: str, ticker: str, claim_type: str, claim: str,
             "the claim could never come due.", claim_type, ticker, resolves_on)
         return None
     pid = f"{trade_id}::{claim_type}"
-    rows = _read()
-    if any(r.get("id") == pid for r in rows):
-        return pid          # one claim of each type per trade; re-recording is a no-op
-    rows.append({
+    if _BUFFER is not None:
+        # Inside batch(): the ledger is already in memory and the id index is a set, so the
+        # duplicate check is O(1) and nothing is written until the batch closes.
+        rows, seen = _BUFFER, _BUFFER_IDS
+        if pid in seen:
+            return pid
+        seen.add(pid)
+    else:
+        rows = None         # filled under the lock below
+    row = {
         "id": pid, "trade_id": trade_id, "ticker": ticker,
         "claim_type": claim_type, "claim": claim,
         "probability": round(float(probability), 4) if probability is not None else None,
@@ -160,8 +213,16 @@ def record(trade_id: str, ticker: str, claim_type: str, claim: str,
         "resolves_on": str(resolves_on)[:10],
         "context": context or {},
         "status": "open", "correct": None, "resolved_at": None, "resolution_note": None,
-    })
-    _write(rows)
+    }
+    if rows is not None:                     # batching: the flush writes it
+        rows.append(row)
+        return pid
+    with durable_write.exclusive(PREDICTIONS_FILE):
+        rows = _read()
+        if any(r.get("id") == pid for r in rows):
+            return pid      # one claim of each type per trade; re-recording is a no-op
+        rows.append(row)
+        _write(rows)
     return pid
 
 
