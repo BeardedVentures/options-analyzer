@@ -1,6 +1,7 @@
 # ── Secrets ──────────────────────────────────────
 .env
 *.env
+data/.robinhood_mcp_tokens.json
 
 # ── Python ───────────────────────────────────────
 __pycache__/
@@ -57,3 +58,11 @@ VEGA_PAPER_DESK_README.md
 # Ledger snapshots taken before a repair. Data, not source — and they carry the same
 # contents as logs/, which is already ignored.
 backups/ledgers/
+
+# Backups of .env carry every secret .env does. One was created on 2026-08-27 while enabling
+# the Robinhood data source and sat untracked-but-not-ignored for a day; this repository is
+# PUBLIC, and it has already leaked three credentials (a NewsAPI key and two Gmail app
+# passwords). A timestamped copy of a secrets file is still a secrets file.
+.env.bak*
+*.env.bak*
+.env.*.bak
