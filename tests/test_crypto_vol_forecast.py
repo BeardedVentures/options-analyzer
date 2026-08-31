@@ -154,3 +154,96 @@ def test_it_is_a_separate_claim_type_from_the_direction_forecast():
     distinct is what lets the ledger say which one earns its place."""
     from analysis import predictions as p
     assert getattr(p, "DIRECTION_1D", "direction_1d") != "crypto_vrp_positive"
+
+
+# ── The claim has to be gradeable, not just recordable ───────────────────────────────────
+#
+# predictions.py grades DIRECTION claims against price. A VRP claim resolves against REALISED
+# VOL over the window, which is a different comparison entirely. Without a scorer for it these
+# claims accumulate as `open` forever and never grade -- exactly the trap btc_forecast.py was
+# written to avoid ("fully built and dormant": the ledger had a DIRECTION type nothing ever
+# wrote to). A claim that cannot come due is an opinion with a date on it.
+
+import math
+from datetime import date, timedelta
+
+import numpy as np
+
+
+def _bars(sigma_daily, n=30, start=date(2026, 7, 1), seed=7):
+    rng = np.random.default_rng(seed)
+    px, out = 100.0, []
+    for i in range(n):
+        px *= math.exp(rng.normal(0, sigma_daily))
+        out.append((start + timedelta(days=i), px * 1.01, px * 0.99, px, px))
+    return out
+
+
+def _claim(pred, tmp_path, iv, made="2026-07-01T15:00:00"):
+    pred.PREDICTIONS_FILE = tmp_path / "p.jsonl"
+    pred._write([])
+    pred.record("cvf-IBIT-t", "IBIT", pred.CRYPTO_VRP_POSITIVE, "claim", 0.6,
+                (date(2026, 7, 1) + timedelta(days=30)).isoformat(),
+                context={"ibit_iv": iv})
+    rows = pred.load()
+    rows[0]["made_at"] = made
+    pred._write(rows)
+
+
+def test_a_calm_window_under_rich_implied_grades_correct(tmp_path):
+    from analysis import predictions as pred
+    _claim(pred, tmp_path, iv=0.40)
+    pred.resolve(lambda t, s, e: _bars(0.010), today=date(2026, 8, 15))
+    r = pred.load()[0]
+    assert r["correct"] is True and r["status"] == "resolved"
+
+
+def test_a_wild_window_under_cheap_implied_grades_wrong(tmp_path):
+    """The half that matters. A scorer that cannot mark a claim WRONG grades nothing."""
+    from analysis import predictions as pred
+    _claim(pred, tmp_path, iv=0.20)
+    pred.resolve(lambda t, s, e: _bars(0.045), today=date(2026, 8, 15))
+    r = pred.load()[0]
+    assert r["correct"] is False and r["status"] == "resolved"
+
+
+def test_a_claim_with_no_implied_in_context_is_unresolvable_not_guessed(tmp_path):
+    from analysis import predictions as pred
+    pred.PREDICTIONS_FILE = tmp_path / "p.jsonl"
+    pred._write([])
+    pred.record("cvf-IBIT-x", "IBIT", pred.CRYPTO_VRP_POSITIVE, "claim", 0.6,
+                (date(2026, 7, 1) + timedelta(days=30)).isoformat(), context={})
+    rows = pred.load(); rows[0]["made_at"] = "2026-07-01T15:00:00"; pred._write(rows)
+    pred.resolve(lambda t, s, e: _bars(0.02), today=date(2026, 8, 15))
+    assert pred.load()[0]["correct"] is None
+
+
+def test_too_few_bars_is_refused_rather_than_measured(tmp_path):
+    """Vol over three sessions is not vol. Refusing beats a confident wrong number."""
+    from analysis import predictions as pred
+    _claim(pred, tmp_path, iv=0.40)
+    pred.resolve(lambda t, s, e: _bars(0.02, n=4), today=date(2026, 8, 15))
+    r = pred.load()[0]
+    assert r["correct"] is None and "too few" in (r["resolution_note"] or "")
+
+
+def test_the_scorer_annualises_on_market_days_not_calendar_days(tmp_path):
+    """The forecast maps BTC->IBIT on sqrt(252). Scoring the outcome on sqrt(365) would inflate
+    every realised number by ~20% and bias every verdict the same way -- and the sign of that
+    bias would never surface in the hit rate."""
+    from analysis import predictions as pred
+    _claim(pred, tmp_path, iv=0.40)
+    pred.resolve(lambda t, s, e: _bars(0.020), today=date(2026, 8, 15))
+    note = pred.load()[0]["resolution_note"]
+    realised = float(note.split("realised ")[1].split("%")[0])
+    expected = 0.020 * math.sqrt(252) * 100
+    assert abs(realised - expected) < 6, f"{realised} not near {expected} (252-day annualised)"
+
+
+def test_it_grades_alongside_the_direction_claims(tmp_path):
+    """Same ledger, same grader. That is the whole point of not giving it a private table."""
+    from analysis import predictions as pred
+    _claim(pred, tmp_path, iv=0.40)
+    pred.resolve(lambda t, s, e: _bars(0.010), today=date(2026, 8, 15))
+    g = pred.grade()
+    assert pred.CRYPTO_VRP_POSITIVE in g["by_type"]

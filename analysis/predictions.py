@@ -70,6 +70,12 @@ DIRECTION_1M = "direction_1m"                # ~21 trading days out
 # lottery tab's own question — it already computes `breakeven_move_pct` per candidate and has
 # never once recorded whether that move arrived. Distinct from EVENT_REALISED, which is
 # undirected and measures a single day's range rather than cumulative travel.
+# A volatility claim, not a price one: does realised vol over the window finish BELOW the
+# implied that was sold? This is the question a credit spread actually asks, and it is
+# deliberately a SEPARATE type from the direction claims so the ledger can say which of
+# the two earns its place. Written by analysis/crypto_vol_forecast.py.
+CRYPTO_VRP_POSITIVE = "crypto_vrp_positive"
+
 MOVE_EXCEEDS = "move_exceeds"
 
 # Did price finish inside the band the engine drew? price_projection states a range at a stated
@@ -363,6 +369,29 @@ def _score(r: Dict, bars: Sequence) -> tuple:
         ok = final < float(k) if is_call else final > float(k)
         return ok, (f"settled {final:.2f} vs strike {float(k):.2f} "
                     f"({'call' if is_call else 'put'} side)")
+
+    if ct == CRYPTO_VRP_POSITIVE:
+        # "Realised vol finishes below the implied that was sold." Scored on the SAME
+        # annualisation the forecast used (sqrt(252), market days) -- comparing a 252-day
+        # annualised realised against a 365-day annualised forecast would bias every verdict in
+        # one direction and the sign of that bias would never show up in the hit rate.
+        iv = ctx.get("ibit_iv")
+        if iv is None:
+            return None, "no implied vol in context"
+        if len(closes) < 10:
+            return None, f"only {len(closes)} bars in the window; too few to measure vol"
+        import math
+        rets = [math.log(closes[i] / closes[i - 1])
+                for i in range(1, len(closes)) if closes[i - 1] > 0 and closes[i] > 0]
+        if len(rets) < 9:
+            return None, "not enough usable returns in the window"
+        mean = sum(rets) / len(rets)
+        var = sum((x - mean) ** 2 for x in rets) / len(rets)
+        realised = math.sqrt(var) * math.sqrt(252.0)
+        ok = realised < float(iv)
+        return ok, (f"realised {realised * 100:.1f}% vs implied {float(iv) * 100:.1f}% over "
+                    f"{len(rets)} sessions -> premium {'held' if ok else 'did NOT hold'} "
+                    f"({(float(iv) - realised) * 100:+.1f} vol pts)")
 
     if ct == STRIKE_UNTOUCHED:
         k = ctx.get("short_strike")

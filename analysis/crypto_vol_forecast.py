@@ -327,7 +327,7 @@ def record_claim(view: Dict, today: Optional[date] = None,
     return pred.record(
         trade_id=trade_id,
         ticker=ticker,
-        claim_type="crypto_vrp_positive",
+        claim_type=getattr(pred, "CRYPTO_VRP_POSITIVE", "crypto_vrp_positive"),
         claim=("Realised vol on %s over the next %d days finishes BELOW the %.1f%% implied "
                "sold today. Forecast realised %.1f%%, edge %+.1f vol pts. %s"
                % (ticker, horizon, 100 * (view.get("ibit_iv") or 0),
