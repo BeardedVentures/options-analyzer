@@ -1265,6 +1265,56 @@ def _record_direction_forecasts() -> Dict:
         return {}
 
 
+def _record_crypto_premium_view() -> Optional[str]:
+    """One dated claim per day about whether IBIT premium is worth selling.
+
+    Same gate hour as the direction sweep and for the same reason: the claim is anchored to a
+    close, and recording it mid-session would date it to a price that is still moving.
+
+    ADVISORY. It records and is graded; it does not touch selection. The cohort contract treats
+    a criterion added mid-cohort as a sample split, and ravens is at 12 of 30 -- so this has to
+    earn its way in by being right on the ledger first.
+    """
+    if not getattr(config, "CRYPTO_VOL_FORECAST_ENABLED", True):
+        return None
+    after = int(os.getenv("VEGA_DIRECTION_AFTER_HOUR",
+                          str(getattr(config, "DIRECTION_RECORD_AFTER_HOUR", 14))))
+    if datetime.now().hour < after:
+        return None
+    try:
+        import pandas as pd
+        import yfinance as yf
+        from analysis import crypto_vol_forecast as cvf
+        from data import fetcher as _f
+
+        btc = yf.Ticker("BTC-USD").history(start="2017-01-01", auto_adjust=False)["Close"]
+        ibit = yf.Ticker("IBIT").history(start="2024-01-01", auto_adjust=False)["Close"]
+        for _s in (btc, ibit):
+            _s.index = pd.to_datetime(_s.index).tz_localize(None)
+        j = pd.DataFrame({"b": btc, "i": ibit}).dropna()
+
+        iv = None
+        try:
+            spot = float(_f.get_price_data("IBIT")["Close"].iloc[-1])
+            chain = [c for c in _f.get_options_chain("IBIT") if c.get("iv")]
+            if chain:
+                iv = sorted(chain, key=lambda c: abs(c["strike"] - spot))[0]["iv"]
+        except Exception:
+            pass
+
+        view = cvf.premium_view(
+            iv, list(btc.values),
+            ibit_closes=list(j.i.values) if len(j) > 200 else None,
+            paired_btc_closes=list(j.b.values) if len(j) > 200 else None)
+        pid = cvf.record_claim(view)
+        _log(f"CRYPTO PREMIUM VIEW {view.get('verdict')} "
+             f"expected_vrp={view.get('expected_vrp_pp')}pp claim={pid or 'not recorded'}")
+        return pid
+    except Exception as exc:
+        _log(f"Crypto premium view failed: {exc}")
+        return None
+
+
 def _record_counterfactuals() -> Dict:
     """Re-resolve every candidate the scan snapshots hold, once a day near the close.
 
@@ -1475,6 +1525,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             _record_btc_forecast()
             _resolve_predictions()
             _record_direction_forecasts()
+            _record_crypto_premium_view()
             _grade_shadow_book()
             _run([sys.executable, "paper_desk.py", "report"])
             _run([sys.executable, "paper_desk.py", "dashboard", "--no-open"])
@@ -1512,6 +1563,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         _record_btc_forecast()
         _resolve_predictions()
         _record_direction_forecasts()
+        _record_crypto_premium_view()
         _record_counterfactuals()
         _grade_shadow_book()
 

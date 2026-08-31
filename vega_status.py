@@ -273,6 +273,60 @@ def btc():
         print(f"  forecast ledger unavailable: {e}")
 
 
+def crypto_premium():
+    """The IBIT premium view: is selling paid for the risk right now?
+
+    Advisory. It gates nothing -- the cohort contract says a criterion added mid-cohort splits
+    the sample as surely as a rule change, and the ravens cohort is at 12 of 30. This earns its
+    way into selection by being right on the ledger first.
+    """
+    _hdr("4b - IBIT PREMIUM VIEW  (forecast realised vs implied)")
+    try:
+        import pandas as pd
+        import yfinance as yf
+        from analysis import crypto_vol_forecast as cvf
+        from data import fetcher as _f
+
+        btc = yf.Ticker("BTC-USD").history(start="2017-01-01", auto_adjust=False)["Close"]
+        ibit = yf.Ticker("IBIT").history(start="2024-01-01", auto_adjust=False)["Close"]
+        for _s in (btc, ibit):
+            _s.index = pd.to_datetime(_s.index).tz_localize(None)
+        j = pd.DataFrame({"b": btc, "i": ibit}).dropna()
+
+        iv = None
+        try:
+            spot = float(_f.get_price_data("IBIT")["Close"].iloc[-1])
+            chain = [c for c in _f.get_options_chain("IBIT") if c.get("iv")]
+            if chain:
+                iv = sorted(chain, key=lambda c: abs(c["strike"] - spot))[0]["iv"]
+        except Exception:
+            pass
+
+        v = cvf.premium_view(iv, list(btc.values),
+                             ibit_closes=list(j.i.values) if len(j) > 200 else None,
+                             paired_btc_closes=list(j.b.values) if len(j) > 200 else None)
+        f = v.get("forecast") or {}
+        print(f"  BTC forward {f.get('horizon_days', 30)}d vol   "
+              f"{('%.1f%%' % (100 * f['forecast_rv'])) if f.get('forecast_rv') else '—'}"
+              f"   {_c(f.get('method', '—'), D)} · trailing "
+              f"{('%.1f%%' % (100 * f['trailing_rv'])) if f.get('trailing_rv') else '—'}")
+        if v.get("ibit_rv_forecast"):
+            print(f"  mapped to IBIT        {100 * v['ibit_rv_forecast']:.1f}%   "
+                  f"{_c((v.get('ibit_map') or {}).get('method', ''), D)}")
+        print(f"  IBIT implied (live)   "
+              f"{('%.1f%%' % (100 * iv)) if iv else _c('unavailable', D)}")
+        if v.get("available"):
+            col = {"SELL_PREMIUM": G, "THIN": Y, "STAND_ASIDE": R}.get(v["verdict"], D)
+            print(f"  expected VRP          {_c('%+.1f vol pts' % v['expected_vrp_pp'], col)}"
+                  f"   P(realised<implied) {v.get('prob_realised_under_implied')}")
+            print(f"  verdict               {_c(v['verdict'], col)}")
+        print(f"  {_c(v.get('note', ''), D)}")
+        print(f"  {_c('advisory — records a graded claim, gates nothing', D)}")
+    except Exception as exc:
+        print(f"  {_c('unavailable: %s' % str(exc)[:70], D)}")
+    print()
+
+
 def record():
     _hdr("5 · THE RECORD, BY COHORT")
     rows = ol.load_records()
@@ -457,6 +511,7 @@ if __name__ == "__main__":
     data_quality()
     iv_readiness()
     btc()
+    crypto_premium()
     record()
     learning()
     why_empty()

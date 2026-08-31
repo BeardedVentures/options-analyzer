@@ -1252,3 +1252,18 @@ DISCLAIMER = (
     "solely by the user. Options trading involves significant risk of loss. "
     "Past performance does not guarantee future results."
 )
+
+# ─────────────────────────────────────────────
+# CRYPTO VOLATILITY FORECAST (analysis/crypto_vol_forecast.py)
+# ─────────────────────────────────────────────
+# Forecasts FORWARD realised vol for BTC and maps it to IBIT, so the IBIT premium
+# decision is made against what vol is expected to DO rather than what it has done.
+# Measured 2026-08-31: HAR-style beats trailing-vol by 9.3% RMSE out-of-sample over
+# 2,045 walk-forward predictions. Real and modest.
+#
+# ADVISORY. It records a graded claim and gates nothing. A criterion added mid-cohort
+# splits the sample as surely as a rule change, and ravens is at 12 of 30.
+CRYPTO_VOL_FORECAST_ENABLED = True
+# Volatility points of expected premium required before selling is called worthwhile.
+# Not zero: a forecast 9.3% better than naive still carries real error.
+CRYPTO_MIN_EDGE_VOL_POINTS = 5.0
