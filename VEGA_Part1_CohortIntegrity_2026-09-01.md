@@ -106,6 +106,16 @@ the fix landed. See §1.3, because the cause is the term-structure fetch.
 The first scan lands at 96% — one point under the 97% "confirms" bar and far above the 90%
 failure line. Every scan after it reads 100%. On the threshold as written, this passes.
 
+> **CORRECTED 2026-09-02.** These reported figures were inflated. `chain_coverage()` does
+> `skipped -= passed`, and the DTE 5-120 term-structure fetch was a *third* window that passed
+> for tickers which had failed **both** trading chains — silently crediting them as covered. True
+> coverage (failed every window fetched) was **89%** on the 08:52 scan, not 96%: ABBV, CLF, NEE,
+> PFE, PLD and USB were rescued by the wide window. Later scans were 98%, not 100%. Disabling
+> term structure on 2026-09-02 removed the third window, and the first scan after it read 88%
+> reported = 88% true. So the honest before/after is **89% → 88%, flat**, with a metric that can
+> no longer be inflated by adding a window. The delta-band gate's win over the 53.6–67.9%
+> whole-grid baseline stands; only these headline percentages move.
+
 **Canary tickers {GE, RCL, LMT, BAC, JNJ, PFE}** — reported as a miss, not rationalised:
 
 - **GE — cleared.** Never skipped, on either side, on any scan. This was the headline case for
@@ -190,9 +200,16 @@ written, because today produced zero rate limits. There is no active bleeding to
 But a **stronger and more concrete** argument appeared in its place:
 
 > The DTE 5-120 surface fetch is what exhausts the 12-page instrument budget on SPY and QQQ. It
-> truncates on both names on every scan. And because `_truncated_walks` is keyed by **ticker**
-> rather than by (ticker, window), that truncation then blocks the ticker's *subsequent* call-chain
-> fetch as well — SPY's and QQQ's call chains return empty for the rest of the scan.
+> truncates on both names on every scan.
+>
+> ~~And because `_truncated_walks` is keyed by **ticker** rather than by (ticker, window), that
+> truncation then blocks the ticker's *subsequent* call-chain fetch as well — SPY's and QQQ's call
+> chains return empty for the rest of the scan.~~ **WRONG, corrected 2026-09-02.**
+> `_truncated_walks` is read at exactly one site, in `get_options_chain` (the put path);
+> `get_call_options_chain` never consults it. SPY and QQQ were scored and rejected normally on
+> 09-01 — SPY on a news block, QQQ on IV Rank 38.5 — with both trading chains intact. The real
+> cost was narrower: the surface signal was unavailable for the two names it is most expensive to
+> compute. Term structure was disabled anyway on 2026-09-02, on the cost argument alone.
 
 So the term-structure read is not merely expensive. It is, right now, the reason VEGA cannot see
 the call side of the two most liquid underlyings on its watchlist, in exchange for an advisory
@@ -306,7 +323,7 @@ already existed, and `_is_retryable_error`, which is unchanged.
 | item | premise | outcome |
 |---|---|---|
 | 1.1 | 85 events correct; 25 open positions wrong (it is 5) | **Zero affected.** No flag applied. Found live SPY/QQQ truncation instead |
-| 1.2 | — | **Pass** at 96→100% vs 53.6–67.9% baseline. **LMT is a named miss.** Retry logic unexercised — credit belongs to the gate change |
+| 1.2 | — | **Pass** at 89→100% *true* (96→100% as reported was inflated — see the correction) vs 53.6–67.9% baseline. **LMT is a named miss.** Retry logic unexercised — credit belongs to the gate change |
 | 1.3 | 52% of volume | **~60.1%**, re-derived. Recommend disabling; new argument is SPY/QQQ, not rate limits. **Not flipped — your call** |
 | 1.4 | 17 tickers, 7 open — wrong | **Zero yfinance today, zero ever touched an open position.** Real gap found and fixed: iron condor never stamped `chain_source` |
 | 1.5 | optional | **Done**, and promoted — the matcher is unexercised in production |

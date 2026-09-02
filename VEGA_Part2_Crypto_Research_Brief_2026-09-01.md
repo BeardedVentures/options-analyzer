@@ -7,13 +7,40 @@ is itself the most important finding here.
 
 ---
 
-## 0. The isolation requirement is already violated — and this needs a decision before anything else
+## 0. Where the crypto boundary actually is — CORRECTED 2026-09-02
 
-The handoff's hard isolation requirements say a crypto bolt-on "must not share VEGA's scan cycle,
-scheduler, or rate-limit budget" and must be "a separate file/module from the outset".
+> **This section was wrong when first written, and the error was mine.** It said crypto "ran in
+> every one of today's seven scans", inferred from 38 Coinbase readings in the quality log. That
+> inference does not hold: `crypto._record_quality` never passes a `scan_id`, so the `None` on
+> those rows says nothing about what produced them. Measuring properly on 2026-09-02 gives a
+> different and much narrower answer, below. The original text is superseded, not amended,
+> because the conclusion it reached was the opposite of the correct one.
 
-**That ship has sailed.** Crypto is not a proposed bolt-on. It is already inside VEGA, enabled, and
-ran in every one of today's seven scans:
+**What is actually true.** `auto_paper_cycle` spawns `main.py` as a **subprocess** and waits for
+it. The crypto phases run afterwards, in the parent, once that process has exited — so they spend
+none of the scan's Robinhood budget. From the 2026-09-01 14:35 cycle:
+
+```
+14:35:02  START
+14:35:02  main.py  (run_scan)                17m 41s   <- the scan, a separate process
+14:52:43  vega_candidates.py                  8m 23s
+15:01:06  _auto_open_from_board / reprice
+15:01:33  _record_btc_forecast                    ~7s   <- crypto
+15:01:55  _resolve + _record_direction_forecasts  22s
+15:02:00  _record_crypto_premium_view             ~5s   <- crypto
+15:02:42  END                          total  27m 40s
+```
+
+**Crypto costs 12 seconds of a 27m40s cycle — 0.7% — and zero request budget.** The Coinbase
+readings cluster at 09:00, 09:59, 11:00, 11:59, 13:00, 13:59, 15:00: roughly eight minutes *after*
+each scan completes, exactly as this sequencing predicts.
+
+The **one** genuine in-scan hook is `assessment._btc_cross_venue`, reached from `assess()` for
+every ticker but short-circuiting before any I/O unless the ticker is in `BTC_PROXY_TICKERS`
+(`{"IBIT"}`). One cached HTTP read for IBIT; nothing at all for the other 55. ETHA declares a DVOL
+reference but is not on the watchlist.
+
+So the components are:
 
 | component | file | flag | state |
 |---|---|---|---|
@@ -23,28 +50,35 @@ ran in every one of today's seven scans:
 | BTC signal primitives | `analysis/btc_signal.py` | — | live |
 | Coinbase/Deribit data | `data/crypto.py` | — | live |
 
-Evidence it ran today: `data/data_quality_log.json` records **38 `coinbase` readings on
-2026-09-01**, interleaved with the 1,772 `robinhood` ones, under the same `scan_id`s. IBIT is a
-watchlist member (`config.py`: "iShares Bitcoin ETF — crypto exposure, high IV, zero equity
-correlation") and carries its own sector mapping.
+All three are enabled and run once per cycle. IBIT is a watchlist member on purpose
+(`config.py`: "iShares Bitcoin ETF — crypto exposure, high IV, zero equity correlation") and
+carries its own sector mapping, so its chain is fetched by the equity scan like any other name —
+that is an options fetch, not a crypto one.
 
-**How bad is the contamination?** Better than it sounds, because the existing design was careful:
+**How much isolation already exists?** Effectively all of the isolation that matters:
 
 - The BTC signal is **advisory by construction** — `config.py` states it "never enters the gates
   dict, so it cannot block a trade regardless of what it reads". That is the same discipline the
   `advisory=True` convention enforces elsewhere.
 - BTC claims go to `vega_predictions.jsonl` (the **prediction** ledger), not to
   `vega_outcomes.jsonl` (the **trade** ledger). The 30-trade cohort clock is untouched.
-- It does, however, share the scan cycle and the request budget.
+- It does **not** share the scan's process or request budget. It shares only ~12s of cycle
+  wall-clock, after the scan has finished.
 
-**Decision needed from Josh, and it is genuinely a decision, not a cleanup:** the handoff wants
-crypto walled off; the codebase has already integrated it under weaker but real safeguards
-(advisory-only, separate ledger). Extracting it now would be a substantial refactor of working,
-tested code that is not currently harming the cohort. My recommendation is to **leave it where it
-is and correct the handoff's framing**, because the isolation requirement's actual purpose —
-"don't let this contaminate the 30-trade cohort" — is already satisfied by the advisory-only rule
-and the separate ledger. But that is your call, and it should be made explicitly rather than by
-default.
+**DECIDED 2026-09-02: enforce and document, do not extract.** The isolation a standalone module
+would buy is already held by the process split and the gates rule. What extraction would *add* is
+a second scheduled task — and every serious VEGA outage on record has been scheduler fragility
+(`StopAtDurationEnd` killing the close scan, the un-hidden window, cp1252 stdout), so spending a
+new task to save twelve seconds is the wrong side of that trade. The IBIT read in particular is
+not overhead: DVOL-versus-IBIT-IV is a premium-richness read on a watchlist underlying held
+deliberately for uncorrelated VRP, which is the mission rather than a distraction from it.
+
+What was done instead: `tests/test_crypto_boundary.py` (12 tests) holds the boundary
+**behaviourally** — driving the crypto reading to both extremes and asserting `qualified` and
+`failed_gates` do not move, asserting the gate set still equals `config.REQUIRED_GATES`, asserting
+the two ledger paths stay distinct, asserting the cohort key grows no crypto dimension, and
+asserting the scan subprocess still runs *before* any crypto phase. The measured boundary is
+recorded in `config.py` above `BTC_SIGNAL_ENABLED`.
 
 ---
 

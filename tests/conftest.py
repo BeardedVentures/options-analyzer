@@ -117,6 +117,25 @@ def _reset_process_caches():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _entry_hold_off_by_default(monkeypatch):
+    """Test the ENTRY LOGIC, not the current deployment posture.
+
+    config.ENTRY_HOLD is a hard stop added 2026-09-02, checked before anything else in
+    _auto_open_from_board. Deployed ON, it short-circuits the open path -- which took twelve
+    entry-diversification tests red at once, all of them reporting an operator decision as a
+    logic regression. Worse, it would have left the per-run, per-day and per-expiration caps
+    UNTESTED for as long as the hold stayed on, so a real break in them would surface only
+    once entry resumed.
+
+    So the default here is OFF and tests/test_entry_hold.py turns it ON explicitly. Both
+    directions stay covered, and neither depends on what config happens to say today.
+    """
+    import config
+    monkeypatch.setattr(config, "ENTRY_HOLD", False, raising=False)
+    yield
+
+
 @pytest.fixture
 def temp_ledger(tmp_path, monkeypatch):
     """Point outcome_logger at a throwaway ledger so tests can never touch logs/vega_outcomes.jsonl."""

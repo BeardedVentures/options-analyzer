@@ -596,6 +596,14 @@ def _auto_open_from_board() -> int:
       here has already passed. Re-checked anyway: this is the last point where a leak between
       the engine and the desk could still open a trade nobody approved.
     """
+    # FIRST, before the board is even read. A hold that only applies to boards it managed to
+    # parse is a hold with a hole in it.
+    if getattr(config, "ENTRY_HOLD", False):
+        _log("ENTRY HELD — no new positions will be opened. "
+             f"{getattr(config, 'ENTRY_HOLD_REASON', 'no reason recorded')} "
+             "(lift by setting config.ENTRY_HOLD = False)")
+        return 0
+
     if not BOARD_FILE.exists():
         _log("No board artifact yet — run the engine (main.py) before the desk can open.")
         return 0

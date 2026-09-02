@@ -248,6 +248,21 @@ def test_output_shape_is_stable():
 
 # ── Edge-score modifier ───────────────────────────────────────────────────────────────────────
 
+@pytest.fixture
+def term_structure_on(monkeypatch):
+    """Score the term-structure component with the feature ON, whatever the deployment says.
+
+    These tests assert what the SCORING RULE does, which is a different question from whether
+    the operator currently wants the signal. TERM_STRUCTURE_ENABLED was set False on
+    2026-09-02 (60% of fetch volume, ungraded), and without this fixture seven of these went
+    red -- reporting a config decision as a logic regression and, worse, leaving the rule
+    itself untested for as long as the flag stays off. Pinning it here keeps both directions
+    covered: these prove the adjustment applies when enabled, and
+    test_disabling_term_structure_zeroes_the_component proves it vanishes when not.
+    """
+    monkeypatch.setattr(config, "TERM_STRUCTURE_ENABLED", True, raising=False)
+
+
 def _score(**over):
     from analysis.edge_calculator import calculate_edge_score
     base = dict(ticker="T", strategy="bull_put_spread", technical_score=70,
@@ -260,7 +275,7 @@ def _score(**over):
 @pytest.mark.parametrize("slope,expected", [
     ("upward", 5), ("flat", 2), ("downward", -5), ("event_spike", -8), ("unknown", 0),
 ])
-def test_term_slope_moves_the_score(slope, expected):
+def test_term_slope_moves_the_score(slope, expected, term_structure_on):
     assert _score(term_slope=slope)["component_breakdown"]["term_structure"] == expected
 
 
@@ -276,12 +291,12 @@ def test_term_structure_is_passed_as_a_keyword_not_a_trade_dict():
     assert "trade" not in params
 
 
-def test_event_inside_the_window_penalises_an_otherwise_benign_slope():
+def test_event_inside_the_window_penalises_an_otherwise_benign_slope(term_structure_on):
     assert _score(term_slope="flat", event_expiry_flag=True)[
         "component_breakdown"]["term_structure"] == -4
 
 
-def test_event_and_spike_do_not_stack_into_a_double_penalty():
+def test_event_and_spike_do_not_stack_into_a_double_penalty(term_structure_on):
     """When the slope IS the spike, the two describe one observation."""
     assert _score(term_slope="event_spike", event_expiry_flag=True)[
         "component_breakdown"]["term_structure"] == -8
@@ -303,7 +318,7 @@ def test_event_spike_never_disqualifies():
     assert "term" not in (r.get("disqualification_reason") or "").lower()
 
 
-def test_term_structure_is_a_bonus_component_not_a_base_one():
+def test_term_structure_is_a_bonus_component_not_a_base_one(term_structure_on):
     """It sits outside the 0-100 base like skew and post-earnings, so it adjusts the final
     score rather than diluting the weights of the components it sits beside."""
     up = _score(term_slope="upward")

@@ -178,6 +178,36 @@ IV_PLAUSIBLE_MAX_MULT = 3.0       # Stored IV above this multiple of the ticker'
 #
 # ADVISORY BY CONSTRUCTION: this never enters the gates dict, so it cannot block a trade
 # regardless of what it reads. See analysis/btc_signal.py.
+#
+# ── WHERE THE CRYPTO/EQUITY BOUNDARY ACTUALLY IS ─────────────────────────────
+# Written down 2026-09-02 because a review had just asserted the wrong version of it, and a
+# boundary nobody can measure is a boundary that drifts. Enforced by
+# tests/test_crypto_boundary.py, not by this comment.
+#
+# MEASURED on the 2026-09-01 cycles, not assumed:
+#
+#  * auto_paper_cycle spawns main.py as a SUBPROCESS and waits. _record_btc_forecast and
+#    _record_crypto_premium_view run afterwards, in the parent, once that process has exited.
+#    Different process, so they spend NONE of the scan's Robinhood budget. Cost: 12s of a
+#    27m40s cycle -- 0.7% -- against 17m41s for the scan and 8m23s for vega_candidates.
+#
+#  * The ONE hook inside the scan is assessment._btc_cross_venue, reached from assess() for
+#    every ticker but short-circuiting before any I/O unless the ticker is in
+#    BTC_PROXY_TICKERS. So it is one cached HTTP read for IBIT and nothing at all for the
+#    other 55 names. ETHA declares a DVOL reference too but is not on the watchlist.
+#
+#  * Claims land in logs/vega_predictions.jsonl. The 30-trade cohort clock is
+#    logs/vega_outcomes.jsonl and no crypto path writes it. btc_iv_gap_pp / btc_vrp_pp are
+#    recorded ON a trade row when one opens; they are recordings, never inputs, and both
+#    default to None so the equity ledger never depends on a crypto feed being up.
+#
+# NOT EXTRACTED, deliberately (decision 2026-09-02). The isolation a standalone module would
+# buy is already held by the process split and the gates rule; what it would add is a second
+# scheduled task. Every serious VEGA outage on record has been scheduler fragility --
+# StopAtDurationEnd killing the close scan, the un-hidden window Josh kept closing, cp1252
+# stdout -- so buying 12 seconds with another task is the wrong side of that trade. And the
+# IBIT read is not overhead to be trimmed: DVOL-versus-IBIT-IV is a premium-richness read on
+# a watchlist underlying deliberately held for uncorrelated VRP, which is the mission.
 BTC_SIGNAL_ENABLED = True
 # Only underlyings that track BTC ~1:1. Measured 2026-08-09: DVOL 34.24 vs IBIT 32.72 (a 1.5pt
 # gap between two prices for the same risk) but vs COIN 65.23 (a 31pt gap). COIN is an operating
@@ -639,6 +669,36 @@ MAX_OPEN_PER_EXPIRATION = 4      # with 15 open max, forces at least four settle
 # the first trade opened under the new rules would have joined them under an identical key and
 # the count would have read 5 of 30 as though nothing had changed. Entry rules select the
 # population; a change to them starts a new one, and the key has to say so.
+# ─── ENTRY HOLD (added 2026-09-02) ───────────────────────────────────────────────────────────
+# A HARD STOP on opening new positions. Checked first thing in
+# auto_paper_cycle._auto_open_from_board(), before the board is even read.
+#
+# WHY THIS EXISTS AS A FLAG AND NOT AS AN UNDERSTANDING. The 2026-09-02 brief said the first
+# caps_v1 trade must not open until the scanner had been fixed, and the honest answer to "what
+# is stopping it?" was NOTHING. Entry was not gated; it was merely not happening, because the
+# board has qualified almost nothing since 2026-08-10. A drought is not a control -- the moment
+# one board qualifies, _auto_open_from_board opens up to MAX_NEW_OPENS_PER_RUN positions with
+# no further approval. Relying on that is relying on the bug to keep holding.
+#
+# It is deliberately NOT implemented as VEGA_MAX_OPEN_TOTAL=5, which would have the same effect
+# today: that reads as a capacity limit rather than a stop, would silently stop holding the
+# moment a position closes, and leaves no reason string anywhere.
+#
+# This is a cohort-safe control. It gates ENTRY TIMING, not selection: it opens no trade, closes
+# none, and changes no rule about which trades qualify. Nothing keyed by cohort() moves.
+#
+# TO LIFT: set ENTRY_HOLD = False. Do that only when the answer to ENTRY_HOLD_REASON is yes.
+ENTRY_HOLD = True
+ENTRY_HOLD_REASON = (
+    "Watchlist audit (VEGA_Watchlist_Audit_2026-09-02.md) is a PROPOSAL awaiting sign-off. "
+    "Steps 1 and 2 of the 2026-09-02 brief are complete and revalidated -- term structure is "
+    "off (fetch volume -60.6%, SPY/QQQ truncation gone) and the crypto boundary is enforced by "
+    "tests. Step 3 is delivered but NOT decided: 31 of 56 watchlist names produced zero "
+    "qualified spreads in 8 trading days, and whether any are cut is Josh's call. The caps_v1 "
+    "cohort is at 0 of 30, so the first trade it opens should be selected by a scanner whose "
+    "watchlist has already been decided -- not one still under review."
+)
+
 ENTRY_RULES_EPOCH = "2026-08-20"
 ENTRY_RULES_EPOCH_LABELS = ("pre_caps", "caps_v1")
 
@@ -990,10 +1050,47 @@ LEVEL_MANAGEMENT_ALERTS = True
 # COST, measured 2026-08-31: this read spans DTE 5-120 against the 25-45 the engine trades,
 # and it accounted for 8,491 of the 16,290 option contracts quoted in a single scan -- 52% of
 # the entire Robinhood request budget, for a signal that is advisory and never hard-blocks.
-# Its sibling SKEW_SCORING_ENABLED is already off for a related reason. Setting this to False
-# halves per-scan request volume in one flip; it is left True because dropping a signal is a
-# judgement call, not a bug fix.
-TERM_STRUCTURE_ENABLED = True
+# Its sibling SKEW_SCORING_ENABLED is already off for a related reason.
+#
+# DISABLED 2026-09-02. The judgement call above was made; this is what it was made on.
+#
+# Re-derived cost, over the seven full scans of 2026-09-01: 81,318 of 135,398 contracts, or
+# 60.1% -- HIGHER than the 52% measured on 08-31, because coverage improved and more tickers
+# now reach the fetch at all. Per scan that is 11,616 contracts of 19,342.
+#
+# WHY IT COSTS THAT MUCH, which is the part that decides it. This is a SCORING input --
+# edge_calculator adds TERM_STRUCTURE_SCORE_ADJ (+5 upward, -8 event_spike) as a bonus
+# component, and the bonus has to exist before `total >= MIN_EDGE_SCORE` is evaluated. So the
+# DTE 5-120 pull happens in screen_ticker for ALL 56 tickers, ahead of every gate, including
+# the ~47 about to be rejected. assessment.load_context's docstring argues exactly this case
+# and offers enrich_surface() as the fix -- "roughly nine tickers rather than fifty-six" --
+# but that path is post-selection ANALYSIS and cannot serve a pre-selection SCORE. The eager
+# fetch is not a bug to be fixed; it is what scoring on this signal costs.
+#
+# So the trade is: 60% of the request budget, spent ahead of selection, on a bonus that has
+# never been graded. Under a mission of finding high-edge premium, that budget is better spent
+# on depth and reliability in the names that can actually support it.
+#
+# Timing is deliberate. Term structure is not in the COHORT CONTRACT block, but it selects
+# which trades qualify, and the caps_v1 cohort currently stands at 0 of 30. Flipping it now
+# costs nothing; flipping it after the first trade opens would restart the count, exactly as
+# the entry-diversification block argued for the caps on 2026-08-20.
+#
+# ONE CLAIM CORRECTED, because it was mine and it was wrong. The 2026-09-01 Part 1 findings
+# said this fetch's truncation "blocks the ticker's subsequent call-chain fetch as well". It
+# does not. `_truncated_walks` is read at exactly one site, in get_options_chain (the put
+# path); get_call_options_chain never consults it. On 2026-09-01 SPY and QQQ were scored and
+# rejected normally -- SPY on a news block, QQQ on IV Rank 38.5 -- with both trading chains
+# intact. The real cost of the truncation is narrower: the surface signal is unavailable for
+# SPY and QQQ, i.e. it fails on precisely the two names it is most expensive to compute.
+#
+# TO RE-ENABLE, both must be true:
+#   1. The signal is GRADED -- term_slope carried on closed trades, and its buckets shown to
+#      separate outcomes. TERM_STRUCTURE_SCORE_ADJ's five constants are reasoned, never fitted.
+#   2. The SPY/QQQ page_budget_exhausted truncation is fixed first (raise
+#      _MAX_INSTRUMENT_PAGES, or narrow TERM_STRUCTURE_MAX_DTE), so re-enabling does not
+#      reintroduce a signal that is blind on the two most liquid underlyings.
+TERM_STRUCTURE_ENABLED = False
 TERM_STRUCTURE_MIN_DTE = 5        # ignore weeklies — not the curve a 25-45 DTE seller trades
 TERM_STRUCTURE_MAX_DTE = 120      # ignore LEAPS
 TERM_STRUCTURE_FLAT_BAND_PTS = 2.0   # |back - front| inside this reads as flat
