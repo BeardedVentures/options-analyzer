@@ -103,10 +103,10 @@ Delivered instead of an extraction:
 
 ---
 
-## Step 3 — Watchlist audit ✅ DELIVERED as a proposal — **awaiting your sign-off**
+## Step 3 — Watchlist audit ✅ Tier B EXECUTED, Tier A revised by diagnostic
 
-Full artifact: **`VEGA_Watchlist_Audit_2026-09-02.md`**. Nothing has been cut; the watchlist
-config is untouched.
+Full artifact: **`VEGA_Watchlist_Audit_2026-09-02.md`**, delivered as a proposal and since acted
+on — see *Resolved* below.
 
 **The premise was wrong in both directions.**
 
@@ -135,10 +135,40 @@ producing tickers      (n=25) : median IV rank 25.4
 Six zero-qualifiers sat in exactly the premium-rich conditions the strategy wants and still
 produced nothing — XBI 49 spreads at median IVR 56 → 0; also BAC, PEP, XOM, TLT, CRWD.
 
-**Recommendation: approve Tier B now (LMT, ABBV — chain quality, clean call on 7 scans); hold
-Tier A (XBI, CRWD, PEP, XOM, TLT, BAC) for one more week.** Tier A is a claim about *edge* on 8
-trading days, and the asymmetry favours waiting: a cut name produces nothing forever, while a kept
-name costs only budget Step 1 already freed 60% of.
+### Resolved 2026-09-02
+
+**Tier B executed.** LMT and ABBV removed; watchlist 56 → 54. Commented out rather than deleted,
+each line carrying the numbers that condemned it.
+
+**Tier A diagnostic run instead of waiting** (Josh's call, and the right one). Splitting gates into
+SELECTION (`delta_cap`, `otm_buffer`, `pop`, `credit_to_width` — the scanner just picks another
+strike pair) and EXECUTION (`quote_spread`, `liquidity` — no strike choice fixes a wide book):
+
+```
+failing an EXECUTION gate on >20% of spreads : 27 tickers, mean qual  0.9%,  4/27 ever produced
+not                                          : 26 tickers, mean qual 21.6%, 20/26 ever produced
+```
+
+23 of 27 execution-bound names produced nothing at all. Stated as a threshold, not a trend — the
+linear correlation actually favours selection gates (−0.61 vs −0.54), so the split is the finding
+and the correlation does not support the tidier story.
+
+Every producer fails only selection gates. QQQ fails `credit_to_width` on **69%** of its spreads and
+still qualifies 28%, because that is the only gate it fails. XBI fails six gates at 24–71%.
+
+Revised Tier A:
+
+| ticker | verdict | evidence |
+|---|---|---|
+| **XBI** | cut — structural | quote_spread 57%, liquidity 29%, 6 gates >20% |
+| **PEP** | cut — structural | quote_spread 46% |
+| **XOM** | cut — structural | quote_spread 37%, liquidity 49% |
+| CRWD | **keep** | `earnings_clear` **100%** — a dated catalyst, not the name |
+| TLT | keep | credit floor verified correct; $0.14/share vs a scaled $20.75 floor — a premium call |
+| BAC | keep | `support_shelter` 95% — investigate the gate before the ticker |
+
+The extra week is still worth having for the three structural names, but its question has changed
+from "do they recover" to "does anything about their options market change".
 
 ---
 
@@ -223,8 +253,8 @@ Flagging it for a decision.
 | entry control | none | **`ENTRY_HOLD`, proven to stop a live board** |
 | tests | 1310 | **1328** |
 
-**Steps 1, 2 and 4 are complete and revalidated. Step 3 is delivered and awaiting your decision** —
-which is exactly why the hold is on. The scanner is now spending its budget correctly and the
+**Steps 1, 2 and 4 are complete and revalidated. Step 3's Tier B is executed and Tier A is
+scheduled for re-check in a week** — the hold stays on until Tier A is closed out. The scanner is now spending its budget correctly and the
 coverage metric no longer flatters itself, but the watchlist it spends that budget on is still
 under review, and the brief's own sequencing says the first `caps_v1` trade should be selected by a
 scanner whose watchlist has already been decided.

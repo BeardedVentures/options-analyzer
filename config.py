@@ -485,7 +485,11 @@ WATCHLIST = [
     {"ticker": "JNJ",  "type": "Stock", "note": "Johnson & Johnson — diversified health"},
     {"ticker": "PFE",  "type": "Stock", "note": "Pfizer — pharma giant"},
     {"ticker": "UNH",  "type": "Stock", "note": "UnitedHealth — insurance/healthcare"},
-    {"ticker": "ABBV", "type": "Stock", "note": "AbbVie — biopharm"},
+    # REMOVED 2026-09-02 (watchlist audit, Tier B). Chronic delta-band failure: skipped on
+    # 3 of 7 scans at band ratios 31/34/49/49% against a 50% floor, and 0 qualified spreads
+    # from 14 formed. Cut on the CORRECTED metric -- the whole-grid number reads 51%, which
+    # is the measure that wrongly condemned GE. See VEGA_Watchlist_Audit_2026-09-02.md.
+    # {"ticker": "ABBV", "type": "Stock", "note": "AbbVie — biopharm"},
     {"ticker": "AMGN", "type": "Stock", "note": "Amgen — biotech"},
     
     # ── Financials (5) ──
@@ -518,10 +522,15 @@ WATCHLIST = [
     {"ticker": "CLF",  "type": "Stock", "note": "Cleveland-Cliffs — steel"},
     {"ticker": "SCCO", "type": "Stock", "note": "Southern Copper — mining"},
     
-    # ── Industrials (3) ──
+    # ── Industrials (2, was 3 — LMT cut 2026-09-02) ──
     {"ticker": "BA",   "type": "Stock", "note": "Boeing — aerospace/defense"},
     {"ticker": "GE",   "type": "Stock", "note": "General Electric — diversified"},
-    {"ticker": "LMT",  "type": "Stock", "note": "Lockheed Martin — defense"},
+    # REMOVED 2026-09-02 (watchlist audit, Tier B). The most chronic name on the board:
+    # skipped on 5 of 7 scans (band 32-47% vs a 50% floor), the call side every time, and
+    # 0 qualified spreads from 20 formed. It was also the one canary that never cleared
+    # after the delta-band gate landed -- reported as a miss on 2026-09-01 rather than
+    # explained away, and this is the resolution of that miss.
+    # {"ticker": "LMT",  "type": "Stock", "note": "Lockheed Martin — defense"},
     
     # ── Utilities (1) ──
     {"ticker": "NEE",  "type": "Stock", "note": "NextEra Energy — utilities/renewable"},

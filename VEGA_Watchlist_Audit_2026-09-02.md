@@ -1,6 +1,7 @@
 # VEGA — Watchlist audit (Step 3)
 **Date:** 2026-09-02
-**Status:** PROPOSAL. Nothing has been cut. No watchlist config has been touched.
+**Status:** Tier B **APPROVED AND EXECUTED** 2026-09-02 (LMT, ABBV removed; watchlist 56 → 54).
+Tier A held, and **revised** by the diagnostic in §5 — CRWD and TLT come off it.
 **Headline:** the premise is wrong in both directions — far fewer names have a chain-quality
 problem than believed, and far more names are dead weight for a completely different reason.
 
@@ -131,7 +132,7 @@ property of the name's spread pricing, not a bad week.
 
 ---
 
-## 3. Proposal — for your approval, nothing has been cut
+## 3. Proposal (as submitted) — Tier B since approved and executed
 
 Three tiers, deliberately separated because they fail for different reasons and deserve different
 treatment.
@@ -149,14 +150,24 @@ strategy needs, and cutting them now would be procyclical: removing names precis
 has not arrived, guaranteeing they are absent when it does. ADBE/CRM/CRWD's top blocker is
 `earnings_clear`, which is a calendar state, not a property of the name.
 
-**My recommendation: approve Tier B now, and hold Tier A for one more week of data.** Tier B is
+**My recommendation was: approve Tier B now, and hold Tier A for one more week of data.** Tier B is
 two names failing a data-quality gate — that is a clean, well-evidenced call on 7 scans. Tier A is
 a claim about *edge*, made on 8 trading days, and the cost of being wrong is asymmetric: a cut
 name produces nothing forever, while a kept name costs only fetch budget that Step 1 has already
 freed 60% of. The evidence for Tier A is strong enough to name and weak enough to wait on.
 
-**What I did not do:** touch the watchlist. `config.py`'s ticker list is unchanged. Nothing here
-takes effect until you say so.
+### Outcome, 2026-09-02
+
+**Tier B approved and executed.** LMT and ABBV are out; the watchlist is 54. Both lines are
+commented out in `config.py` rather than deleted, each carrying the band ratios and formed/qualified
+counts that condemned it, so the reason travels with the line and a future reader is not left
+guessing. Josh's stated basis for approving is worth preserving: the audit's own finding undercuts
+the list that prompted it, so two names standing out as chronic *on the corrected metric* is a far
+stronger warrant than the original sixteen ever were.
+
+**Tier A held** — and then revised by the diagnostic in §5, which Josh asked for rather than
+waiting a week to ask the same question. That call was right: it took CRWD and TLT off the cut list
+for reasons a week of data would not have surfaced.
 
 ---
 
@@ -172,3 +183,104 @@ takes effect until you say so.
   standing finding that the drought is a credit-floor problem. That is a *system-level* constraint
   and it is not fixed by trimming the watchlist — a point worth keeping in view, because it means
   Tier A's zeros are partly a floor calibration question wearing a ticker-selection costume.
+
+
+---
+
+# 5. Diagnostic — why XBI's spreads die, and whether it generalises
+
+Added 2026-09-02 at Josh's direction. His argument for doing it now rather than after a week:
+XBI clears every upstream filter and dies at the same downstream gate, so if the cause is
+structural, another week reproduces the same zero and answers nothing. That was right, and the
+answer arrived in about ten minutes.
+
+## The finding: selection failures are survivable, execution failures are terminal
+
+Splitting the gates by what they describe:
+
+- **SELECTION** — `delta_cap`, `otm_buffer`, `pop`, `credit_to_width`. These say *this strike pair*
+  is wrong. The scanner simply picks another pair.
+- **EXECUTION** — `quote_spread`, `liquidity`. These say *this underlying's options market* is too
+  wide or too thin. No choice of strikes fixes that.
+
+Across the 53 tickers with ≥10 formed spreads:
+
+```
+failing an EXECUTION gate on >20% of spreads : 27 tickers, mean qual rate  0.9%, 4/27 ever produced
+not                                          : 26 tickers, mean qual rate 21.6%, 20/26 ever produced
+```
+
+**23 of 27 execution-bound names produced nothing at all in eight trading days.** Note the
+threshold is what separates them, not a smooth relationship: the linear correlation with
+qualification is −0.54 for the worst execution gate against −0.61 for the worst selection gate,
+so on correlation alone selection looks *stronger*. Reported that way round deliberately — the
+split is the finding, and the correlation does not support the tidier story.
+
+The producers make the point from the other side. Every one of them fails only selection gates:
+
+```
+TSLA 67%   delta_cap, otm_buffer, pop        QQQ  28%   credit_to_width          (quote_spread 0%)
+META 61%   delta_cap, otm_buffer, pop        GDX  41%   delta_cap, otm_buffer, pop
+PLTR 63%   delta_cap, pop                    COIN 33%   delta_cap, pop
+```
+
+QQQ fails `credit_to_width` on **69%** of its spreads and still qualifies 28% of them, because
+that is the only gate it fails. XBI fails six gates at 24–71%, including `quote_spread` 57% and
+`liquidity` 29%.
+
+## What this does to Tier A
+
+**XBI — confirmed structural. Cut candidate on evidence, not on a coin flip.**
+`quote_spread` 57%, `liquidity` 29%, six gates over 20%. Its chain is *present* — 0% skip rate,
+76% whole-grid — it is simply too wide to trade. Another week reproduces the zero.
+
+**PEP and XOM — same pattern, weaker.** `quote_spread` 46% and 37%. They belong with XBI.
+
+**CRWD — REMOVE FROM THE CUT LIST.** Its dominant failure is `earnings_clear` at **100%** — every
+single one of 43 spreads blocked by a dated catalyst. `quote_spread` is 7%, `liquidity` 0%. This
+is a calendar state with an expiry date, not a property of the name, and it is exactly the case
+Josh's instinct to check was aimed at. CRWD is genuinely "wait", and we now know what for.
+
+**TLT — REMOVE FROM THE CUT LIST, and it is not a ticker problem.** `min_credit_usd` 78% and
+`otm_buffer` 100%, `quote_spread` only 11%. TLT trades ~$83 with median natural credit of
+**$0.14/share = $14/contract** against a correctly-scaled floor of $20.75. I checked whether the
+price-scaled floor was misfiring — it is not:
+
+```
+CREDIT_FLOOR_REFERENCE_PRICE = 100.0, MIN_CREDIT_USD = 25
+  TLT  $83  -> $20.75      BAC  $62  -> $15.50      IBIT $37 -> $15.00
+  XBI  $164 -> $25.00      SPY  $773 -> $25.00
+```
+
+The floor is doing exactly what it was built to do. TLT is a low-vol bond ETF that does not pay
+enough premium at the width VEGA trades. That is a real answer, and cutting it is defensible on
+those grounds — but it is a *premium* judgement, not a data-quality one, and it belongs in the
+same conversation as the credit floor itself rather than in a watchlist trim.
+
+**BAC — own case.** `support_shelter` 95% — a levels gate, not execution (`quote_spread` 26%).
+Worth its own look before cutting; a technical gate failing 95% of the time on one name is more
+likely to be telling us something about the gate than about BAC.
+
+## Revised Tier A
+
+| ticker | verdict | evidence |
+|---|---|---|
+| **XBI** | cut — structural | quote_spread 57%, liquidity 29%, 6 gates >20% |
+| **PEP** | cut — structural | quote_spread 46% |
+| **XOM** | cut — structural | quote_spread 37%, liquidity 49% |
+| CRWD | **keep** | earnings_clear 100% — calendar, expires |
+| TLT | keep for now | credit floor working correctly; a premium call, not a quality one |
+| BAC | keep for now | support_shelter 95% — investigate the gate first |
+
+The week of extra data is still worth having for the three structural names, but its purpose has
+changed: it is no longer "do they recover", it is "does anything about their options market
+change". If `quote_spread` is still failing on half their spreads next week, that is the same
+answer twice and they should go.
+
+## A generalisable rule worth keeping
+
+**Before cutting a name for producing nothing, check whether it fails execution gates or selection
+gates.** Selection failures mean the scanner is being picky and will find another pair. Execution
+failures mean the name's options market cannot support the trade, and no amount of waiting or
+re-scanning changes it. The same test cleanly separated a structural cut (XBI) from a calendar
+artifact (CRWD) that would otherwise have been cut for a reason that expires on its own.
