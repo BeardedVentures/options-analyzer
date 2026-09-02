@@ -47,6 +47,247 @@ _CALLBACK_PATH = "/callback"
 _tools_cache: Optional[List[str]] = None
 
 
+# ─────────────────────────────────────────────
+# Token pre-flight (added 2026-09-02)
+# ─────────────────────────────────────────────
+#
+# WHY THIS EXISTS, and why it is here rather than as a patch to the MCP SDK.
+#
+# The SDK's refresh path is unreachable, and then broken. Both faults verified live on
+# 2026-09-02 against this machine's real cached token:
+#
+#   1. UNREACHABLE. OAuthContext.token_expiry_time defaults to None and _initialize() loads
+#      tokens from storage WITHOUT setting it (mcp/client/auth/oauth2.py:550). is_token_valid()
+#      reads `not self.token_expiry_time or time.time() <= ...`, so an unknown expiry counts as
+#      VALID. In a fresh process -- which every scheduled cycle is -- the refresh branch at
+#      oauth2.py:589 (`if not is_token_valid() and can_refresh_token()`) therefore never fires.
+#      A 401 then goes to the FULL OAuth flow, not a refresh; there is no refresh attempt
+#      anywhere inside that handler.
+#
+#   2. BROKEN WHEN FORCED. Patching is_token_valid() to return False once made _refresh_token()
+#      run: it POSTed to https://agent.robinhood.com/token and got HTTP 404. The SDK builds the
+#      token URL from the server ORIGIN before metadata discovery has happened. Robinhood's real
+#      token endpoint is on a DIFFERENT HOST -- https://api.robinhood.com/oauth2/token/ -- named
+#      in the authorization-server metadata.
+#
+# So the promise in _redirect_handler's message ("the cached refresh token then serves
+# unattended runs") was false: every expiry, forever, required a browser click. That is not a
+# stale-token problem, it is an architecturally unreachable path.
+#
+# NOT AN SDK PATCH, deliberately. Monkeypatching OAuthContext would put this project's
+# unattended operation at the mercy of an upstream refactor, and the failure would be silent.
+# This runs BEFORE the SDK is handed the token, so the SDK only ever sees a fresh one and its
+# broken path is never entered.
+#
+# The endpoint is DISCOVERED, never hardcoded. Hardcoding api.robinhood.com would reproduce the
+# exact bug above with a different constant.
+_AUTH_EVENT_LOG = Path(__file__).resolve().parent.parent / "logs" / "vega_auth_events.jsonl"
+
+# Refresh when less than this remains. One trading day of margin: a cycle that starts inside
+# the margin renews rather than gambling that the token outlives the run.
+TOKEN_REFRESH_MARGIN_S = 24 * 3600
+
+
+class TokenRefreshError(RuntimeError):
+    """A refresh that must not be swallowed -- see _persist_tokens on the write-failure case."""
+
+
+def _record_auth_event(event: Dict) -> None:
+    """Durable, operator-visible record of every pre-flight outcome.
+
+    Mirrors logs/cycle_deaths.jsonl in intent. A WARNING in run.log is technically a record and
+    practically unread -- run.log is 15MB. This file holds only auth events, so a non-empty
+    tail is itself the signal. Never raises: a failure to journal must not break the scan.
+    """
+    try:
+        from datetime import datetime as _dt
+        event = {"at": _dt.now().isoformat(timespec="seconds"), **event}
+        _AUTH_EVENT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(_AUTH_EVENT_LOG, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event) + "\n")
+    except Exception as exc:               # pragma: no cover - journalling is best-effort
+        logger.warning("[robinhood_mcp] could not journal auth event: %s", exc)
+
+
+def _discover_token_endpoint(server_url: str, timeout: float = 12.0) -> Optional[str]:
+    """The authorization server's token endpoint, read from its own metadata.
+
+    RFC 8414 inserts the path INTO the well-known segment rather than appending it, and
+    Robinhood scopes metadata per path, so the path-aware URL is tried first. Both forms were
+    confirmed to answer on 2026-09-02; the root form is kept as a fallback for servers that
+    do not scope per path.
+    """
+    import urllib.request
+
+    parsed = urllib.parse.urlparse(server_url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    path = (parsed.path or "").rstrip("/")
+    candidates = []
+    if path:
+        candidates.append(f"{origin}/.well-known/oauth-authorization-server{path}")
+    candidates.append(f"{origin}/.well-known/oauth-authorization-server")
+
+    for url in candidates:
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                meta = json.loads(resp.read().decode("utf-8"))
+            endpoint = meta.get("token_endpoint")
+            if endpoint:
+                logger.debug("[robinhood_mcp] token_endpoint %s discovered at %s", endpoint, url)
+                return str(endpoint)
+        except Exception as exc:
+            logger.debug("[robinhood_mcp] metadata probe failed at %s: %s", url, exc)
+    return None
+
+
+def token_expiry_epoch() -> Optional[float]:
+    """When the cached access token stops working, as a unix timestamp.
+
+    The token file records `expires_in` (a DURATION) and, since this pre-flight landed,
+    `obtained_at` (the instant it was issued). Files written before that fall back to the
+    file's mtime, which is sound because _FileTokenStorage._save() rewrites the file on every
+    token update -- but it is a fallback, not the design, because a file COPY would carry a
+    wrong mtime and a right token.
+    """
+    try:
+        raw = json.loads(_TOKEN_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    tokens = raw.get("tokens") or {}
+    expires_in = tokens.get("expires_in")
+    if not isinstance(expires_in, (int, float)):
+        return None
+    obtained = raw.get("obtained_at")
+    if not isinstance(obtained, (int, float)):
+        try:
+            obtained = _TOKEN_PATH.stat().st_mtime
+        except OSError:
+            return None
+    return float(obtained) + float(expires_in)
+
+
+def _persist_tokens(raw: Dict, new_tokens: Dict) -> None:
+    """Write refreshed tokens, then PROVE the write landed.
+
+    LOUD ON FAILURE, BY DESIGN. Robinhood ROTATES the refresh token: the 2026-09-02 refresh
+    returned a different one, which means the previous refresh token is dead the instant the
+    server answers 200. A silent write failure here would leave the old, now-invalid credential
+    on disk and the only working one in a process about to exit -- an unrecoverable state that
+    would look exactly like an ordinary expiry days later. So the write is verified by reading
+    it back, and a mismatch raises rather than returns.
+    """
+    import time as _time
+
+    raw = dict(raw)
+    raw["tokens"] = new_tokens
+    raw["obtained_at"] = _time.time()
+    payload = json.dumps(raw, indent=2)
+
+    try:
+        import durable_write
+        durable_write.atomic_write_text(_TOKEN_PATH, payload)
+    except Exception:
+        _TOKEN_PATH.write_text(payload, encoding="utf-8")
+
+    check = json.loads(_TOKEN_PATH.read_text(encoding="utf-8"))
+    if (check.get("tokens") or {}).get("access_token") != new_tokens.get("access_token"):
+        _record_auth_event({"event": "persist_failed", "severity": "critical"})
+        raise TokenRefreshError(
+            "Refreshed the Robinhood token but FAILED TO PERSIST it. The refresh token "
+            "rotates, so the copy on disk is now dead and the working one is only in this "
+            "process. Re-authorize immediately: python test_robinhood_mcp_connection.py "
+            f"(token file: {_TOKEN_PATH})")
+
+
+def ensure_fresh_token(server_url: str, margin_s: float = TOKEN_REFRESH_MARGIN_S) -> Dict:
+    """Renew the cached access token before the SDK is asked to use it.
+
+    Returns a status dict; never raises for an ordinary failure, because a data source that
+    cannot authenticate must cost its own records and nothing else. The ONE exception is
+    TokenRefreshError from _persist_tokens, which is unrecoverable state and must not be
+    swallowed.
+
+    status: ok | refreshed | no_token | no_endpoint | refresh_failed
+    """
+    import time as _time
+    import urllib.request
+
+    if not _TOKEN_PATH.exists():
+        return {"status": "no_token",
+                "reason": "no cached token; authorize once with test_robinhood_mcp_connection.py"}
+
+    expiry = token_expiry_epoch()
+    remaining = None if expiry is None else expiry - _time.time()
+    if remaining is not None and remaining > margin_s:
+        return {"status": "ok", "seconds_remaining": int(remaining)}
+
+    raw = json.loads(_TOKEN_PATH.read_text(encoding="utf-8"))
+    tokens = raw.get("tokens") or {}
+    client_info = raw.get("client_info") or {}
+    refresh_token = tokens.get("refresh_token")
+    client_id = client_info.get("client_id")
+    if not refresh_token or not client_id:
+        out = {"status": "no_token", "reason": "no refresh_token/client_id cached"}
+        _record_auth_event({"event": "preflight", "severity": "critical", **out})
+        logger.error("[robinhood_mcp] token pre-flight: %s", out["reason"])
+        return out
+
+    endpoint = _discover_token_endpoint(server_url)
+    if not endpoint:
+        out = {"status": "no_endpoint",
+               "reason": "authorization-server metadata did not name a token_endpoint"}
+        _record_auth_event({"event": "preflight", "severity": "critical", **out})
+        logger.error("[robinhood_mcp] token pre-flight: %s", out["reason"])
+        return out
+
+    body = urllib.parse.urlencode({
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": client_id,
+    }).encode()
+    req = urllib.request.Request(
+        endpoint, data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded",
+                 "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            status_code, payload = resp.status, json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        out = {"status": "refresh_failed", "reason": f"{type(exc).__name__}: {exc}",
+               "endpoint": endpoint}
+        _record_auth_event({"event": "preflight", "severity": "critical", **out})
+        logger.error("[robinhood_mcp] TOKEN REFRESH FAILED (%s). Robinhood access will fall "
+                     "back to yfinance until someone runs "
+                     "test_robinhood_mcp_connection.py from a terminal.", out["reason"])
+        return out
+
+    if status_code != 200 or not payload.get("access_token"):
+        out = {"status": "refresh_failed", "http": status_code, "endpoint": endpoint}
+        _record_auth_event({"event": "preflight", "severity": "critical", **out})
+        logger.error("[robinhood_mcp] TOKEN REFRESH REJECTED (HTTP %s). Re-authorize with "
+                     "test_robinhood_mcp_connection.py.", status_code)
+        return out
+
+    # RFC 6749 6: a refresh response MAY omit the refresh token, meaning "keep using the old
+    # one". Robinhood does rotate, but do not assume it -- an omitted value must not blank it.
+    new_tokens = {
+        "access_token": payload["access_token"],
+        "token_type": payload.get("token_type", tokens.get("token_type", "Bearer")),
+        "expires_in": payload.get("expires_in", tokens.get("expires_in")),
+        "scope": payload.get("scope", tokens.get("scope")),
+        "refresh_token": payload.get("refresh_token") or refresh_token,
+    }
+    rotated = new_tokens["refresh_token"] != refresh_token
+    _persist_tokens(raw, new_tokens)          # raises on an unpersisted rotation, by design
+
+    out = {"status": "refreshed", "rotated": rotated,
+           "expires_in": new_tokens.get("expires_in"), "endpoint": endpoint}
+    _record_auth_event({"event": "preflight", **out})
+    logger.info("[robinhood_mcp] token refreshed via %s (rotated=%s, expires_in=%s)",
+                endpoint, rotated, new_tokens.get("expires_in"))
+    return out
+
+
 def _require_mcp_sdk():
     try:
         import mcp  # noqa: F401

@@ -101,6 +101,50 @@ def _log(msg: str) -> None:
     print(f"[{_now()}] {msg}")
 
 
+def _token_preflight() -> Dict:
+    """Renew the Robinhood token before the scan needs it, and SAY SO IN THIS LOG.
+
+    Placement is the point. run.log is 15MB and nobody reads it; this file is the one an
+    operator actually opens, and it is where "PREVIOUS CYCLE DIED" already surfaces. An auth
+    failure that only reached run.log would reproduce exactly the condition this pre-flight
+    exists to end -- a component that had stopped working, reporting nothing about it.
+
+    Never fatal. A refusal here costs Robinhood's records and falls back a tier, which is what
+    every other data-source failure in this cycle already does. The one exception is
+    TokenRefreshError, which means a rotated refresh token was NOT written to disk: that is
+    unrecoverable state, not a degraded run, and it is logged at the top of its lungs.
+    """
+    try:
+        from data import robinhood_mcp
+        import config as _cfg
+        if not getattr(_cfg, "ROBINHOOD_MCP_ENABLED", True):
+            return {"status": "disabled"}
+        res = robinhood_mcp.ensure_fresh_token(_cfg.ROBINHOOD_MCP_URL)
+    except Exception as exc:
+        name = type(exc).__name__
+        if name == "TokenRefreshError":
+            _log("!!! TOKEN REFRESHED BUT NOT SAVED !!! The refresh token rotates, so the "
+                 f"copy on disk is now DEAD. Re-authorize NOW: {exc}")
+            return {"status": "persist_failed"}
+        _log(f"Token pre-flight errored ({name}: {exc}) — continuing; Robinhood will fall "
+             f"back a tier if the token is actually bad.")
+        return {"status": "error"}
+
+    status = res.get("status")
+    if status == "ok":
+        hrs = (res.get("seconds_remaining") or 0) / 3600.0
+        _log(f"Token OK — {hrs:.1f}h remaining.")
+    elif status == "refreshed":
+        _log(f"TOKEN REFRESHED (rotated={res.get('rotated')}, "
+             f"expires_in={res.get('expires_in')}s) via {res.get('endpoint')}.")
+    else:
+        _log(f"!!! ROBINHOOD AUTH PROBLEM: {status} — {res.get('reason') or res} !!! "
+             f"The scan will fall back to yfinance, whose wide quotes collapse natural "
+             f"credit toward zero. Fix: python test_robinhood_mcp_connection.py from a "
+             f"terminal. Recorded to logs/vega_auth_events.jsonl.")
+    return res
+
+
 def _run(cmd: List[str]) -> int:
     _log(f"RUN: {' '.join(cmd)}")
     try:
@@ -1527,6 +1571,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     try:
+        _token_preflight()
+
         # Mark-only: resolve existing positions without opening new ones near the close.
         if args.mark_only:
             _log("=== AUTO PAPER CYCLE (MARK-ONLY) START ===")

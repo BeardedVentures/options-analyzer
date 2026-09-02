@@ -72,3 +72,18 @@ backups/ledgers/
 # cycle is mid-write, which is most of the trading day.
 *.tmp
 *.lock
+
+# CREDENTIAL BACKUPS. Same lesson as the .env.bak rules above, learned again on 2026-09-02:
+# a session brief instructed backing the live Robinhood OAuth token up to backups/, and
+# backups/ is NOT ignored -- backups/scheduled_tasks/ is tracked and public right now. That
+# would have staged a live bearer token into a public repo, which is exactly the NewsAPI leak
+# a second time, committed by the work that was meant to be cleaning it up.
+#
+# backups/ledgers/ is already ignored below/above; these cover the credential cases the
+# directory rules do not. A token backup belongs OUTSIDE the repository entirely -- these
+# patterns are the safety net, not the plan.
+backups/secrets/
+*.json.bak*
+*.bak-*.json
+*_tokens.json
+*.token.json
