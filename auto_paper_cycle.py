@@ -76,7 +76,29 @@ def is_market_open() -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 # Old candidates file pruner — prevents output/candidates/ from growing unbounded
 # ─────────────────────────────────────────────────────────────────────────────
-_KEEP_CANDIDATE_FILES = int(os.getenv("VEGA_KEEP_CANDIDATES", "20"))  # keep N most-recent pairs
+# RAISED 20 -> 91 on 2026-09-02, because 20 was silently destroying every counterfactual.
+#
+# THE ARITHMETIC THAT WAS NEVER DONE. The cycle runs 7 times a trading day, so keeping 20 JSON
+# snapshots is 2.9 TRADING DAYS of retention. counterfactuals.HORIZON_DAYS is 10. A snapshot
+# was therefore deleted roughly 7 trading days before the row that depends on it could reach
+# horizon_complete, and counterfactuals.build() only re-resolves rows whose snapshot survives.
+#
+# The result, measured 2026-09-02: 2,726 counterfactual rows, `horizon_complete` False on ALL
+# of them, `touched` None on ALL of them, 1,757 marked source_snapshot_missing and frozen at
+# whatever they read when their snapshot was last present. Rows from 08-06 still showed
+# days_observed=1. The one instrument built to ask whether the eleven gates earn their place
+# had never produced a single measurable outcome, and value_of_information() would have gone on
+# reporting "insufficient" forever -- correctly, and silently.
+#
+# 7 cycles/day * 10 horizon days = 70, plus ~30% for half-days and schedule drift. Cost is disk
+# only: snapshots average 522KB, so ~47MB against the 10MB this was holding.
+#
+# This is the TOURNIQUET, not the repair. The repair is counterfactuals.build() re-resolving
+# from the LEDGER ROW rather than the snapshot -- the row already carries ticker, scan_date,
+# strikes, expiration and horizon_days, so it never needed the snapshot to resolve. With that
+# in place this number stops being load-bearing for correctness and goes back to being a
+# disk-hygiene knob, which is all it was ever written to be.
+_KEEP_CANDIDATE_FILES = int(os.getenv("VEGA_KEEP_CANDIDATES", "91"))  # keep N most-recent pairs
 
 
 def _prune_candidates(keep: int = _KEEP_CANDIDATE_FILES) -> int:

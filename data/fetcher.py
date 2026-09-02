@@ -329,6 +329,46 @@ def validate_tradier_connection(symbol: str = "SPY") -> Dict[str, Any]:
 # PRICE DATA
 # ─────────────────────────────────────────────
 
+def get_raw_price_data(ticker: str, period: str = "6mo") -> Optional[pd.DataFrame]:
+    """UNADJUSTED OHLCV — the prices that actually traded, for comparing against a STRIKE.
+
+    get_price_data() below uses auto_adjust=True, which back-adjusts history for dividends and
+    splits. That is correct for anything measuring RETURNS or momentum, and wrong for anything
+    measuring "did the underlying trade at or through 212.5", because a strike is a fixed
+    number in raw price space and never moves when a dividend is paid.
+
+    The error is small per event and SYSTEMATIC in one direction: back-adjustment lowers
+    historical prices relative to raw, so an adjusted Low sits BELOW the low that really
+    traded, and a touch test against it fires early. On a dividend payer over a multi-week
+    lookback that is a standing bias toward "touched", concentrated in exactly the names --
+    XOM, CVX, PEP, JNJ -- whose yield makes them attractive to a premium seller.
+
+    Nothing else in the codebase should switch to this. Technicals, RSI, ATR, realized vol and
+    every trend read want the adjusted series and already have it.
+    """
+    cache_key = f"rawprice_{ticker}_{period}"
+    if cache_key in _cache:
+        return _cache[cache_key]
+
+    _rate_limit()
+    try:
+        data = yf.Ticker(ticker).history(period=period, auto_adjust=False)
+        if data is None or data.empty:
+            logger.warning("[fetcher] No RAW price data returned for %s", ticker)
+            _log_api_call("yfinance.rawprice", ticker, False, "Empty response")
+            return None
+        data.index = pd.to_datetime(data.index)
+        data = data[["Open", "High", "Low", "Close", "Volume"]].copy()
+        data.dropna(subset=["Close"], inplace=True)
+        _cache[cache_key] = data
+        _log_api_call("yfinance.rawprice", ticker, True)
+        return data
+    except Exception as e:
+        logger.warning("[fetcher] RAW price fetch failed for %s: %s", ticker, e)
+        _log_api_call("yfinance.rawprice", ticker, False, str(e))
+        return None
+
+
 def get_price_data(ticker: str, period: str = "2y") -> Optional[pd.DataFrame]:
     """
     Fetch OHLCV historical data from yfinance.

@@ -140,6 +140,19 @@ def first_sightings(candidates: Sequence[Dict]) -> List[Dict]:
     return list(seen.values())
 
 
+def _candidate_from_row(row: Dict) -> Optional[Dict]:
+    """The minimum resolve() needs, reconstructed from a ledger row.
+
+    Proof that the snapshot was never the durable record: these three fields have been written
+    on every row since the ledger's first line, so any row ever written can be re-resolved
+    against price history without the scan that produced it.
+    """
+    if row.get("ticker") and row.get("short_strike") is not None and row.get("scan_date"):
+        return {"ticker": row["ticker"], "short_strike": row["short_strike"],
+                "scan_date": row["scan_date"], "expiration": row.get("expiration")}
+    return None
+
+
 # ── Resolution ────────────────────────────────────────────────────────────────────
 def resolve(candidate: Dict, price_history, horizon_days: Optional[int] = None) -> Dict:
     """What the underlying did after the scan. Returns the outcome fields only.
@@ -225,6 +238,11 @@ def _record(candidate: Dict, outcome: Dict) -> Dict:
         # them; a candidate failing exactly one is the only clean read on that gate's value.
         "sole_failed_gate": failed[0] if len(failed) == 1 else None,
         **outcome,
+        # How this outcome was produced. "snapshot" is the live path: measured forward from the
+        # scan that saw the spread. "ledger_replay" (see build) resolves a past window from the
+        # ledger row alone. Both use daily bars, but they are not the same measurement and must
+        # never be pooled without saying so -- the same rule the cohort key enforces on trades.
+        "resolution_method": "snapshot",
         "resolved_at": datetime.now().isoformat(),
     }
 
@@ -252,7 +270,11 @@ def build(snapshot_dir: Optional[Path] = None, ledger: Optional[Path] = None,
     path = Path(ledger or LEDGER)
     if fetch is None:                                # pragma: no cover - network
         from data import fetcher
-        fetch = lambda tk: fetcher.get_price_data(tk, period="6mo")
+        # RAW, not adjusted (changed 2026-09-02). A strike is a fixed number in raw price
+        # space; auto_adjust=True back-adjusts history for dividends, so an adjusted Low sits
+        # below the low that really traded and the touch test fires early. Systematic, one
+        # direction, and worst on the dividend payers a premium seller is drawn to.
+        fetch = lambda tk: fetcher.get_raw_price_data(tk, period="6mo")
 
     existing = {r.get("key"): r for r in load(path)}
 
@@ -267,18 +289,88 @@ def build(snapshot_dir: Optional[Path] = None, ledger: Optional[Path] = None,
             except Exception as e:                   # pragma: no cover - network
                 logger.debug("[counterfactuals] no history for %s: %s", tk, e)
                 history[tk] = None
-        fresh[dedup_key(c)] = _record(c, resolve(c, history[tk]))
+        key = dedup_key(c)
+        rec = _record(c, resolve(c, history[tk]))
+        # FIRST SIGHTING IS IMMUTABLE ONCE RECORDED (2026-09-02).
+        #
+        # dedup_key deliberately excludes scan_date, so the same spread seen on several days
+        # collapses to one row -- and first_sightings() picks the earliest SURVIVING snapshot.
+        # As snapshots age out, "earliest surviving" advances, and the row's scan_date, gates
+        # and outcome were silently rewritten to a LATER moment. Five rows had already drifted
+        # by 2026-09-02 (SPY-741/739 08-31 -> 09-01, NVDA-210/205 08-31 -> 09-02, ...).
+        #
+        # That directly contradicts this module's own contract, in first_sightings: "the
+        # question is what a decision made AT THAT MOMENT would have led to, and a later
+        # sighting has already had part of the outcome happen to it." A drifting scan_date
+        # shortens the observation window and re-reads the gates against a chain the original
+        # decision never saw. It was invisible until now only because no row ever matured.
+        #
+        # The ledger is the durable record, so an earlier recorded sighting wins over a later
+        # re-sighting. Only the OUTCOME is refreshed.
+        # Compared at SNAPSHOT granularity, not just date: snapshot filenames sort
+        # chronologically within a day, and pruning the 08:59 file promotes the 09:59 one to
+        # "first sighting" of the same scan_date. Same defect, smaller clock -- 19 rows on
+        # 2026-09-02 after the cross-day case was fixed.
+        prior = existing.get(key)
+        if prior and ((str(prior.get("scan_date") or ""), str(prior.get("snapshot") or ""))
+                      < (str(rec.get("scan_date") or ""), str(rec.get("snapshot") or ""))):
+            # Re-resolve against the PRIOR scan date, not this later one. Reusing the later
+            # row's outcome would measure a shorter window from the wrong moment -- the same
+            # error the drift itself causes, just arriving by a different route.
+            prior_cand = _candidate_from_row(prior)
+            outcome = (resolve(prior_cand, history[tk], horizon_days=prior.get("horizon_days"))
+                       if prior_cand else {})
+            rec = {**prior, **outcome,
+                   "resolution_method": prior.get("resolution_method") or "snapshot",
+                   "resolved_at": datetime.now().isoformat()}
+        fresh[key] = rec
 
-    orphaned = 0
+    replayed = 0
+    unresolvable = 0
     for key, row in existing.items():
-        if key not in fresh:
-            row["source_snapshot_missing"] = True
+        if key in fresh:
+            continue
+        row["source_snapshot_missing"] = True
+        # RE-RESOLVE FROM THE LEDGER ROW (2026-09-02). This branch used to just mark the row and
+        # keep it, which froze its outcome at whatever it read when the snapshot was last
+        # present -- permanently, because nothing ever revisited it. That, plus a 2.9-day
+        # snapshot retention against a 10-day horizon, is why 2,726 rows carried
+        # horizon_complete=False and touched=None and always would have.
+        #
+        # The snapshot was never actually required. resolve() needs a short strike, a scan date
+        # and an expiration, and the ledger row has carried all three since the first write. So
+        # the observation is not lost, it is UNRESOLVED, and the missing input is the price
+        # path -- which is free, retroactive and available for any past window.
+        cand = _candidate_from_row(row)
+        if not cand:
+            unresolvable += 1
             fresh[key] = row
-            orphaned += 1
-    if orphaned:
-        logger.warning(
-            "[counterfactuals] %d spread(s) kept from the ledger with no surviving snapshot. "
-            "A scan cannot be re-run, so these observations exist nowhere else.", orphaned)
+            continue
+        tk = cand["ticker"]
+        if tk not in history:
+            try:
+                history[tk] = fetch(tk)
+            except Exception as e:                   # pragma: no cover - network
+                logger.debug("[counterfactuals] no history for %s: %s", tk, e)
+                history[tk] = None
+        outcome = resolve(cand, history[tk], horizon_days=row.get("horizon_days"))
+        if outcome.get("days_observed"):
+            # TAGGED, never silently pooled. A replayed row is resolved against DAILY bars over
+            # a window that has already happened; a snapshot-resolved row was measured forward
+            # from a live scan. Same discipline as the cohort key: two measurements produced by
+            # different methods are two populations until proven otherwise.
+            row = {**row, **outcome,
+                   "resolution_method": "ledger_replay",
+                   "resolved_at": datetime.now().isoformat()}
+            replayed += 1
+        fresh[key] = row
+
+    if replayed:
+        logger.info("[counterfactuals] re-resolved %d orphaned spread(s) from the ledger row "
+                    "alone; %d could not be (missing strike/date).", replayed, unresolvable)
+    elif unresolvable:
+        logger.warning("[counterfactuals] %d orphaned spread(s) lack the fields needed to "
+                       "re-resolve and stay frozen.", unresolvable)
 
     durable_write.atomic_write_text(
         path, "".join(json.dumps(r, default=str) + "\n" for r in fresh.values()))
