@@ -92,6 +92,21 @@ def dedup_key(c: Dict) -> str:
             f"-{c.get('expiration')}")
 
 
+def passed_spread_gates(record: Dict) -> bool:
+    """Did this spread clear the eleven PER-SPREAD gates recorded in its snapshot?
+
+    NOT "would VEGA have traded it". The board also screens MIN_IV_RANK per ticker and
+    MIN_EDGE_SCORE on the composite — neither is a per-spread gate, so neither appears here.
+    Reading this as "qualified" is what produced the 52-versus-0 misreading of 2026-09-01.
+
+    Falls back to the legacy `qualified` key: rows written before 2026-09-02 only carry that,
+    and build() rewrites a row only while its snapshot survives, so both will coexist for as
+    long as the oldest surviving snapshot.
+    """
+    v = record.get("passed_spread_gates")
+    return bool(record.get("qualified")) if v is None else bool(v)
+
+
 def iter_snapshot_candidates(snapshot_dir: Optional[Path] = None) -> Iterator[Dict]:
     """Every candidate every scan recorded, oldest first, annotated with its scan date."""
     d = Path(snapshot_dir or SNAPSHOT_DIR)
@@ -194,6 +209,17 @@ def _record(candidate: Dict, outcome: Dict) -> Dict:
         "iv_rank": candidate.get("iv_rank"),
         "gates": gates,
         "failed_gates": failed,
+        # RENAMED from "qualified" on 2026-09-02, because that name caused a real misreading.
+        # A reviewer counted 52 rows with qualified=True on 2026-09-01 against a live scan that
+        # reported qualified=0, and concluded the live path had a gate leak. It does not. This
+        # flag means ONLY "passed the eleven PER-SPREAD gates recorded in the snapshot". The
+        # board additionally requires MIN_IV_RANK (screened per TICKER in main.py, deliberately
+        # not a per-spread gate) and MIN_EDGE_SCORE. Applying both to those 52 leaves 2.
+        #
+        # `qualified` is still WRITTEN for now: 2,726 rows predate this rename, build() only
+        # rewrites rows whose snapshot survives, and readers must not silently see False for a
+        # row that simply has the old key. Read via passed_spread_gates() below, never directly.
+        "passed_spread_gates": bool(gates) and not failed,
         "qualified": bool(gates) and not failed,
         # The single-gate sample. A candidate failing three gates says nothing about any one of
         # them; a candidate failing exactly one is the only clean read on that gate's value.
@@ -293,7 +319,7 @@ def value_of_information(records: Optional[Sequence[Dict]] = None) -> Dict:
     recs = [r for r in all_recs if r.get("horizon_complete")]
     maturing = len(all_recs) - len(recs)
 
-    qualified = [r for r in recs if r.get("qualified")]
+    qualified = [r for r in recs if passed_spread_gates(r)]
     base = _touch_rate(qualified)
 
     gates: Dict[str, Dict] = {}
