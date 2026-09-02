@@ -50,6 +50,20 @@ _polygon_entitlement_warned: set = set()
 # path cannot serve (needs browser approval, SDK missing, server unreachable), every
 # later ticker skips it instead of paying the same failure 56 times over.
 _robinhood_unavailable_this_run: set = set()
+# Which tickers the chain-quality floor let through this run, and which it turned away.
+# Populated by get_options_chain / get_call_options_chain, read by chain_coverage(). This is
+# the honest answer to "did this scan actually see the market", and it is the signal the
+# JARVIS ingest gate should have been using all along -- see chain_coverage().
+_chain_gate_passed: set = set()
+_chain_gate_skipped: set = set()
+# Tickers whose returned chain has a hole INSIDE the delta band the engine sells from.
+# {ticker: {"band": n, "grid": n}} -- see _parse_robinhood_options and chain_coverage().
+_band_drops: Dict[str, Dict[str, int]] = {}
+# Tickers whose instrument PAGE WALK ended early -- rate-limited mid-pagination, or out of page
+# budget. Distinct from _band_drops: a dropped quote batch loses contracts from a known
+# population, a truncated walk shrinks the population itself, so no ratio measured over the
+# instrument list can report it. {ticker: reason}
+_truncated_walks: Dict[str, str] = {}
 # Tickers whose Robinhood fetch came back empty this run. A transport or auth failure is
 # terminal and latches immediately; an empty ANSWER is ordinary (a thin name, an odd DTE
 # window) and only counts toward this threshold.
@@ -121,7 +135,18 @@ def clear_cache():
     _quality_recorded.clear()
     _polygon_entitlement_warned.clear()
     _robinhood_unavailable_this_run.clear()
+    _chain_gate_passed.clear()
+    _chain_gate_skipped.clear()
+    _band_drops.clear()
+    _truncated_walks.clear()
     _robinhood_failures.clear()
+    # Per-scan, like everything else here. Lives in robinhood_mcp because that is the only
+    # module that sees a raw error body; cleared from here because this is what "a scan" means.
+    try:
+        from data import robinhood_mcp
+        robinhood_mcp.reset_unrecognized_errors()
+    except Exception:                                  # pragma: no cover - optional SDK
+        pass
     _newsapi_rate_limited.clear()
     _log_api_call.calls = []
 
@@ -646,6 +671,45 @@ def _parse_robinhood_options(ticker: str, current_price: float,
             "rh_pop_short": _f(q.get("chance_of_profit_short")),
         })
 
+    # BAND-LOCAL DROPS. A dropped quote batch removes its contracts from `quotes`, so they
+    # never become records and never enter measure_tradeable_band_quality's denominator -- the
+    # band ratio is structurally incapable of reporting them. That blind spot got WORSE, not
+    # better, when the gate moved to the delta band on 2026-08-31: under the old whole-grid
+    # gate a lost batch was mostly far-OTM strikes nobody would sell, but a hole inside the
+    # band is a strike select_bull_put_pair could have used. It would silently choose a
+    # second-best pair with no signal that the better one was absent from the returned set.
+    #
+    # So the count is reported against the STRIKE RANGE the band actually occupies, which is
+    # recoverable from the instrument records -- those exist before any quote is requested and
+    # are therefore the one denominator a dropped batch cannot shrink.
+    if result.get("truncated"):
+        _truncated_walks[ticker] = str(result.get("truncated_reason") or "unknown")
+
+    dropped_strikes = result.get("dropped_strikes") or []
+    if dropped_strikes:
+        lo_d = float(getattr(config, "SHORT_STRIKE_MIN_DELTA", 0.12))
+        hi_d = float(getattr(config, "SHORT_STRIKE_MAX_DELTA", 0.30))
+        band_strikes = [r["strike"] for r in records
+                        if r.get("delta") is not None
+                        and lo_d <= abs(float(r["delta"])) <= hi_d]
+        if band_strikes:
+            lo_k, hi_k = min(band_strikes), max(band_strikes)
+            in_band = [k for k in dropped_strikes if lo_k <= k <= hi_k]
+        else:
+            lo_k = hi_k = None
+            in_band = []
+        _record_band_drop(ticker, option_type, len(in_band), len(dropped_strikes))
+        if in_band:
+            logger.warning(
+                "[fetcher] BAND_DROP %s %ss: %d of %d unquoted strikes fall INSIDE the "
+                "tradeable band (%.2f-%.2f). Selection is choosing from an incomplete set and "
+                "the band quality ratio cannot see it.",
+                ticker, option_type, len(in_band), len(dropped_strikes), lo_k, hi_k)
+        else:
+            logger.info(
+                "[fetcher] GRID_DROP %s %ss: %d unquoted strikes, none inside the tradeable "
+                "band -- selection is unaffected.", ticker, option_type, len(dropped_strikes))
+
     if unmatched:
         logger.debug("[fetcher] %s: %d quotes had no matching instrument", ticker, unmatched)
     _log_api_call("robinhood.mcp", ticker, len(records) > 0)
@@ -781,20 +845,32 @@ def _parse_polygon_options(ticker: str, current_price: float,
     return records
 
 
-def _option_record_is_usable(opt: Dict) -> bool:
-    """Is this one option record a real, quotable market?
+def _option_record_is_quotable(opt: Dict) -> bool:
+    """Does this record carry a real, believable two-sided PRICE?
 
-    Extracted from _quality_filter_options so the SAME predicate can measure a chain without
-    filtering it. The Polygon path does not filter, so a ratio expressed as
-    len(after_filter)/len(before_filter) would read 1.000 there forever — a quality metric that
-    is arithmetically incapable of reporting a problem on the primary data source. Measuring
-    with the predicate directly is what lets the number be wrong.
+    This is a question about RETRIEVAL and PRICING, and nothing else. It asks whether the
+    quote we were handed can be traded off, not whether anyone has traded this strike.
+
+    Split out of _option_record_is_usable on 2026-08-31. That predicate also required
+    `volume or open_interest`, and CHAIN_QUALITY_MIN_RATIO gates a whole ticker on the
+    resulting ratio -- so a name whose far strikes are simply untraded was being recorded as
+    a name whose chain could not be RETRIEVED, and skipped for the scan.
+
+    The two are separable and the data says they must be. Measured across the six hourly
+    scans of 2026-08-31, the between-ticker standard deviation of the ratio was 21.7% while
+    the median within-ticker standard deviation was 7.2%: the number is three times more a
+    property of WHICH ticker it is than of WHEN it was measured. MU, PLTR, NVDA and TSLA sat
+    at 97-99% in every scan; LMT at 31%, GE at 46%, RCL at 50% in every scan. That is a
+    liquidity profile being read out, not an intermittent fetch failure.
+
+    It also could not have been a fetch failure on the primary path. _parse_robinhood_options
+    builds records only from quotes the server actually returned, and drops anything with no
+    two-sided market before it appends. A dropped quote batch therefore lowers raw_count; it
+    cannot lower this ratio. The one clause capable of moving it was the liquidity clause.
     """
     bid = float(opt.get("bid", 0) or 0)
     ask = float(opt.get("ask", 0) or 0)
     mid = float(opt.get("mid", 0) or 0)
-    volume = int(opt.get("volume", 0) or 0)
-    oi = int(opt.get("open_interest", 0) or 0)
 
     if bid == 0 and ask == 0:                       # no market / stale
         return False
@@ -802,16 +878,87 @@ def _option_record_is_usable(opt: Dict) -> bool:
         return False
     if mid > 0 and (ask - bid) / mid > 0.80:        # impossibly wide -- stale pricing
         return False
+    return True
+
+
+def _option_record_is_usable(opt: Dict) -> bool:
+    """Quotable AND actually traded: the SELECTION predicate.
+
+    Kept as the filter for chains that get filtered (the yfinance fallback), because refusing
+    to sell a contract with no volume and no open interest is correct -- at the STRIKE level,
+    where the decision belongs. It is not a reason to decline to look at the underlying.
+
+    See _option_record_is_quotable for why chain-health measurement no longer uses this.
+    """
+    if not _option_record_is_quotable(opt):
+        return False
+    volume = int(opt.get("volume", 0) or 0)
+    oi = int(opt.get("open_interest", 0) or 0)
     if volume == 0 and oi == 0:                     # no activity at all
         return False
     return True
 
 
 def measure_chain_quality(records: List[Dict]) -> tuple:
-    """(raw_count, usable_count, usable_ratio) for a chain, without modifying it."""
+    """(raw_count, usable_count, usable_ratio) for a chain, without modifying it.
+
+    Measures QUOTABILITY. The ratio this returns is what CHAIN_QUALITY_MIN_RATIO gates on and
+    what data_quality_log records, so it has to mean one thing on every source: "how much of
+    the chain we retrieved carries a price we could trade off". Set
+    config.CHAIN_QUALITY_REQUIRES_ACTIVITY = True to restore the pre-2026-08-31 behaviour,
+    where the ratio also demanded volume or open interest and illiquid names were skipped
+    wholesale.
+    """
+    predicate = (_option_record_is_usable
+                 if getattr(config, "CHAIN_QUALITY_REQUIRES_ACTIVITY", False)
+                 else _option_record_is_quotable)
     raw = len(records or [])
-    usable = sum(1 for opt in (records or []) if _option_record_is_usable(opt))
+    usable = sum(1 for opt in (records or []) if predicate(opt))
     return raw, usable, (round(usable / raw, 4) if raw else 0.0)
+
+
+def measure_tradeable_band_quality(records: List[Dict]) -> tuple:
+    """The same measurement, restricted to the strikes SELECTION COULD ACTUALLY USE.
+
+    This is the number the gate should have been reading, and not reading it is what produced
+    the daily skip list. Measured live on 2026-08-31:
+
+        ticker   whole chain      delta 0.12-0.30 band
+        GE        31/54  = 57%        11/11  = 100%
+        RCL       23/42  = 55%        11/11  = 100%
+        LMT       38/90  = 42%        14/19  =  74%
+        MU       153/153 = 100%       58/58  = 100%
+        SPY      461/461 = 100%      112/112 = 100%
+
+    GE and RCL were skipped every scan for weeks by CHAIN_QUALITY_MIN_RATIO = 0.50 while every
+    single strike VEGA would consider selling was perfectly quotable. The whole-chain ratio is
+    a liquidity census over the entire listed grid -- and the far-OTM strikes dragging it down
+    are one-sided markets (bid 0.00 / ask 8.30 on LMT 425), which is the normal state of a
+    strike nobody wants to buy, on an underlying that is otherwise completely tradeable.
+
+    Asking "is every listed strike quotable" to decide "can I trade this name" is the wrong
+    question. This asks the right one. The whole-chain number is still measured and still
+    logged -- it is a real reading of the vendor and the cockpit tile shows it -- it just no
+    longer decides whether the scan may look at an underlying.
+
+    Falls back to the whole chain when the band is too small to judge (deltas missing, or a
+    handful of contracts), because a ratio over three records is noise, not a measurement.
+    """
+    lo = float(getattr(config, "SHORT_STRIKE_MIN_DELTA", 0.12))
+    hi = float(getattr(config, "SHORT_STRIKE_MAX_DELTA", 0.30))
+    band = []
+    for opt in records or []:
+        d = opt.get("delta")
+        if d is None:
+            continue
+        try:
+            if lo <= abs(float(d)) <= hi:
+                band.append(opt)
+        except (TypeError, ValueError):
+            continue
+    if len(band) < int(getattr(config, "CHAIN_QUALITY_MIN_BAND_CONTRACTS", 8)):
+        return measure_chain_quality(records)
+    return measure_chain_quality(band)
 
 
 def _quality_filter_options(records: List[Dict], ticker: str, source: str) -> List[Dict]:
@@ -962,17 +1109,35 @@ def get_options_chain(ticker: str,
         raw_yf = _parse_yfinance_options(ticker, current_price, min_dte, max_dte)
         kept = _quality_filter_options(raw_yf, ticker, "yfinance")
         records = kept if apply_quality_gate else raw_yf
-        chain_source = "yfinance"
+        # Only claim yfinance served this chain if it actually returned something. The label
+        # was assigned unconditionally, so a ticker that got NOTHING from any tier was recorded
+        # as "yfinance, 0/0" -- indistinguishable in the quality log from a real yfinance read.
+        # AMT and PLD logged 21 such rows each on 2026-08-31 and were reported as living on
+        # yfinance; they were not priced off yfinance at all, they simply have monthly-only
+        # expirations and the 25-45 DTE window fell between two of them. That mislabel now
+        # matters more than it did: chain_source is a cohort dimension as of 2026-08-31.
+        chain_source = "yfinance" if raw_yf else "none"
         _log_api_call("yfinance.options", ticker, len(records) > 0)
         # Measure BEFORE the filter on this path: what arrived is the honest denominator.
         # The reading describes the CHAIN, so it is the same number whether or not this caller
         # asked for the filtered view -- otherwise the ungated path would log a perfect ratio.
-        raw_count, usable_count, ratio = len(raw_yf), len(kept), (
-            round(len(kept) / len(raw_yf), 4) if raw_yf else 0.0)
+        #
+        # Measured with measure_chain_quality, NOT as len(kept)/len(raw_yf). Those differ now:
+        # `kept` is filtered on the SELECTION predicate, which also demands volume or open
+        # interest, and the recorded ratio has to mean "how much of this chain is quotable" on
+        # every source or CHAIN_QUALITY_MIN_RATIO gates yfinance and Robinhood on two different
+        # questions. `kept` is still what this path RETURNS; only the measurement changed.
+        raw_count, usable_count, ratio = measure_chain_quality(raw_yf)
+        # The GATE denominator must be the unfiltered chain too, for the same reason. `records`
+        # is `kept` on this path, which is 100% usable by construction -- gating on it would be
+        # comparing a list to itself, the exact defect _option_record_is_usable's docstring
+        # warns about, and the floor could never fire on yfinance.
+        gate_input = raw_yf
     else:
         # Polygon is not filtered, so measure it with the same predicate rather than
         # comparing a list to itself. See _option_record_is_usable.
         raw_count, usable_count, ratio = measure_chain_quality(records)
+        gate_input = records
 
     # Once per chain, not once per view. Splitting the cache by apply_quality_gate made it
     # possible for one process to read the same chain twice and log the same reading twice,
@@ -988,19 +1153,127 @@ def get_options_chain(ticker: str,
     # about the handful of contracts that happened to quote rather than about the underlying.
     # Returning [] empties the board for this ticker, which is the correct outcome: no read is
     # better than a confident read of nothing.
-    floor = float(getattr(config, "CHAIN_QUALITY_MIN_RATIO", 0.30))
-    if (apply_quality_gate and raw_count > 0 and ratio < floor
-            and getattr(config, "CHAIN_QUALITY_GATE_ENABLED", True)):
+    # A TRUNCATED walk is not a thin chain, it is an unknown one, and the quality ratio cannot
+    # tell them apart: the ratio is measured over the instrument list and truncation shortens
+    # that list. Because pagination is ascending by strike, the strikes lost are the high ones
+    # -- for puts, the sellable band rather than the deep-OTM tail -- so a truncated chain
+    # reads as healthy and is missing exactly the region selection needs. Refuse it.
+    if (apply_quality_gate and ticker in _truncated_walks
+            and getattr(config, "SKIP_TRUNCATED_CHAINS", True)):
         logger.warning(
-            f"[fetcher] SKIP_DATA_QUALITY {ticker}: only {usable_count}/{raw_count} "
-            f"({ratio:.0%}) of the {chain_source} chain is quotable, floor is {floor:.0%} "
-            f"-- skipping this ticker rather than scoring a chain that is mostly absent."
-        )
+            f"[fetcher] SKIP_TRUNCATED_CHAIN {ticker}: instrument walk ended early "
+            f"({_truncated_walks[ticker]}); the chain is incomplete in the strike range "
+            f"selection uses. Declining to score it -- this is not a quality reading.")
+        _chain_gate_skipped.add(ticker)
         _cache[cache_key] = []
         return []
 
+    # Gate on the TRADEABLE BAND, log the whole chain. See measure_tradeable_band_quality:
+    # GE measured 57% over its full grid and 100% across every strike VEGA would sell, and the
+    # full-grid number is what skipped it, every scan, for weeks.
+    gate_raw, gate_usable, gate_ratio = measure_tradeable_band_quality(gate_input)
+    floor = float(getattr(config, "CHAIN_QUALITY_MIN_RATIO", 0.30))
+    if (apply_quality_gate and gate_raw > 0 and gate_ratio < floor
+            and getattr(config, "CHAIN_QUALITY_GATE_ENABLED", True)):
+        logger.warning(
+            f"[fetcher] SKIP_DATA_QUALITY {ticker}: only {gate_usable}/{gate_raw} "
+            f"({gate_ratio:.0%}) of the {chain_source} chain's tradeable delta band is "
+            f"quotable, floor is {floor:.0%} -- skipping this ticker rather than scoring a "
+            f"chain whose sellable strikes are mostly absent. "
+            f"(whole chain: {usable_count}/{raw_count})"
+        )
+        _chain_gate_skipped.add(ticker)
+        _cache[cache_key] = []
+        return []
+
+    if records:
+        _chain_gate_passed.add(ticker)
+    _stamp_chain_source(records, chain_source)
     _cache[cache_key] = records
     return records
+
+
+def _record_band_drop(ticker: str, option_type: str, in_band: int, total: int) -> None:
+    """Accumulate unquoted strikes for a ticker, split by whether they sit in the sellable band."""
+    if not total:
+        return
+    slot = _band_drops.setdefault(ticker, {"band": 0, "grid": 0})
+    slot["band"] += in_band
+    slot["grid"] += total - in_band
+
+
+def _stamp_chain_source(records: List[Dict], chain_source: str) -> None:
+    """Write the vendor onto every record, in place.
+
+    It was a local variable: it reached the log line and data_quality_log and died there, so
+    nothing downstream of the fetch could tell a Robinhood-priced leg from a yfinance one. That
+    is the single distinction the cohort system most needs to make. The 2026-08-27 finding was
+    that yfinance's stale, wide quotes collapse natural credit (short bid - long ask) toward
+    zero, which is what invalidated the prior 64-trade cohort -- and a trade priced off each
+    vendor was, until now, identical in the cohort key. With the clean cohort at roughly one
+    usable trade, one mixed-provenance entry is a large fraction of the whole evidence base.
+
+    Provenance for trades already opened is recoverable by joining data/data_quality_log.json
+    on (ticker, date); it carries chain_source per reading and goes back to 2026-08-27.
+    """
+    if not records:
+        return
+    for r in records:
+        r["chain_source"] = chain_source
+
+
+def chain_coverage() -> Dict[str, Any]:
+    """How much of the watchlist this run could actually see.
+
+    A scan that reaches its gates on 30 of 56 tickers has not measured a quiet market; it has
+    measured itself, and the two are indistinguishable in the output. Every artifact this run
+    writes is a statement about the tickers in `passed` and about no others.
+
+    This exists because the health signal that gated JARVIS ingest was
+    validate_polygon_connection() -- a probe of Polygon, which has been TIER TWO and unentitled
+    for quotes since 2026-08-26 and serves no scan. It therefore returned healthy=False on
+    every run, and ingest was skipped 29 times out of 29 between 2026-08-26 and 2026-08-31
+    with no successes, regardless of whether the data was good. A guard that cannot pass is
+    not a guard. This one is derived from the run it describes and costs no extra requests.
+    """
+    band_holes = {t: v["band"] for t, v in _band_drops.items() if v["band"]}
+    truncated = dict(_truncated_walks)
+    try:
+        from data import robinhood_mcp
+        unrecognized = robinhood_mcp.unrecognized_errors()
+    except Exception:                                  # pragma: no cover - optional SDK
+        unrecognized = {}
+    passed, skipped = set(_chain_gate_passed), set(_chain_gate_skipped)
+    skipped -= passed                      # any window passing means the ticker was seen
+    attempted = len(passed) + len(skipped)
+    ratio = round(len(passed) / attempted, 4) if attempted else 0.0
+    floor = float(getattr(config, "SCAN_COVERAGE_MIN_RATIO", 0.70))
+    return {
+        "enabled": True,
+        "healthy": attempted > 0 and ratio >= floor,
+        "mode": "chain_coverage",
+        "attempted": attempted,
+        "scored": len(passed),
+        "skipped": sorted(skipped),
+        "ratio": ratio,
+        "floor": floor,
+        # Tickers that PASSED the gate while missing strikes inside the band they were judged
+        # on. Not a skip -- the chain was usable -- but the board's pick for these names was
+        # made from an incomplete set, which is invisible in every other number here.
+        "band_holes": band_holes,
+        # Tickers whose instrument walk ended early. These are NOT in `skipped` if the partial
+        # chain happened to clear the floor -- which is the danger, so they are named here.
+        "truncated_walks": truncated,
+        # Error bodies the retry matcher did not recognise, and therefore did not retry.
+        # {signature: count}. Normally empty. A NEW signature appearing here is the signal that
+        # Robinhood changed its error wording and _RETRYABLE_ERROR_MARKERS needs a new entry --
+        # without it, retries silently degrade to a single attempt and the only symptom is a
+        # coverage regression with no stated cause. See robinhood_mcp._unrecognized_errors.
+        "unrecognized_errors": unrecognized,
+        "reason": (f"{len(passed)}/{attempted} tickers ({ratio:.0%}) cleared the chain-quality "
+                   f"floor, minimum is {floor:.0%}"
+                   if attempted else "no chain was fetched this run"),
+    }
 
 
 def _is_rate_limited(exc) -> bool:
@@ -1466,12 +1739,15 @@ def get_call_options_chain(ticker: str, min_dte: int = None, max_dte: int = None
             except Exception:
                 kept = raw_yf
         records = kept
-        chain_source = "yfinance"
+        chain_source = "yfinance" if raw_yf else "none"   # see the put path
         _log_api_call("yfinance.calls", ticker, len(records) > 0)
-        raw_count, usable_count, ratio = len(raw_yf), len(kept), (
-            round(len(kept) / len(raw_yf), 4) if raw_yf else 0.0)
+        # Same predicate as the put path -- see the note there on why this is
+        # measure_chain_quality rather than len(kept)/len(raw_yf).
+        raw_count, usable_count, ratio = measure_chain_quality(raw_yf)
+        gate_input = raw_yf          # unfiltered, same reason as the put path
     else:
         raw_count, usable_count, ratio = measure_chain_quality(records)
+        gate_input = records
 
     # Record call-side chain quality too. It was never measured before, so the cockpit's
     # quality tile described only half the data the engine actually trades on.
@@ -1480,17 +1756,27 @@ def get_call_options_chain(ticker: str, min_dte: int = None, max_dte: int = None
         _quality_recorded.add(quality_key)
         _record_chain_quality(ticker, chain_source, raw_count, usable_count, ratio)
 
+    # Gate on the TRADEABLE BAND, log the whole chain. See measure_tradeable_band_quality:
+    # GE measured 57% over its full grid and 100% across every strike VEGA would sell, and the
+    # full-grid number is what skipped it, every scan, for weeks.
+    gate_raw, gate_usable, gate_ratio = measure_tradeable_band_quality(gate_input)
     floor = float(getattr(config, "CHAIN_QUALITY_MIN_RATIO", 0.30))
-    if (apply_quality_gate and raw_count > 0 and ratio < floor
+    if (apply_quality_gate and gate_raw > 0 and gate_ratio < floor
             and getattr(config, "CHAIN_QUALITY_GATE_ENABLED", True)):
         logger.warning(
-            f"[fetcher] SKIP_DATA_QUALITY {ticker} calls: only {usable_count}/{raw_count} "
-            f"({ratio:.0%}) of the {chain_source} chain is quotable, floor is {floor:.0%} "
-            f"-- skipping this ticker rather than scoring a chain that is mostly absent."
+            f"[fetcher] SKIP_DATA_QUALITY {ticker} calls: only {gate_usable}/{gate_raw} "
+            f"({gate_ratio:.0%}) of the {chain_source} chain's tradeable delta band is "
+            f"quotable, floor is {floor:.0%} -- skipping this ticker rather than scoring a "
+            f"chain whose sellable strikes are mostly absent. "
+            f"(whole chain: {usable_count}/{raw_count})"
         )
+        _chain_gate_skipped.add(ticker)
         _cache[cache_key] = []
         return []
 
+    if records:
+        _chain_gate_passed.add(ticker)
+    _stamp_chain_source(records, chain_source)
     _cache[cache_key] = records
     return records
 

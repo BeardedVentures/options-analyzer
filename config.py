@@ -232,6 +232,51 @@ CHAIN_QUALITY_GATE_ENABLED = True # Below the floor, return an empty chain inste
 # names in the interim.
 CHAIN_QUALITY_MIN_RATIO = 0.50    # Floor. Under 50% quotable, skip the ticker for this scan.
 CHAIN_QUALITY_GOOD_RATIO = 0.70   # At or above this the chain reads green in the cockpit tile.
+# What the ratio above MEASURES. False (2026-08-31 onward) means "quotable": a two-sided,
+# uncrossed, not-absurdly-wide price. True restores the pre-2026-08-31 predicate, which ALSO
+# demanded volume or open interest.
+#
+# It was True by accident, not by decision -- one predicate served both the chain-health
+# measurement and the per-strike selection filter, and only the second of those has any
+# business asking whether a strike has traded. The cost was a permanent blacklist: across the
+# six hourly scans of 2026-08-31, LMT measured 31%, GE 46%, RCL 50% and PLD 55% in EVERY scan,
+# while MU, PLTR, NVDA and TSLA measured 97-99% in every scan. Between-ticker sigma was 21.7%
+# against a median within-ticker sigma of 7.2% -- the floor was reading a liquidity profile
+# and reporting it as a retrieval failure, and 19-20 of 56 tickers were dropped for it daily.
+#
+# Nothing about strike selection loosens. A contract with no volume and no open interest is
+# still refused by _option_record_is_usable where that decision belongs, at the strike.
+CHAIN_QUALITY_REQUIRES_ACTIVITY = False
+
+# Minimum share of the watchlist a scan must actually SCORE for its output to be treated as a
+# reading of the market rather than a reading of the pipeline. Gates the JARVIS ingest and sets
+# the `degraded` flag on the board artifact. See fetcher.chain_coverage() for why this replaced
+# validate_polygon_connection() as the ingest gate on 2026-08-31.
+SCAN_COVERAGE_MIN_RATIO = 0.70
+
+# CHAIN_QUALITY_MIN_RATIO is applied to the strikes inside the 0.12-0.30 delta band -- the ones
+# selection could actually use -- not to every strike listed on the underlying. Measured live
+# 2026-08-31: GE read 57% over its full grid and 100% across its band; RCL 55% and 100%; LMT
+# 42% and 74%. All three were being skipped every scan by the full-grid number while every
+# strike VEGA would consider selling was quotable. The strikes dragging the grid down are
+# one-sided markets far from the money (LMT 425 put: bid 0.00, ask 8.30), which is the normal
+# condition of a strike nobody bids on, not a sign the underlying cannot be traded.
+#
+# Below this many band contracts the band ratio is noise and the whole-chain ratio is used
+# instead. Three quotable records out of four is not a measurement.
+CHAIN_QUALITY_MIN_BAND_CONTRACTS = 8
+
+# Refuse a chain whose instrument PAGE WALK ended early (rate-limited mid-pagination, or out of
+# page budget) instead of scoring the fraction that arrived.
+#
+# This is not the same failure as a thin chain and the quality ratio cannot distinguish them:
+# the ratio is measured over the instrument list, and truncation shortens that list, so a
+# truncated chain reads as healthy. Pagination is ASCENDING BY STRIKE, so the strikes lost are
+# the HIGH ones -- for puts, the 0.12-0.30 delta band rather than the deep-OTM tail. A
+# truncated walk therefore produces a plausible chain missing precisely the region selection
+# uses. 85 rate-limited instrument-page responses appear in run.log; roughly 35 of them
+# truncated a walk rather than emptying it, and none were visible in any downstream number.
+SKIP_TRUNCATED_CHAINS = True
 # How wide a window counts as "the last scan" when the cockpit summarises chain quality.
 # scan_id is per PROCESS, and one cycle runs several — the engine scan, vega_candidates, then a
 # mark loop over only the tickers already holding positions. Summarising the newest scan_id
@@ -452,8 +497,16 @@ WATCHLIST = [
     {"ticker": "NEE",  "type": "Stock", "note": "NextEra Energy — utilities/renewable"},
     
     # ── Real Estate & REITs (2) ──
-    {"ticker": "PLD",  "type": "Stock", "note": "Prologis — industrial REIT"},
-    {"ticker": "AMT",  "type": "Stock", "note": "American Tower — tower REIT"},
+    # MONTHLY-ONLY EXPIRATIONS (3rd Friday). Robinhood serves both fully -- 189/189 and 191/191
+    # contracts quoted at 100% on 2026-08-31 -- but a 25-45 DTE window has NO expiration inside
+    # it on ~31% of days. On 2026-08-31 the 10-16 monthly sat at DTE 46, one day past MAX_DTE.
+    # On those days they produce no chain from any tier, which is correct and not a data
+    # problem. They were previously logged as chain_source="yfinance" with raw=0 and reported
+    # as yfinance-dependent; they are not, and must not be dropped for that reason.
+    # Widening MAX_DTE would close the gap but MIN_DTE/MAX_DTE are part of the cohort contract,
+    # so that is an operator decision and two names do not justify forking a cohort.
+    {"ticker": "PLD",  "type": "Stock", "note": "Prologis — industrial REIT (monthly-only expirations; no chain ~31% of days)"},
+    {"ticker": "AMT",  "type": "Stock", "note": "American Tower — tower REIT (monthly-only expirations; no chain ~31% of days)"},
     
     # ── Sector & Commodity ETFs (4) ──
     {"ticker": "XLE",  "type": "ETF",   "note": "Energy Sector ETF"},
@@ -934,6 +987,12 @@ LEVEL_MANAGEMENT_ALERTS = True
 # VEGA read IV as one scalar per trade. The surface has two axes that both change what a
 # premium seller should do: term structure across expirations, and skew depth across strikes.
 # Independent of SKEW_SCORING_ENABLED so either can be switched off alone.
+# COST, measured 2026-08-31: this read spans DTE 5-120 against the 25-45 the engine trades,
+# and it accounted for 8,491 of the 16,290 option contracts quoted in a single scan -- 52% of
+# the entire Robinhood request budget, for a signal that is advisory and never hard-blocks.
+# Its sibling SKEW_SCORING_ENABLED is already off for a related reason. Setting this to False
+# halves per-scan request volume in one flip; it is left True because dropping a signal is a
+# judgement call, not a bug fix.
 TERM_STRUCTURE_ENABLED = True
 TERM_STRUCTURE_MIN_DTE = 5        # ignore weeklies — not the curve a 25-45 DTE seller trades
 TERM_STRUCTURE_MAX_DTE = 120      # ignore LEAPS

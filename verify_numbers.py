@@ -142,6 +142,22 @@ def main():
               + ("" if not iss else "  <-- " + "; ".join(iss)))
         if iss:
             bad += 1
+    if not trades:
+        # "0/0 rows reconcile" is not a passing check, it is an ABSENT one -- and it printed
+        # directly above a green banner on 2026-08-31. Say which of the two actually happened.
+        cov = d.get("scan_coverage") or {}
+        if cov:
+            print(f"\nNO DATA -- 0 qualified trades. Chain coverage: {cov.get('reason')}")
+            if cov.get("skipped"):
+                print(f"         tickers not seen: {', '.join(cov['skipped'])}")
+        else:
+            print("\nNO DATA -- 0 qualified trades. Nothing was reconciled; this is not a pass.")
+        print("         An empty board is evidence about the market only if the scan could "
+              "see the market.")
+        return 1 if stale else 0
+    if d.get("degraded"):
+        print("\nDEGRADED SCAN -- this board does not describe the full watchlist. "
+              + str((d.get("scan_coverage") or {}).get("reason", "")))
     print(f"\n{len(trades)-bad}/{len(trades)} rows reconcile" + (f", {bad} FAILED" if bad else ""))
     return 1 if (bad or stale) else 0
 

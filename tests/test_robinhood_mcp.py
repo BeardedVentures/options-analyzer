@@ -454,7 +454,16 @@ def test_a_text_error_response_does_not_raise(monkeypatch):
     monkeypatch.setattr(robinhood_mcp, "_robinhood_session", fake_session)
     out = _run(robinhood_mcp.afetch_chain("https://x", "SPY", spot=100.0,
                                               min_dte=25, max_dte=45))
-    assert out == {"instruments": [], "quotes": []}
+    assert out["instruments"] == [] and out["quotes"] == []
+    # "Request entity too large" is a 413 caused by the REQUEST SHAPE, not by load. It must be
+    # answered on the FIRST attempt -- retrying it spends the request budget the retry exists
+    # to protect, plus its own backoff, to arrive at the same answer. The first version of the
+    # instrument retry burned 4 attempts and 15s of exponential backoff on exactly this.
+    assert not robinhood_mcp._is_retryable_error("Request entity too large")
+    # It still ended the walk early, so it is still reported as a truncation -- just not as a
+    # rate limit.
+    assert out["truncated"] is True
+    assert out["truncated_reason"] == "server_error_instrument_page"
 
 
 def test_one_empty_answer_does_not_disable_the_whole_run(monkeypatch):
@@ -683,3 +692,154 @@ def test_a_wide_dte_range_still_sends_a_date_filter(monkeypatch):
     assert all(len(a["expiration_dates"]) < 1000 for a in captured), (
         "a chunk is still large enough to break the server's parser")
     assert len(captured) > 1, "a 201-day range should have been split into chunks"
+
+
+# ── Rate-limited quote batches must be retried, not silently discarded ────────────────────
+
+class _QuoteFakeSession:
+    """Answers get_option_instruments once, then get_option_quotes with a scripted sequence."""
+
+    def __init__(self, quote_replies):
+        self._quote_replies = list(quote_replies)
+        self.quote_calls = 0
+
+    async def call_tool(self, name, args):
+        if name == "get_option_instruments":
+            return _QuoteResult({"data": {"instruments": [
+                {"id": f"id-{i}", "strike_price": "100.0",
+                 "expiration_date": "2026-10-16"} for i in range(20)
+            ], "next": None}})
+        assert name == "get_option_quotes"
+        self.quote_calls += 1
+        return _QuoteResult(self._quote_replies.pop(0))
+
+
+class _QuoteResult:
+    def __init__(self, payload):
+        self.structuredContent = payload if isinstance(payload, dict) else None
+        self.content = [] if isinstance(payload, dict) else [_QuoteText(payload)]
+
+
+class _QuoteText:
+    def __init__(self, text):
+        self.text = text
+
+
+def _run_fetch(monkeypatch, quote_replies):
+    import contextlib as _cl
+    import asyncio as _aio
+
+    session = _QuoteFakeSession(quote_replies)
+
+    @_cl.asynccontextmanager
+    async def _fake_session(server_url):
+        yield session
+
+    monkeypatch.setattr(robinhood_mcp, "_robinhood_session", _fake_session)
+    monkeypatch.setattr(robinhood_mcp, "_QUOTE_BACKOFF_BASE_S", 0.0)   # don't sleep in tests
+    out = _aio.run(robinhood_mcp.afetch_chain("https://x/mcp", "TEST", "put",
+                                              spot=100.0, min_dte=30, max_dte=60))
+    return out, session
+
+
+def test_a_rate_limited_quote_batch_is_retried_not_dropped(monkeypatch):
+    """The original code logged the non-JSON body and `continue`d, throwing 20 contracts away.
+
+    Be precise about the harm, because the obvious story is wrong: a dropped batch does NOT
+    produce a low quotable ratio. fetcher._parse_robinhood_options builds records only from
+    quotes that came back, so 20 lost contracts are 20 records that never exist and the ratio
+    is measured over the survivors. What it produces is an unreported hole in the strike grid.
+    """
+    good = {"data": {"results": [{"quote": {"instrument_id": f"id-{i}", "bid_price": "1.00",
+                                            "ask_price": "1.10"}} for i in range(20)]}}
+    out, session = _run_fetch(monkeypatch, ["429 Too Many Requests", good])
+    assert session.quote_calls == 2, "the rate-limited batch must be retried"
+    assert len(out["quotes"]) == 20, "and its contracts must survive"
+    assert out["dropped_instruments"] == 0
+
+
+def test_a_batch_that_never_recovers_is_counted_rather_than_lost_silently(monkeypatch):
+    """Giving up is allowed. Giving up quietly is what made this invisible for four days."""
+    out, session = _run_fetch(monkeypatch, ["429"] * robinhood_mcp._QUOTE_RETRIES)
+    assert session.quote_calls == robinhood_mcp._QUOTE_RETRIES
+    assert out["quotes"] == []
+    assert out["dropped_instruments"] == 20
+
+
+def test_a_rate_limited_instrument_page_is_retried(monkeypatch):
+    """85 of the non-JSON responses in run.log came from this path, every one RATE_LIMITED,
+    and until 2026-08-31 it had no retry at all -- only the quote loop did."""
+    calls = {"n": 0}
+
+    class _S:
+        async def call_tool(self, name, args):
+            if name == "get_option_instruments":
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    return _QuoteResult("error: RATE_LIMITED: too many requests")
+                return _QuoteResult({"data": {"instruments": [
+                    {"id": "i1", "strike_price": "100.0", "expiration_date": "2026-10-16"}],
+                    "next": None}})
+            return _QuoteResult({"data": {"results": [
+                {"quote": {"instrument_id": "i1", "bid_price": "1.0", "ask_price": "1.1"}}]}})
+
+    import contextlib as _cl, asyncio as _aio
+
+    @_cl.asynccontextmanager
+    async def _fake(server_url):
+        yield _S()
+
+    monkeypatch.setattr(robinhood_mcp, "_robinhood_session", _fake)
+    monkeypatch.setattr(robinhood_mcp, "_QUOTE_BACKOFF_BASE_S", 0.0)
+    out = _aio.run(robinhood_mcp.afetch_chain("https://x/mcp", "TEST", "put",
+                                              spot=100.0, min_dte=30, max_dte=60))
+    assert calls["n"] == 2, "the rate-limited instrument page must be retried"
+    assert out["truncated"] is False
+    assert len(out["instruments"]) == 1
+
+
+def test_a_walk_that_never_recovers_is_marked_truncated(monkeypatch):
+    """The old code `break`ed out of the page walk and the caller proceeded as though the pages
+    already collected were the whole chain. Pagination is ascending by strike, so what survives
+    is the LOW strikes -- for puts the deep-OTM tail, not the band the engine sells from. A
+    truncated walk is an UNKNOWN chain, not a thin one, and no ratio downstream can see it
+    because truncation shrinks the very list those ratios are measured over."""
+    import contextlib as _cl, asyncio as _aio
+
+    class _S:
+        async def call_tool(self, name, args):
+            return _QuoteResult("error: RATE_LIMITED: too many requests")
+
+    @_cl.asynccontextmanager
+    async def _fake(server_url):
+        yield _S()
+
+    monkeypatch.setattr(robinhood_mcp, "_robinhood_session", _fake)
+    monkeypatch.setattr(robinhood_mcp, "_QUOTE_BACKOFF_BASE_S", 0.0)
+    out = _aio.run(robinhood_mcp.afetch_chain("https://x/mcp", "TEST", "put",
+                                              spot=100.0, min_dte=30, max_dte=60))
+    assert out["truncated"] is True
+    assert out["truncated_reason"] == "rate_limited_instrument_page"
+    assert out["instruments"] == []
+
+
+@pytest.mark.parametrize("body", [
+    "error: RATE_LIMITED: too many requests, please try again shortly",
+    "429 Too Many Requests",
+    "gateway timeout",
+    "503 Service Unavailable",
+])
+def test_transient_errors_are_retryable(body):
+    assert robinhood_mcp._is_retryable_error(body)
+
+
+@pytest.mark.parametrize("body", [
+    "Request entity too large",
+    "400 Bad Request: unknown parameter 'cursr'",
+    "Instrument not found",
+    "",
+])
+def test_permanent_errors_are_not_retryable(body):
+    """Unrecognised errors are treated as permanent ON PURPOSE. A new server-side failure mode
+    should cost one request, not _INSTRUMENT_RETRIES of them across all 56 tickers."""
+    assert not robinhood_mcp._is_retryable_error(body)

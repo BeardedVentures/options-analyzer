@@ -836,6 +836,11 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "short_strike": short_put.get("strike"),
         "long_strike": long_put.get("strike"),
         "long_mid": long_put.get("mid"),
+        # Which vendor priced the legs this candidate was built from. Carried onto the board and
+        # then onto the ledger row, because it is a cohort dimension: yfinance's wide quotes
+        # collapse natural credit toward zero, which is the whole reason Robinhood is Tier 1.
+        # Read off the short leg -- both legs come from one chain fetch, so they agree.
+        "chain_source": short_put.get("chain_source"),
         "expiration": short_put.get("expiration"),
         "last_trade_date": short_put.get("last_trade_date"),
         "expiration_display": short_put.get("last_trade_date") or short_put.get("expiration"),
@@ -1639,6 +1644,24 @@ def run_scan(session_type: str) -> None:
                      exc_info=True)
     logger.debug(f"[scan] renderer.render() returned: {output_path}")
 
+    # Derived from the run that just finished, not from a pre-scan probe of another vendor.
+    scan_coverage = fetcher.chain_coverage()
+    (logger.info if scan_coverage.get("healthy") else logger.warning)(
+        "[scan] Chain coverage: %s", scan_coverage.get("reason"))
+    if scan_coverage.get("skipped"):
+        logger.warning("[scan] Tickers this scan could not see: %s",
+                       ", ".join(scan_coverage["skipped"]))
+    if scan_coverage.get("truncated_walks"):
+        logger.warning("[scan] Chains fetched incomplete: %s",
+                       ", ".join(f"{t} ({why})"
+                                 for t, why in sorted(scan_coverage["truncated_walks"].items())))
+    # Normally empty, and loud when it is not: an unrecognised error body means the retry
+    # matcher stopped matching, which degrades retries to one attempt with no other symptom.
+    if scan_coverage.get("unrecognized_errors"):
+        logger.warning("[scan] UNRECOGNIZED_ERROR_BODY -- retries did not fire for these; if a "
+                       "signature here recurs, add it to robinhood_mcp._RETRYABLE_ERROR_MARKERS: "
+                       "%s", scan_coverage["unrecognized_errors"])
+
     scan_entry = {
         "timestamp": ts.isoformat(),
         "session_type": session_type,
@@ -1655,6 +1678,7 @@ def run_scan(session_type: str) -> None:
         "regime_note": regime["regime_note"],
         "source_health": {
             "polygon": source_health,
+            "coverage": scan_coverage,
         },
         "shadow_run": shadow_run,
         "shadow_evaluations": shadow_evaluations,
@@ -1669,6 +1693,12 @@ def run_scan(session_type: str) -> None:
         "regime": regime,
         "scan_summary": build_scan_summary(tickers, tech_map, qualified_trades),
         "source_health": source_health,
+        # What this scan could actually SEE. source_health above probes Polygon, which is Tier
+        # 2 and unentitled -- it describes a source no scan uses. The board is a statement
+        # about scan_coverage["scored"] tickers and about no others; anything reading it needs
+        # to be able to know that.
+        "scan_coverage": scan_coverage,
+        "degraded": not scan_coverage.get("healthy", False),
         "qualified_trades": qualified_trades,
         "rejected_trades": avoided,
         "book": {
@@ -1690,7 +1720,13 @@ def run_scan(session_type: str) -> None:
     logger.info(f"Scan complete. Tip sheet saved to {output_path}")
 
     # ── VEGA: Push scan results to JARVIS tower ──────────────────────────
-    if VEGA_INGEST_ENABLED and source_health.get("healthy", False):
+    # Gated on COVERAGE, not on the Polygon probe. The probe reported healthy=False on every
+    # run from 2026-08-26 onward because the Starter plan is not entitled to option quotes --
+    # true, permanent, and irrelevant, since Robinhood has been Tier 1 since 2026-08-27. Ingest
+    # was skipped 29 times out of 29 with zero successes: the guard was jammed shut rather than
+    # holding. What ingest actually needs to know is whether this scan saw enough of the
+    # watchlist to be worth ingesting, which is what chain_coverage() answers.
+    if VEGA_INGEST_ENABLED and scan_coverage.get("healthy", False):
         # Read tipsheet HTML if available
         tipsheet_html = None
         if output_path and Path(output_path).exists():
@@ -1713,7 +1749,7 @@ def run_scan(session_type: str) -> None:
             tipsheet_html=tipsheet_html,
         )
     elif VEGA_INGEST_ENABLED:
-        logger.warning("[scan] Skipping JARVIS ingest because source health is degraded")
+        logger.warning("[scan] Skipping JARVIS ingest: %s", scan_coverage.get("reason"))
 
     if config.EMAIL_ENABLED:
         pass  # Email sending not configured

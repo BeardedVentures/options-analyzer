@@ -342,6 +342,108 @@ async def alist_tools(server_url: str) -> List[Dict[str, Any]]:
 # the response degrades. Batch conservatively.
 _QUOTE_BATCH = 20
 
+# Retries for one quote batch that came back as something other than JSON. The server answers
+# errors -- rate limits among them -- as plain text, and the original code logged that and
+# `continue`d, dropping all 20 contracts on the floor.
+#
+# Be precise about what this fixes, because the obvious story is wrong. A dropped batch does
+# NOT show up as a low quotable ratio: fetcher._parse_robinhood_options builds records only
+# from quotes that came back, so 20 lost contracts are 20 records that never exist, and the
+# ratio is computed over the survivors. The harm is quieter than a bad ratio -- it is a hole
+# in the strike grid that no downstream number reports, and the strikes lost are whichever
+# ones happened to land in that batch.
+_QUOTE_RETRIES = 3
+_QUOTE_BACKOFF_BASE_S = 1.0
+
+# The instrument walk gets its own retry count because a failure there is STRICTLY WORSE than a
+# failed quote batch. A dropped quote batch loses 20 contracts out of a known population; a
+# rate-limited instrument page ends the walk, and the caller keeps whatever pages arrived.
+# 85 of the non-JSON responses in run.log came from this path, every one RATE_LIMITED, and
+# roughly 35 of them truncated a walk rather than emptying it -- silently, because the
+# "no instruments" warning only fires when the walk returns nothing at all.
+_INSTRUMENT_RETRIES = 4
+
+
+# Substrings that mark a TRANSIENT server error -- one worth waiting out. Everything else is
+# permanent for this request and retrying it burns the request budget it is supposedly
+# protecting, plus its own backoff, to arrive at the same answer.
+#
+# Added after the first version of this retry spent 4 attempts and 15s of backoff on
+# "Request entity too large" -- a 413 caused by the REQUEST SHAPE (too many expiration dates in
+# one filter, which is what _MAX_EXPIRATION_DATES chunking exists to avoid). No amount of
+# waiting makes an oversized request smaller.
+_RETRYABLE_ERROR_MARKERS = (
+    "rate_limited",
+    "too many requests",
+    "429",
+    "timeout",
+    "timed out",
+    "503",
+    "service unavailable",
+    "temporarily unavailable",
+)
+
+
+def _is_retryable_error(payload) -> bool:
+    """Is this non-JSON error body worth another attempt?
+
+    Conservative by design: retry only what is known-transient. An unrecognised error is
+    treated as permanent, so a new server-side failure mode costs one request rather than
+    _INSTRUMENT_RETRIES of them across every ticker in the scan.
+    """
+    text = str(payload or "").lower()
+    return any(marker in text for marker in _RETRYABLE_ERROR_MARKERS)
+
+
+def _error_reason(payload) -> str:
+    """Short machine-readable tag for why a walk ended, for the truncation record."""
+    return ("rate_limited_instrument_page" if _is_retryable_error(payload)
+            else "server_error_instrument_page")
+
+
+# Error bodies _RETRYABLE_ERROR_MARKERS did not recognise, counted per scan.
+# {signature: count} -- a signature, not a raw body, so one recurring failure is one line
+# rather than 56 near-identical ones.
+#
+# WHY THIS EXISTS. _is_retryable_error defaults the unknown to PERMANENT, which is the right
+# default -- it fails fast instead of burning four attempts and 15s of backoff on a request
+# that can never succeed. The cost of that default is a silent mode: if Robinhood reworded its
+# rate-limit response, every marker would stop matching, retries would quietly collapse to one
+# attempt, and the symptom would be a coverage regression with nothing in the log naming the
+# cause. That is the same shape as the Polygon probe that sat at healthy=False for 29
+# consecutive runs -- a component that had stopped working, reporting nothing about it.
+#
+# The 2026-09-01 scans make this concrete rather than hypothetical: SEVEN full scans produced
+# ZERO rate-limited responses, so the matcher never ran. It is now load-bearing code that
+# nothing has exercised in production, and a matcher that is never exercised is a matcher
+# nobody can tell has broken.
+_unrecognized_errors: Dict[str, int] = {}
+
+
+def _error_signature(payload) -> str:
+    """Collapse an error body to something stable enough to count.
+
+    Keeps the leading words, which is where these servers put the error CODE, and drops the
+    tail, which is where they put the ids and timestamps that make every instance unique.
+    """
+    text = " ".join(str(payload or "").split())[:80]
+    return text or "<empty response>"
+
+
+def _note_unrecognized(payload) -> None:
+    sig = _error_signature(payload)
+    _unrecognized_errors[sig] = _unrecognized_errors.get(sig, 0) + 1
+
+
+def unrecognized_errors() -> Dict[str, int]:
+    """Unrecognised error bodies seen since the last reset. Read by fetcher.chain_coverage."""
+    return dict(_unrecognized_errors)
+
+
+def reset_unrecognized_errors() -> None:
+    """Called from fetcher.clear_cache() at the start of each scan."""
+    _unrecognized_errors.clear()
+
 # Strikes outside this band cost quote requests and are never selected. Measured across SPY,
 # NKE, XLE and AMD on 2026-08-28, every strike inside VEGA's usable delta range (.10-.35) fell
 # between 82% and 99% of spot; the widest was AMD at 82%. 75%-102% keeps a 7-point margin below
@@ -473,6 +575,8 @@ async def afetch_chain(server_url: str, ticker: str, option_type: str = "put",
         # delta band, which looks exactly like "this underlying has nothing to sell" rather
         # than like a truncated fetch.
         instruments = []
+        truncated = False
+        truncated_reason = None
         for chunk in date_chunks:
             cursor = None
             for _page in range(_MAX_INSTRUMENT_PAGES):
@@ -486,14 +590,43 @@ async def afetch_chain(server_url: str, ticker: str, option_type: str = "put",
                     args["expiration_dates"] = ",".join(chunk)
                 if cursor:
                     args["cursor"] = cursor
-                inst_result = await _call_read_tool(session, "get_option_instruments", args)
-                raw = _extract_tool_json(inst_result)
-                if not isinstance(raw, dict):
+                raw = None
+                last_error = None
+                for attempt in range(_INSTRUMENT_RETRIES):
+                    inst_result = await _call_read_tool(session, "get_option_instruments", args)
+                    candidate = _extract_tool_json(inst_result)
+                    if isinstance(candidate, dict):
+                        raw = candidate
+                        break
                     # The server answers errors as text, not JSON. Treating that as a dict raised
-                    # "AttributeError: 'str' object has no attribute 'get'" from inside the anyio
-                    # task group, which surfaced as an opaque ExceptionGroup.
+                    # "AttributeError: 'str' object has no attribute 'go'" from inside the anyio
+                    # task group, which surfaced as an opaque ExceptionGroup. Every one of the 85
+                    # such responses in run.log is "RATE_LIMITED: too many requests".
+                    last_error = candidate
+                    if not _is_retryable_error(candidate):
+                        _note_unrecognized(candidate)
+                        logger.warning("[robinhood_mcp] %s: non-retryable error from "
+                                       "get_option_instruments, not retrying: %s",
+                                       ticker, str(candidate)[:200])
+                        break
+                    delay = _QUOTE_BACKOFF_BASE_S * (2 ** attempt)
                     logger.warning("[robinhood_mcp] %s: non-JSON response from "
-                                   "get_option_instruments: %s", ticker, str(raw)[:200])
+                                   "get_option_instruments (attempt %d/%d, retrying in %.0fs): %s",
+                                   ticker, attempt + 1, _INSTRUMENT_RETRIES, delay,
+                                   str(candidate)[:200])
+                    if attempt < _INSTRUMENT_RETRIES - 1:
+                        await asyncio.sleep(delay)
+                if raw is None:
+                    # TRUNCATION, not a skip. This `break` leaves the walk part-done and the
+                    # caller previously proceeded as though the pages already collected were the
+                    # whole chain. Pagination is ASCENDING BY STRIKE, so what survives is
+                    # systematically the LOW strikes -- for puts, the deep-OTM tail below the
+                    # 0.12-0.30 delta band. A truncated walk therefore yields a plausible
+                    # partial chain that is missing precisely the region the engine sells from,
+                    # and it is invisible to every ratio computed downstream: those are measured
+                    # over the instrument list, and this shrinks the instrument list itself.
+                    truncated = True
+                    truncated_reason = _error_reason(last_error)
                     break
                 payload = (raw.get("data") or {})
                 page = payload.get("instruments") or []
@@ -519,33 +652,90 @@ async def afetch_chain(server_url: str, ticker: str, option_type: str = "put",
                 cursor = _next_cursor(payload.get("next"))
                 if not cursor:
                     break
+            else:
+                # The page loop ran to _MAX_INSTRUMENT_PAGES with a cursor still outstanding:
+                # the walk stopped because it hit its budget, not because the chain ended or
+                # the ascending-strike early-stop fired. Same silent partial chain as a
+                # rate-limited page, from a different cause, so it is reported the same way.
+                if cursor:
+                    truncated = True
+                    truncated_reason = "page_budget_exhausted"
+
+        if truncated:
+            logger.warning("[robinhood_mcp] TRUNCATED_WALK %s %ss DTE %s-%s (%s): kept %d "
+                           "instruments from an incomplete page walk. Pagination is ascending "
+                           "by strike, so the missing strikes are the HIGH ones -- for puts "
+                           "that is the sellable band, not the tail.",
+                           ticker, option_type, min_dte, max_dte, truncated_reason,
+                           len(instruments))
 
         if not instruments:
             logger.warning("[robinhood_mcp] no %s instruments for %s in DTE %s-%s",
                            option_type, ticker, min_dte, max_dte)
-            return {"instruments": [], "quotes": []}
+            return {"instruments": [], "quotes": [],
+                    "truncated": truncated, "truncated_reason": truncated_reason}
 
         by_id = {i["id"]: i for i in instruments if i.get("id")}
         ids = list(by_id.keys())
 
         quotes = []
+        dropped = 0
+        dropped_strikes: List[float] = []
         for n in range(0, len(ids), _QUOTE_BATCH):
             batch = ids[n:n + _QUOTE_BATCH]
-            q_result = await _call_read_tool(session, "get_option_quotes",
-                                             {"instrument_ids": batch})
-            q_payload = _extract_tool_json(q_result)
-            if not isinstance(q_payload, dict):
-                logger.warning("[robinhood_mcp] %s: non-JSON response from get_option_quotes: "
-                               "%s", ticker, str(q_payload)[:200])
+            q_payload = None
+            for attempt in range(_QUOTE_RETRIES):
+                q_result = await _call_read_tool(session, "get_option_quotes",
+                                                 {"instrument_ids": batch})
+                candidate = _extract_tool_json(q_result)
+                if isinstance(candidate, dict):
+                    q_payload = candidate
+                    break
+                if not _is_retryable_error(candidate):
+                    _note_unrecognized(candidate)
+                    logger.warning("[robinhood_mcp] %s: non-retryable error from "
+                                   "get_option_quotes, not retrying: %s",
+                                   ticker, str(candidate)[:200])
+                    break
+                # Exponential backoff. The one thing that must NOT happen on a rate-limited
+                # response is an immediate retry, which spends the budget it is waiting on.
+                delay = _QUOTE_BACKOFF_BASE_S * (2 ** attempt)
+                logger.warning("[robinhood_mcp] %s: non-JSON response from get_option_quotes "
+                               "(attempt %d/%d, retrying in %.0fs): %s",
+                               ticker, attempt + 1, _QUOTE_RETRIES, delay,
+                               str(candidate)[:200])
+                if attempt < _QUOTE_RETRIES - 1:
+                    await asyncio.sleep(delay)
+            if q_payload is None:
+                # Still a drop, but a counted one -- and counted by STRIKE, not just by
+                # quantity. The strikes matter because the caller gates on the delta band, and
+                # a hole there is a contract the engine could have sold and cannot see. A bare
+                # count cannot distinguish "we lost 20 far-OTM strikes nobody would sell" from
+                # "we lost the three strikes this spread would have been built from".
+                dropped += len(batch)
+                for _id in batch:
+                    try:
+                        dropped_strikes.append(float(by_id[_id].get("strike_price")))
+                    except (TypeError, ValueError, KeyError):
+                        pass
                 continue
             for row in ((q_payload.get("data") or {}) or {}).get("results") or []:
                 quote = row.get("quote") if isinstance(row, dict) else None
                 if quote:
                     quotes.append(quote)
 
+        if dropped:
+            logger.warning("[robinhood_mcp] %s: QUOTE_BATCH_DROPPED %d of %d instruments have "
+                           "no quote after %d attempts -- this chain has holes in its strike "
+                           "grid, not a low quotable ratio.",
+                           ticker, dropped, len(ids), _QUOTE_RETRIES)
         logger.debug("[robinhood_mcp] %s: %d instruments, %d quotes",
                      ticker, len(instruments), len(quotes))
-        return {"instruments": list(by_id.values()), "quotes": quotes}
+        return {"instruments": list(by_id.values()), "quotes": quotes,
+                "dropped_instruments": dropped,
+                "dropped_strikes": sorted(dropped_strikes),
+                "truncated": truncated,
+                "truncated_reason": truncated_reason}
 
 
 # ─────────────────────────────────────────────

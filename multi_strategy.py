@@ -211,6 +211,26 @@ def _edge_score(ticker, strategy, tech, vrp_pct, true_pop, implied_pop, sentimen
         return int(max(0, min(100, 50 + ep))), {}
 
 
+def _vendor_of(*legs) -> Optional[str]:
+    """Which vendor priced these legs, for outcome_logger.vendor_basis.
+
+    A condor is built from TWO independent chain fetches -- get_call_options_chain and
+    get_options_chain each pick their own source and each can fall back to yfinance alone, so
+    the two wings genuinely can come from different vendors. Returning either one's label would
+    file a mixed-vendor trade under a single-vendor cohort key, which is the exact contamination
+    vendor_basis was added on 2026-08-31 to keep out.
+
+    So disagreement gets its own label rather than a winner: 'mixed:robinhood+yfinance' can
+    never be pooled with 'robinhood', which is the point. A missing label stays missing --
+    vendor_basis renders None as 'unrecorded', and inventing a source here would be worse than
+    admitting one was never recorded.
+    """
+    seen = sorted({str(l.get("chain_source")) for l in legs if l and l.get("chain_source")})
+    if not seen:
+        return None
+    return seen[0] if len(seen) == 1 else "mixed:" + "+".join(seen)
+
+
 def _base(ticker, strategy_key, price, tech, sentiment, dte, exp):
     return {
         "ticker": ticker, "strategy": strategies.STRATEGY_SPECS[strategy_key]["label"],
@@ -305,6 +325,10 @@ def build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings
     t = _base(ticker, "bear_call", price, tech, sentiment, dte, short.get("last_trade_date") or short.get("expiration"))
     t.update({
         "short_strike": short["strike"], "long_strike": long_["strike"], "credit_per_share": credit_ps,
+        # Vendor provenance, same contract as the bull-put path in main.py — a cohort dimension.
+        # One chain fetch here, so _vendor_of collapses to that single source; routed
+        # through it anyway so the two call-side paths cannot drift apart on format.
+        "chain_source": _vendor_of(short),
         "credit_usd": credit_usd, "max_loss_usd": max_loss, "delta": short.get("delta"),
         # credit_per_share above IS the natural (fillable) credit. The mid is kept beside it
         # because the difference between them is the execution cost, and a board that shows
@@ -379,6 +403,12 @@ def build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, 
     t.update({
         "put_short_strike": ps["strike"], "put_long_strike": pl["strike"],
         "call_short_strike": cs["strike"], "call_long_strike": cl["strike"],
+        # Vendor provenance -- see _vendor_of. Absent until 2026-09-01, so a condor
+        # reached the ledger as vendor_basis 'unrecorded' while a bull put off the
+        # IDENTICAL Robinhood chain reached it as 'robinhood'. Two trades from one
+        # fetch, two cohort keys -- and the split was invisible, because 'unrecorded'
+        # is also the honest label on every row written before 2026-08-31.
+        "chain_source": _vendor_of(ps, cs),
         "credit_per_share": credit_ps, "credit_usd": credit_usd, "max_loss_usd": max_loss,
         "natural_credit_per_share": credit_ps, "natural_credit_usd": credit_usd,
         "natural_credit_to_width": round(credit_ps / width, 4) if width else 0,

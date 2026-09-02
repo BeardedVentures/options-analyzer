@@ -143,6 +143,7 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
                      expected_move_at_entry=None, pop_gap_at_entry=None,
                      btc_iv_gap_pp=None, btc_vrp_pp=None,
                      support_level_at_entry=None,
+                     chain_source: str = None,
                      strategy: str = "bull_put_spread") -> str:
     """
     Open a PAPER position from a real candidate (or manual entry). Records the entry credit you
@@ -225,6 +226,10 @@ def open_paper_trade(ticker: str, short_strike, long_strike, expiration,
         # still a valid record of what the selection logic picked — it just cannot be compared
         # against, or pooled with, natural-fill results.
         "fill_model": fill_model,
+        # VENDOR COHORT. Which data source priced the legs this trade was selected from --
+        # written at open, because both vendors are live at once and it cannot be recovered
+        # from the date afterwards. See outcome_logger.vendor_basis and fetcher._stamp_chain_source.
+        "chain_source": chain_source,
         # Both sides of the fill on record, not just the one booked. `actual_fill_credit` is what
         # the trade is scored on; these two make the gap measurable per trade so the 75.5% figure
         # from the 2026-08-02 audit can be tracked over time instead of re-derived from snapshots.
@@ -409,6 +414,29 @@ def current_entry_epoch() -> str:
     return entry_epoch({"opened_at": datetime.now().isoformat()})
 
 
+def vendor_basis(record: Dict) -> str:
+    """Which data vendor priced this trade's legs: 'robinhood', 'yfinance', 'polygon', ...
+
+    The fourth defect in the same family as fill_model and gate_basis, and the one the ledger
+    has the least excuse for missing. The 2026-08-27 switch to Robinhood was made BECAUSE
+    yfinance's stale and wide quotes collapse natural credit (short bid - long ask) toward
+    zero; that is what invalidated the prior 64-trade cohort. Two trades priced off the two
+    vendors are different trades, and until 2026-08-31 they carried an identical cohort key.
+
+    Unlike gate_basis and entry_epoch this is NOT derivable from the open date. Both vendors
+    are live simultaneously -- yfinance is the standing fallback whenever Robinhood returns
+    nothing for a ticker, and it served 8 of 56 tickers in a single scan on 2026-08-31, two of
+    them (AMT, PLD) in every scan of the day. So it must be read off the record, and records
+    written before fetcher._stamp_chain_source existed cannot answer.
+
+    'unrecorded' is the honest label for those, not a guess. It is recoverable if it ever
+    matters: data/data_quality_log.json carries chain_source per (ticker, date) from
+    2026-08-27 onward. Backfilling it here would be inventing a measurement, which is the same
+    reason gate_basis is derived rather than stored.
+    """
+    return str(record.get("chain_source") or "unrecorded")
+
+
 def cohort(record: Dict) -> str:
     """The comparability key: trades sharing it were selected and closed under the same rules.
 
@@ -423,11 +451,18 @@ def cohort(record: Dict) -> str:
     the key, so the next trade to open would have been counted alongside four trades opened in
     a single minute on 2026-08-10 — the exact clustering those caps exist to prevent.
 
+    The fifth, vendor_basis, was added 2026-08-31. It is the same argument as fill_model made
+    about a different price: the whole reason for the 2026-08-27 move to Robinhood was that
+    yfinance quotes collapse natural credit toward zero, and yfinance is still the live
+    fallback for any ticker Robinhood cannot serve — 8 of 56 in one scan that day. Without
+    this dimension the contamination the cohort system exists to exclude walks straight back
+    in, one ticker at a time, invisibly.
+
     Derived, never written to history. The ledger is append-only and closed records are left
     exactly as they were written — see close_cohort.
     """
     return (f"{record.get('fill_model') or 'mid'}|{gate_basis(record)}|"
-            f"{close_cohort(record)}|{entry_epoch(record)}")
+            f"{close_cohort(record)}|{entry_epoch(record)}|{vendor_basis(record)}")
 
 
 def analysis_eligible(record: Dict) -> bool:

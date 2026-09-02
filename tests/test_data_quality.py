@@ -12,6 +12,7 @@ write while being arithmetically incapable of reporting a problem on the primary
 So the suite proves the metric can be non-zero on Polygon before it proves anything else.
 """
 import json
+from unittest import mock
 
 import pytest
 
@@ -65,13 +66,43 @@ def test_each_unusable_shape_is_rejected(bad, why):
     assert fetcher._option_record_is_usable(bad) is False, why
 
 
-def test_the_filter_and_the_measurement_agree():
-    """_quality_filter_options and measure_chain_quality must never disagree about one record,
-    or the log would describe a chain other than the one the scan traded."""
-    chain = [opt(), opt(bid=0, ask=0, mid=0), opt(), opt(volume=0, oi=0)]
+def test_the_measurement_asks_about_pricing_and_the_filter_asks_about_activity():
+    """These two deliberately DISAGREE about one kind of record, as of 2026-08-31.
+
+    They used to share a predicate, which sounds like consistency and was the bug. The filter
+    picks which STRIKES may be sold and is right to refuse one with no volume and no open
+    interest. The measurement feeds CHAIN_QUALITY_MIN_RATIO, which decides whether the whole
+    TICKER is looked at -- and an untraded far strike is not a reason to decline to look at the
+    underlying. Sharing the predicate turned a liquidity profile into a retrieval verdict and
+    blacklisted 19-20 of 56 tickers every scan.
+
+    So: a record with a real two-sided market but no activity is UNQUOTABLE-no / TRADEABLE-no.
+    It counts toward the chain being retrievable; it is still refused as a strike to sell.
+    """
+    priced_and_traded = opt()
+    no_market = opt(bid=0, ask=0, mid=0)
+    priced_but_untraded = opt(volume=0, oi=0)
+    chain = [priced_and_traded, no_market, priced_and_traded, priced_but_untraded]
+
     kept = fetcher._quality_filter_options(list(chain), "TEST", "yfinance")
-    _, usable, _ = fetcher.measure_chain_quality(chain)
-    assert len(kept) == usable == 2
+    assert len(kept) == 2, "selection still refuses the untraded strike and the dead one"
+
+    _, usable, ratio = fetcher.measure_chain_quality(chain)
+    assert usable == 3, "the untraded strike was still successfully PRICED; only the dead one was not"
+    assert ratio == 0.75
+
+    # And the two agree exactly on the only thing they should: a record with no market at all.
+    assert not fetcher._option_record_is_quotable(no_market)
+    assert not fetcher._option_record_is_usable(no_market)
+
+
+def test_the_old_conflated_predicate_is_still_reachable():
+    """CHAIN_QUALITY_REQUIRES_ACTIVITY restores the pre-2026-08-31 behaviour without a code
+    edit, because loosening a gate on a live trading system should be revertible in one line."""
+    chain = [opt(), opt(volume=0, oi=0)]
+    assert fetcher.measure_chain_quality(chain)[1] == 2
+    with mock.patch.object(fetcher.config, "CHAIN_QUALITY_REQUIRES_ACTIVITY", True, create=True):
+        assert fetcher.measure_chain_quality(chain)[1] == 1
 
 
 # ── The log ───────────────────────────────────────────────────────────────────────────────────
@@ -465,3 +496,219 @@ def test_macro_fallback_is_not_used_when_newsapi_works(monkeypatch):
     fetcher._cache.clear()
     out = fetcher.get_macro_news()
     assert out and not any(a.get("macro_proxy") for a in out)
+
+
+# ── Coverage: the guard that replaced the Polygon probe ───────────────────────────────────────
+
+def test_coverage_is_the_ratio_of_tickers_actually_scored():
+    """The signal that gates the JARVIS ingest, derived from the run it describes.
+
+    It replaced fetcher.validate_polygon_connection() on 2026-08-31. That probed Polygon --
+    Tier 2, and unentitled for option quotes since 2026-08-26 -- so it returned healthy=False
+    on every run and ingest was skipped 29 times out of 29 with zero successes, regardless of
+    whether the scan had gone well. A guard that cannot pass is not a guard.
+    """
+    fetcher.clear_cache()
+    for t in ("SPY", "QQQ", "IWM", "NVDA", "MU", "PLTR", "TSLA"):
+        fetcher._chain_gate_passed.add(t)
+    for t in ("LMT", "GE", "RCL"):
+        fetcher._chain_gate_skipped.add(t)
+
+    cov = fetcher.chain_coverage()
+    assert cov["attempted"] == 10
+    assert cov["scored"] == 7
+    assert cov["ratio"] == 0.7
+    assert cov["skipped"] == ["GE", "LMT", "RCL"]
+    assert cov["healthy"] is True          # exactly at the 0.70 floor
+    fetcher.clear_cache()
+
+
+def test_a_ticker_that_passed_any_window_is_not_counted_as_skipped():
+    """Puts, calls and the term-structure read are three separate gate decisions for one
+    ticker. The advisory DTE 5-120 read failing its floor does not mean the scan could not see
+    the underlying, so it must not count against coverage."""
+    fetcher.clear_cache()
+    fetcher._chain_gate_passed.add("COP")      # the 25-45 put window cleared
+    fetcher._chain_gate_skipped.add("COP")     # the 5-120 term-structure read did not
+    cov = fetcher.chain_coverage()
+    assert cov["attempted"] == 1 and cov["scored"] == 1 and cov["skipped"] == []
+    fetcher.clear_cache()
+
+
+def test_no_chain_fetched_is_not_healthy():
+    """A run that fetched nothing has coverage 0/0. The honest answer is 'unhealthy', not the
+    0/0 == 100% that an empty-denominator shortcut would produce -- that is the same vacuous
+    pass verify_numbers.py printed as '0/0 rows reconcile'."""
+    fetcher.clear_cache()
+    cov = fetcher.chain_coverage()
+    assert cov["attempted"] == 0
+    assert cov["healthy"] is False
+
+
+def test_records_carry_the_vendor_that_priced_them():
+    """chain_source was a local in get_options_chain: it reached the log line and died there,
+    so nothing downstream could tell a Robinhood-priced leg from a yfinance one."""
+    records = [{"strike": 100.0}, {"strike": 105.0}]
+    fetcher._stamp_chain_source(records, "yfinance")
+    assert all(r["chain_source"] == "yfinance" for r in records)
+    fetcher._stamp_chain_source([], "robinhood")      # must not raise
+
+
+# ── The gate asks about the strikes selection could use, not every strike listed ───────────────
+
+def _band(delta, **kw):
+    """A record inside the 0.12-0.30 short-strike delta band."""
+    return dict(opt(**kw), delta=delta)
+
+
+def _far_otm_one_sided():
+    """The normal condition of a strike nobody bids on: ask only, no bid.
+
+    This is what actually dragged the whole-chain ratio down -- not rate limiting, and not the
+    volume/OI clause. LMT's 425 put on 2026-08-31 quoted bid 0.00 / ask 8.30.
+    """
+    return dict(opt(bid=0.0, ask=8.30, mid=4.15, volume=0, oi=0), delta=0.02)
+
+
+def test_the_gate_measures_the_tradeable_band_not_the_whole_grid():
+    """GE measured 57% over its full listed chain and 100% across every strike VEGA would sell.
+    The full-grid number is what skipped it, every scan, for weeks."""
+    chain = [_band(0.20) for _ in range(10)] + [_far_otm_one_sided() for _ in range(30)]
+
+    whole_raw, whole_usable, whole_ratio = fetcher.measure_chain_quality(chain)
+    assert (whole_raw, whole_usable) == (40, 10)
+    assert whole_ratio == 0.25, "the full grid looks unusable"
+
+    band_raw, band_usable, band_ratio = fetcher.measure_tradeable_band_quality(chain)
+    assert (band_raw, band_usable) == (10, 10)
+    assert band_ratio == 1.0, "every strike selection could actually use is quotable"
+
+
+def test_a_band_too_small_to_judge_falls_back_to_the_whole_chain():
+    """A ratio over three records is noise, not a measurement, so the conservative whole-chain
+    reading stands rather than letting four lucky contracts wave a broken chain through."""
+    chain = [_band(0.20) for _ in range(3)] + [_far_otm_one_sided() for _ in range(30)]
+    assert fetcher.measure_tradeable_band_quality(chain) == fetcher.measure_chain_quality(chain)
+
+
+def test_records_with_no_delta_never_count_as_band():
+    """yfinance records missing Greeks must not be silently treated as in-band."""
+    chain = [dict(opt(), delta=None) for _ in range(20)]
+    assert fetcher.measure_tradeable_band_quality(chain) == fetcher.measure_chain_quality(chain)
+
+
+def test_the_band_gate_still_catches_a_genuinely_broken_band():
+    """Loosening the denominator must not disarm the gate. If the strikes VEGA would sell are
+    the ones that cannot be priced, that is exactly the case the floor exists for."""
+    chain = [_band(0.20, bid=0.0, ask=8.30, mid=4.15) for _ in range(10)] + \
+            [_band(0.20) for _ in range(2)]
+    raw, usable, ratio = fetcher.measure_tradeable_band_quality(chain)
+    assert raw == 12 and usable == 2
+    assert ratio < config.CHAIN_QUALITY_MIN_RATIO
+
+
+def test_calls_are_banded_on_absolute_delta():
+    """Call deltas are positive and put deltas negative; the band is about distance from the
+    money, so it must be read on the absolute value or the call side would never band."""
+    puts = [_band(-0.20) for _ in range(10)]
+    calls = [_band(0.20) for _ in range(10)]
+    assert fetcher.measure_tradeable_band_quality(puts)[0] == 10
+    assert fetcher.measure_tradeable_band_quality(calls)[0] == 10
+
+
+def test_the_yfinance_gate_denominator_is_the_unfiltered_chain(monkeypatch):
+    """The gate must never be handed the chain the filter already cleaned.
+
+    On the yfinance path `records` is `kept`, which is 100% usable by construction. Measuring
+    the gate over it is comparing a list to itself -- arithmetically incapable of firing, the
+    exact defect _option_record_is_usable's docstring was written about. Caught in review on
+    2026-08-31 after being introduced that same day by the band-gate change.
+    """
+    dead = dict(opt(bid=0.0, ask=0.0, mid=0.0), delta=0.20)
+    alive = dict(opt(), delta=0.20)
+    raw = [dead] * 18 + [alive] * 2        # 10% quotable: must be refused
+
+    monkeypatch.setattr(fetcher.config, "ROBINHOOD_MCP_ENABLED", False, raising=False)
+    monkeypatch.setattr(fetcher.config, "POLYGON_API_KEY", "", raising=False)
+    monkeypatch.setattr(fetcher.config, "CHAIN_QUALITY_LOG_ENABLED", False, raising=False)
+    monkeypatch.setattr(fetcher, "_parse_yfinance_options", lambda *a, **k: [dict(r) for r in raw])
+
+    class _Px:
+        empty = False
+        class Close:
+            @staticmethod
+            def iloc(_): ...
+    monkeypatch.setattr(fetcher, "get_price_data",
+                        lambda *a, **k: __import__("pandas").DataFrame({"Close": [100.0]}))
+
+    fetcher.clear_cache()
+    assert fetcher.get_options_chain("TEST", 25, 45) == [], (
+        "a chain whose tradeable band is 10% quotable must be refused, not waved through "
+        "because the filter had already removed the evidence")
+    fetcher.clear_cache()
+
+
+# ── A hole inside the sellable band must be reported, not absorbed ─────────────────────────────
+
+def test_the_band_ratio_is_structurally_blind_to_dropped_batches():
+    """Pins the LIMITATION, so nobody mistakes a healthy ratio for a complete chain.
+
+    A dropped quote batch removes its contracts from `quotes`, so they never become records
+    and never enter the denominator. The ratio therefore reads 100% over what survived. This
+    is NOT the yfinance tautology -- records that exist can still fail the predicate, and LMT
+    measured 14/19 = 74% live -- but it is the same family, and the band gate made it matter
+    more: a missing far-OTM strike is nothing, a missing in-band strike is a spread the engine
+    could have built and cannot see.
+    """
+    full = [dict(opt(), delta=0.20, strike=float(k)) for k in range(100, 120)]
+    survived = full[:10]                       # ten in-band strikes never came back
+
+    assert fetcher.measure_tradeable_band_quality(survived)[2] == 1.0
+    assert fetcher.measure_tradeable_band_quality(full)[2] == 1.0
+    # Identical ratios, materially different chains. Hence _record_band_drop.
+
+
+def test_a_drop_inside_the_band_is_recorded_separately_from_one_outside_it():
+    """GRID_DROP is noise; BAND_DROP means selection chose from an incomplete set."""
+    fetcher.clear_cache()
+    fetcher._record_band_drop("LMT", "put", in_band=3, total=20)
+    fetcher._record_band_drop("GE", "put", in_band=0, total=20)
+
+    assert fetcher._band_drops["LMT"] == {"band": 3, "grid": 17}
+    assert fetcher._band_drops["GE"] == {"band": 0, "grid": 20}
+
+    fetcher._chain_gate_passed.update({"LMT", "GE"})
+    cov = fetcher.chain_coverage()
+    assert cov["healthy"] is True, "both tickers were usable -- this is not a skip"
+    assert cov["band_holes"] == {"LMT": 3}, "only the in-band hole surfaces"
+    fetcher.clear_cache()
+
+
+def test_band_drops_are_cleared_between_runs():
+    fetcher._record_band_drop("LMT", "put", 3, 20)
+    fetcher.clear_cache()
+    assert fetcher._band_drops == {}
+
+
+def test_an_empty_chain_is_not_attributed_to_yfinance(monkeypatch):
+    """A ticker that got nothing from any tier was logged as "yfinance, 0/0", which reads as a
+    real yfinance chain that happened to be empty. AMT and PLD each logged 21 such rows on
+    2026-08-31 and were reported as living on yfinance; they were never priced off yfinance at
+    all -- they have monthly-only expirations and the 25-45 DTE window fell between two of
+    them. chain_source is a cohort dimension now, so a false vendor claim is a false cohort."""
+    import pandas as pd
+    monkeypatch.setattr(fetcher.config, "ROBINHOOD_MCP_ENABLED", False, raising=False)
+    monkeypatch.setattr(fetcher.config, "POLYGON_API_KEY", "", raising=False)
+    monkeypatch.setattr(fetcher.config, "CHAIN_QUALITY_LOG_ENABLED", False, raising=False)
+    monkeypatch.setattr(fetcher, "_parse_yfinance_options", lambda *a, **k: [])
+    monkeypatch.setattr(fetcher, "get_price_data",
+                        lambda *a, **k: pd.DataFrame({"Close": [100.0]}))
+
+    seen = {}
+    monkeypatch.setattr(fetcher, "_record_chain_quality",
+                        lambda t, src, r, u, ratio: seen.update(source=src, raw=r))
+    fetcher.clear_cache()
+    assert fetcher.get_options_chain("AMT", 25, 45) == []
+    assert seen["raw"] == 0
+    assert seen["source"] == "none", "an empty result must not claim a vendor priced it"
+    fetcher.clear_cache()

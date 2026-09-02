@@ -127,7 +127,7 @@ def test_close_logic_is_part_of_the_cohort_key():
     from analysis import outcome_logger as ol
     key = ol.cohort({"fill_model": "natural", "gate_basis": "natural",
                      "close_logic": "ravens_v1", "opened_at": "2026-08-10T09:38:00"})
-    assert key.count("|") == 3, "cohort key must be fill|gate|close|entry_epoch"
+    assert key.count("|") == 4, "cohort key must be fill|gate|close|entry_epoch|vendor"
     assert "hold_to_stop_or_expiry" in config.COHORT_STRATEGY_LABEL
 
 
@@ -274,3 +274,33 @@ def test_the_select_contract_still_requires_computable_risk():
     needs the number to size against, even though VEGA never sizes for them."""
     from analysis import contracts
     assert ("max_loss_usd", "num0") in contracts.SELECT_CANDIDATE
+
+
+def test_vendor_is_part_of_the_cohort_key():
+    """Added 2026-08-31, the same argument fill_model makes about a different price.
+
+    The 2026-08-27 move to Robinhood was made BECAUSE yfinance's stale, wide quotes collapse
+    natural credit (short bid - long ask) toward zero -- that is what invalidated the prior
+    64-trade cohort. yfinance is still the live fallback for any ticker Robinhood cannot serve:
+    it priced 8 of 56 tickers in a single scan on 2026-08-31, two of them in every scan of the
+    day. Without this dimension those trades were indistinguishable in the key from
+    broker-priced ones, and the contamination the cohort system exists to exclude walks back in
+    one ticker at a time.
+    """
+    from analysis import outcome_logger as ol
+    base = {"fill_model": "natural", "gate_basis": "natural",
+            "close_logic": "ravens_v1", "opened_at": "2026-08-28T09:38:00"}
+    rh = ol.cohort({**base, "chain_source": "robinhood"})
+    yf = ol.cohort({**base, "chain_source": "yfinance"})
+    assert rh != yf, "a yfinance-priced trade must not share a cohort with a broker-priced one"
+
+
+def test_unstamped_records_say_so_rather_than_guessing():
+    """Provenance is NOT derivable from the open date -- unlike gate_basis and entry_epoch,
+    both vendors are live simultaneously. Rows written before fetcher._stamp_chain_source
+    existed get 'unrecorded', which is the honest label. Back-filling one would be inventing a
+    measurement, the same reason gate_basis is derived rather than stored."""
+    from analysis import outcome_logger as ol
+    assert ol.vendor_basis({}) == "unrecorded"
+    assert ol.vendor_basis({"chain_source": None}) == "unrecorded"
+    assert ol.vendor_basis({"chain_source": "robinhood"}) == "robinhood"

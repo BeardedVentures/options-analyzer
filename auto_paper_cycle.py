@@ -733,6 +733,7 @@ def _auto_open_from_board() -> int:
                 natural_credit_per_share=float(credit),
                 mid_credit_per_share=t.get("credit_per_share"),
                 source="auto-board", note="auto from scan_latest.json",
+                chain_source=t.get("chain_source"),
                 edge_score=t.get("edge_score"), vrp=t.get("vrp"),
                 technical_score=t.get("composite_score") or t.get("technical_score"),
                 term_slope=t.get("term_slope"), skew_steepness=t.get("skew_steepness"),
