@@ -414,27 +414,91 @@ def current_entry_epoch() -> str:
     return entry_epoch({"opened_at": datetime.now().isoformat()})
 
 
-def vendor_basis(record: Dict) -> str:
-    """Which data vendor priced this trade's legs: 'robinhood', 'yfinance', 'polygon', ...
+# The DATE Robinhood MCP became the Tier-1 chain source. Before it, Robinhood was not in the
+# fetch chain at all, so no trade opened earlier can have been priced by it.
+#
+# THIS IS A DATE, NOT AN INSTANT. What time of day the cutover actually landed is not recorded,
+# so a trade that opened or closed ON 2026-08-27 is ambiguous and is resolved in the
+# conservative direction (treated as Robinhood-side for crossing purposes). That is harmless
+# here -- the worst case is a boundary trade flagged as crossing when it was not. Do NOT reuse
+# this constant anywhere a precise instant matters; it cannot support that.
+ROBINHOOD_TIER1_DATE = "2026-08-27"
 
-    The fourth defect in the same family as fill_model and gate_basis, and the one the ledger
-    has the least excuse for missing. The 2026-08-27 switch to Robinhood was made BECAUSE
-    yfinance's stale and wide quotes collapse natural credit (short bid - long ask) toward
-    zero; that is what invalidated the prior 64-trade cohort. Two trades priced off the two
-    vendors are different trades, and until 2026-08-31 they carried an identical cohort key.
 
-    Unlike gate_basis and entry_epoch this is NOT derivable from the open date. Both vendors
-    are live simultaneously -- yfinance is the standing fallback whenever Robinhood returns
-    nothing for a ticker, and it served 8 of 56 tickers in a single scan on 2026-08-31, two of
-    them (AMT, PLD) in every scan of the day. So it must be read off the record, and records
-    written before fetcher._stamp_chain_source existed cannot answer.
+def _vendor_at(date_str: str, recorded) -> str:
+    """The vendor label for one side of a trade, from what was recorded or what was possible."""
+    if recorded:
+        return str(recorded)
+    d = str(date_str or "")[:10]
+    if not d:
+        return "unrecorded"
+    # Before Tier 1 there was no simultaneity to be ambiguous about: Robinhood was not a source.
+    # This says only that -- NOT which of yfinance or Polygon served, which the record cannot
+    # answer and which guessing would invent.
+    return "pre_robinhood" if d < ROBINHOOD_TIER1_DATE else "unrecorded"
 
-    'unrecorded' is the honest label for those, not a guess. It is recoverable if it ever
-    matters: data/data_quality_log.json carries chain_source per (ticker, date) from
-    2026-08-27 onward. Backfilling it here would be inventing a measurement, which is the same
-    reason gate_basis is derived rather than stored.
+
+def entry_vendor_basis(record: Dict) -> str:
+    """Which data vendor priced this trade's legs AT ENTRY.
+
+    RENAMED from vendor_basis on 2026-09-03, and the name change is the point. Vendor basis is
+    NOT constant across a trade's life. META opened 2026-08-06 and closed 2026-09-03: the entry
+    credit came from a pre-Robinhood source, the exit debit at $0.29 came from Robinhood, and
+    realized P&L is entry credit minus exit debit. Calling that trade "vendor_basis:
+    pre_robinhood" asserted something false about half of it. This project has been bitten
+    repeatedly by fields that meant something narrower than their name, so the field now says
+    which side it describes. See exit_vendor_basis and vendor_boundary_crossed.
+
+    WHY A DERIVATION IS HONEST HERE, when the previous docstring argued it was not. That
+    argument -- "both vendors are live simultaneously, yfinance is the standing fallback, so it
+    must be read off the record" -- is correct from 2026-08-27 onward and is preserved above in
+    _vendor_at. It does not apply before that date, because Robinhood was not in the fetch chain
+    at all. Measured 2026-09-03: all 79 executed rows opened 2026-07-09 to 2026-08-10 and NOT
+    ONE carries a chain_source. So for those rows this is not a guess about which vendor served,
+    it is a fact about which vendor could not have.
+
+    'pre_robinhood', not 'yfinance', for exactly that reason: Polygon was also in the chain
+    then, and naming yfinance would assert something the record cannot support.
+
+    WHAT THIS CHANGED. The dimension was added 2026-08-31 and has held 'unrecorded' on every row
+    ever written, because the candidates path dropped chain_source (fixed 2026-09-03). A
+    constant fifth component neither pools nor splits anything, so the key has been effectively
+    four-dimensional while believed to be five. All 79 executed rows move to 'pre_robinhood'
+    together, so nothing that was pooled becomes split; the first Robinhood-era trade then lands
+    in a genuinely different population, which is what the dimension exists to express.
+
+    Derived, never written to history -- same contract as gate_basis and entry_epoch.
     """
-    return str(record.get("chain_source") or "unrecorded")
+    return _vendor_at(record.get("opened_at") or record.get("logged_at"),
+                      record.get("chain_source"))
+
+
+def exit_vendor_basis(record: Dict) -> Optional[str]:
+    """Which vendor priced the CLOSE, or None while the trade is still open.
+
+    Deliberately NOT part of the cohort key. A comparability key needs one value per trade and
+    entry is the side that determines which trades exist at all. This is the other half of the
+    truth, recorded so the crossing trades are addressable instead of invisible.
+    """
+    if record.get("status") != "closed":
+        return None
+    return _vendor_at(record.get("closed_at"), record.get("exit_chain_source"))
+
+
+def vendor_boundary_crossed(record: Dict) -> bool:
+    """Did this trade ENTER under one vendor regime and EXIT under another?
+
+    Such a trade's realized P&L mixes vendors, and mixes them in the direction that matters:
+    yfinance's stale, wide quotes collapse natural credit toward zero, so a trade entered on a
+    depressed credit and exited on a real one has a P&L attributable to neither vendor's
+    pricing. Measured 2026-09-03: 3 of 75 closed rows cross, 1 of the 12 closed ravens_v1 rows
+    (MSFT, closed on the boundary date itself, +$43.84). The four open positions are marked
+    daily off Robinhood and will all cross when they close, so the fraction MOVES -- which is
+    why any win rate quoted from this cohort should be printed with the crossing count beside
+    it rather than left to whoever reads it later.
+    """
+    ev = exit_vendor_basis(record)
+    return bool(ev) and ev != entry_vendor_basis(record)
 
 
 def cohort(record: Dict) -> str:
@@ -451,18 +515,25 @@ def cohort(record: Dict) -> str:
     the key, so the next trade to open would have been counted alongside four trades opened in
     a single minute on 2026-08-10 — the exact clustering those caps exist to prevent.
 
-    The fifth, vendor_basis, was added 2026-08-31. It is the same argument as fill_model made
-    about a different price: the whole reason for the 2026-08-27 move to Robinhood was that
+    The fifth, entry_vendor_basis, was added 2026-08-31. It is the same argument as fill_model
+    made about a different price: the whole reason for the 2026-08-27 move to Robinhood was that
     yfinance quotes collapse natural credit toward zero, and yfinance is still the live
     fallback for any ticker Robinhood cannot serve — 8 of 56 in one scan that day. Without
     this dimension the contamination the cohort system exists to exclude walks straight back
     in, one ticker at a time, invisibly.
 
+    It is the ENTRY vendor, and only that. A trade can enter under one regime and exit under
+    another -- 3 of 75 closed rows do, and the four open positions all will -- so one value
+    cannot describe the whole trade. A key needs one value per trade and entry is the side that
+    determines which trades exist, so the key carries entry and vendor_boundary_crossed()
+    carries the rest. Renamed from `vendor_basis` on 2026-09-03 so the name says which side it
+    means; this project has been bitten too often by fields that meant less than their name.
+
     Derived, never written to history. The ledger is append-only and closed records are left
     exactly as they were written — see close_cohort.
     """
     return (f"{record.get('fill_model') or 'mid'}|{gate_basis(record)}|"
-            f"{close_cohort(record)}|{entry_epoch(record)}|{vendor_basis(record)}")
+            f"{close_cohort(record)}|{entry_epoch(record)}|{entry_vendor_basis(record)}")
 
 
 def analysis_eligible(record: Dict) -> bool:

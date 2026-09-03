@@ -96,6 +96,38 @@ def compute_stats(rows):
     s["cohort_keys"] = cohorts
     s["cohort_label"] = cohorts[0] if len(cohorts) == 1 else (
         f"{len(cohorts)} eligible cohorts" if cohorts else "no eligible cohort yet")
+
+    # VENDOR-BOUNDARY CROSSINGS, printed BESIDE the win rate rather than left for a reader to
+    # discover. The cohort key carries the ENTRY vendor only, because a comparability key needs
+    # one value per trade -- but a trade that entered pre-Robinhood and exited on Robinhood has
+    # a realized P&L that mixes the two, in the direction that matters, since yfinance's wide
+    # quotes collapse natural credit toward zero.
+    #
+    # The fraction MOVES. It was 3 of 75 closed rows on 2026-09-03, and the four open positions
+    # are marked daily off Robinhood, so each one that closes raises it. A win rate quoted from
+    # this cohort therefore carries a different contamination fraction depending on WHEN it was
+    # computed, and an un-annotated number just relocates the problem to whoever reads it later.
+    s["n_vendor_crossed"] = sum(1 for r in eligible_closed if ol.vendor_boundary_crossed(r))
+    s["n_vendor_crossed_pooled"] = sum(1 for r in closed if ol.vendor_boundary_crossed(r))
+    # An open position only raises the ELIGIBLE cohort's crossing count if it would be eligible
+    # once closed. Counting every open position here overstated it: on 2026-09-03 all four open
+    # rows are gate_basis 'mid', so none can ever join the eligible cohort, and the honest
+    # forecast for that cohort is zero even though three POOLED rows already cross.
+    would_cross = [r for r in open_
+                   if str(r.get("opened_at") or "")[:10] < ol.ROBINHOOD_TIER1_DATE]
+    pending_eligible = [r for r in would_cross
+                        if r.get("fill_model") == "natural"
+                        and ol.gate_basis(r) == "natural"]
+    s["n_vendor_crossing_pending"] = len(pending_eligible)
+    s["n_vendor_crossing_pending_pooled"] = len(would_cross)
+    s["vendor_crossed_note"] = (
+        f"{s['n_vendor_crossed']} of {len(eligible_closed)} eligible closed trade(s) crossed the "
+        f"vendor boundary (entered under one regime, exited under another) — their realized P&L "
+        f"mixes vendors and is attributable to neither. "
+        f"{s['n_vendor_crossed_pooled']} of {len(closed)} pooled. "
+        f"{len(pending_eligible)} open position(s) will add to the eligible count when they "
+        f"close ({len(would_cross)} to the pooled count)."
+    ) if (s["n_vendor_crossed"] or s["n_vendor_crossed_pooled"] or would_cross) else ""
     return s, closed, open_
 
 

@@ -296,11 +296,16 @@ def test_vendor_is_part_of_the_cohort_key():
 
 
 def test_unstamped_records_say_so_rather_than_guessing():
-    """Provenance is NOT derivable from the open date -- unlike gate_basis and entry_epoch,
-    both vendors are live simultaneously. Rows written before fetcher._stamp_chain_source
-    existed get 'unrecorded', which is the honest label. Back-filling one would be inventing a
-    measurement, the same reason gate_basis is derived rather than stored."""
+    """Provenance is not derivable from the open date WHILE BOTH VENDORS ARE LIVE -- yfinance is
+    the standing fallback for any ticker Robinhood cannot serve, so a row on/after
+    ROBINHOOD_TIER1_DATE with no chain_source gets 'unrecorded'. Back-filling that would be
+    inventing a measurement.
+
+    Updated 2026-09-03: the same reasoning does NOT extend before that date, because Robinhood
+    was not in the fetch chain at all -- see the pre_robinhood test below."""
     from analysis import outcome_logger as ol
-    assert ol.vendor_basis({}) == "unrecorded"
-    assert ol.vendor_basis({"chain_source": None}) == "unrecorded"
-    assert ol.vendor_basis({"chain_source": "robinhood"}) == "robinhood"
+    assert ol.entry_vendor_basis({"opened_at": "2026-09-01"}) == "unrecorded"
+    assert ol.entry_vendor_basis({"opened_at": "2026-09-01", "chain_source": None}) == "unrecorded"
+    assert ol.entry_vendor_basis({"opened_at": "2026-09-01",
+                                  "chain_source": "robinhood"}) == "robinhood"
+    assert ol.entry_vendor_basis({}) == "unrecorded", "no date at all cannot be derived either"
