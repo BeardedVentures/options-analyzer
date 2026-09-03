@@ -121,3 +121,53 @@ def test_no_generated_data_artifact_is_tracked_by_git():
         + "\n  ".join(offenders)
         + "\nAdd them to .gitignore, and check `git check-ignore -v <path>` whenever a file "
           "under data/ or logs/ is renamed or gains a new extension.")
+
+
+# ── a gate a rename can disable ───────────────────────────────────────────────
+
+def test_every_caller_uses_a_real_strategy_key():
+    """The rename guard. strategies.evaluate() returns qualified=False for a key it does not
+    recognise, which is INDISTINGUISHABLE from a candidate that failed its criteria.
+
+    main.py wraps that call in a try/except commented "Fail open: a bug in evaluate() must not
+    silently empty the board" -- but the unknown-strategy path RETURNS rather than raising, so
+    the handler never sees it and the board empties anyway, by the one route the guard cannot
+    watch. The symptom would be a board qualifying nothing, which is exactly what a market
+    drought looks like.
+
+    So this checks statically that every hardcoded key in the tree is a real spec. A rename
+    fails here instead of quietly zeroing the board in production.
+    """
+    import re
+    from pathlib import Path
+    import strategies
+
+    root = Path(__file__).resolve().parent.parent
+    pattern = re.compile(r"strategies\.evaluate\(\s*[\"']([^\"']+)[\"']")
+    found = {}
+    for py in root.rglob("*.py"):
+        parts = py.parts
+        if "tests" in parts or ".venv" in parts or "site-packages" in parts:
+            continue
+        try:
+            src = py.read_text(encoding="utf-8", errors="replace")
+        except OSError:                              # pragma: no cover - defensive
+            continue
+        for key in pattern.findall(src):
+            found.setdefault(key, []).append(str(py.relative_to(root)))
+
+    assert found, "expected to find at least one strategies.evaluate() call site"
+    unknown = {k: v for k, v in found.items() if k not in strategies.STRATEGY_SPECS}
+    assert not unknown, (
+        "these call sites pass a strategy key that is not in STRATEGY_SPECS, so they would "
+        f"silently qualify NOTHING: {unknown}. Valid keys: {sorted(strategies.STRATEGY_SPECS)}")
+
+
+def test_an_unknown_key_is_LOUD_even_though_it_fails_closed(caplog):
+    """Failing closed is the safe direction -- raising would hit main.py's fail-open handler and
+    fill the board with ungated candidates instead. But silence is what made this dangerous."""
+    import strategies
+    with caplog.at_level(logging.ERROR):
+        res = strategies.evaluate("bull_put_spread", {})     # a real typo, made on 2026-09-03
+    assert res["qualified"] is False
+    assert any("UNKNOWN STRATEGY" in r.message for r in caplog.records)

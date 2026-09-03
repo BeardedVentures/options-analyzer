@@ -107,6 +107,27 @@ def evaluate(strategy: str, ctx: Dict) -> Dict:
     """
     spec = STRATEGY_SPECS.get(strategy)
     if not spec:
+        # LOUD, because this is a programming error wearing the costume of a normal rejection.
+        #
+        # A caller passing a key that is not in STRATEGY_SPECS gets qualified=False -- which is
+        # indistinguishable from a candidate that genuinely failed its criteria. main.py wraps
+        # this call in a try/except whose comment reads "Fail open: a bug in evaluate() must not
+        # silently empty the board" -- but nothing RAISES here, so that handler never sees it and
+        # the board empties anyway, by the one route the guard cannot watch.
+        #
+        # It is not reachable today: all five production callers pass hardcoded literals
+        # (bull_put, bear_call, iron_condor, long_call_lottery x2). It becomes reachable the
+        # moment a spec key is renamed without updating a caller -- and the symptom would be a
+        # board that qualifies nothing, which this project has just spent a week learning is
+        # extremely easy to mistake for a market condition.
+        #
+        # Still returns qualified=False rather than raising: failing CLOSED is the safe
+        # direction, and raising would hit main.py's fail-open handler and fill the board with
+        # ungated candidates instead. Loud and closed, not silent or open.
+        # test_every_caller_uses_a_real_strategy_key catches the rename before it ships.
+        logger.error("[strategies] UNKNOWN STRATEGY %r -- not in STRATEGY_SPECS (%s). Nothing "
+                     "can qualify under this key; if a spec was renamed, a caller was missed.",
+                     strategy, ", ".join(sorted(STRATEGY_SPECS)))
         return {"qualified": False, "criteria": [_chk("unknown strategy", False)], "news_check": {}, "spec_label": strategy}
     crit: List[Dict] = []
 
