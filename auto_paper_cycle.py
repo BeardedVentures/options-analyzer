@@ -985,7 +985,13 @@ def _level_breach_alerts(ticker: str, positions: List[Dict]) -> int:
         from data import fetcher
         from analysis.levels import find_levels
 
-        px_data = fetcher.get_price_data(ticker, period="1y")
+        # RAW, not adjusted: these levels are compared against SHORT STRIKES below, and a
+        # strike does not move when a dividend is paid. Same reasoning as screen_ticker's level
+        # read -- see the block there for the measured impact. Falls back to the adjusted series
+        # rather than losing the alert entirely.
+        px_data = fetcher.get_raw_price_data(ticker, period="1y")
+        if px_data is None or px_data.empty:
+            px_data = fetcher.get_price_data(ticker, period="1y")
         if px_data is None or px_data.empty:
             return 0
         spot = float(px_data["Close"].iloc[-1])

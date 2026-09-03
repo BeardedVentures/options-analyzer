@@ -243,6 +243,13 @@ def _record(candidate: Dict, outcome: Dict) -> Dict:
         # ledger row alone. Both use daily bars, but they are not the same measurement and must
         # never be pooled without saying so -- the same rule the cohort key enforces on trades.
         "resolution_method": "snapshot",
+        # Which price series the touch test ran against. Until 2026-09-02 every row was
+        # resolved on auto_adjust=True history -- dividend-adjusted lows compared against a raw
+        # strike, biased toward false touches on payers. Rows carrying no price_basis were
+        # produced under that regime and are a third population, alongside the two
+        # resolution_methods. Recorded rather than backfilled: inventing the label on old rows
+        # would be inventing the measurement.
+        "price_basis": "raw",
         "resolved_at": datetime.now().isoformat(),
     }
 
@@ -322,6 +329,7 @@ def build(snapshot_dir: Optional[Path] = None, ledger: Optional[Path] = None,
                        if prior_cand else {})
             rec = {**prior, **outcome,
                    "resolution_method": prior.get("resolution_method") or "snapshot",
+                   "price_basis": "raw",
                    "resolved_at": datetime.now().isoformat()}
         fresh[key] = rec
 
@@ -361,6 +369,7 @@ def build(snapshot_dir: Optional[Path] = None, ledger: Optional[Path] = None,
             # different methods are two populations until proven otherwise.
             row = {**row, **outcome,
                    "resolution_method": "ledger_replay",
+                   "price_basis": "raw",
                    "resolved_at": datetime.now().isoformat()}
             replayed += 1
         fresh[key] = row

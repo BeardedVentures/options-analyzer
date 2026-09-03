@@ -89,7 +89,12 @@ def _stub_market(monkeypatch, spot, support_price=100.0):
     import data
 
     fake_fetcher = type(sys)("fetcher")
-    fake_fetcher.get_price_data = lambda t, period=None: _FakeDF(spot)
+    # Levels are compared against a STRIKE, so _level_breach_alerts reads the RAW series
+    # (2026-09-02). Both are stubbed: the raw one is what it calls, and the adjusted one is the
+    # documented fallback, so a regression that quietly reverts to adjusted prices still fails
+    # this test rather than passing on the fallback.
+    fake_fetcher.get_raw_price_data = lambda t, period=None: _FakeDF(spot)
+    fake_fetcher.get_price_data = lambda t, period=None: None
     monkeypatch.setattr(data, "fetcher", fake_fetcher, raising=False)
     monkeypatch.setitem(sys.modules, "data.fetcher", fake_fetcher)
 
@@ -159,6 +164,7 @@ def test_breach_alert_failure_is_swallowed(monkeypatch):
     boom = type(sys)("fetcher")
     def _raise(*a, **k):
         raise RuntimeError("network down")
+    boom.get_raw_price_data = _raise
     boom.get_price_data = _raise
     monkeypatch.setitem(sys.modules, "data.fetcher", boom)
     assert apc._level_breach_alerts("TEST", [{"id": "X", "short_strike": 1.0}]) == 0

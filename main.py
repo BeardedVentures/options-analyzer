@@ -571,12 +571,38 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
 
     # Levels are needed BEFORE strike selection, and technicals runs after it (it wants the
     # chosen strike), so detect them straight off price_data here.
+    #
+    # LEVELS READ RAW PRICES, NOT ADJUSTED (2026-09-02). price_data comes from
+    # get_price_data(auto_adjust=True), which back-adjusts history for dividends. That is right
+    # for technicals -- returns, RSI, ATR, realized vol all want the adjusted series -- and
+    # wrong here, because a level is compared against a STRIKE, and a strike is a fixed number
+    # in raw price space that does not move when a dividend is paid.
+    #
+    # MEASURED IMPACT, because the hypothesis deserved a number rather than agreement: over the
+    # 544 spreads of 2026-09-01/02, re-evaluating support_shelter on raw levels flipped 6
+    # FAIL->PASS and 3 PASS->FAIL. Net +3 of 544, +0.6%. So this is CORRECTNESS HYGIENE and NOT
+    # a driver of the qualification drought -- the prediction that it would be is not supported.
+    #
+    # The reason the effect is small is worth recording: find_levels detects CLUSTERS OF
+    # TOUCHES, so switching series does not shift every level by the dividend drift, it changes
+    # which pivots are detected at all. Measured shifts run both directions -- QCOM -3.4%, ABBV
+    # -3.1%, GOOG +2.3%, LMT +1.6% -- with the clean dividend signature (XOM +0.82%, CVX +0.64%,
+    # JNJ +0.61%) visible only on the payers. Level re-detection dominates dividend drift.
+    #
+    # Costs one extra yfinance history call per ticker that gets this far, and falls back to the
+    # adjusted series rather than losing levels entirely: _shelter_ok fails OPEN on an empty
+    # pool, so a dropped level read would silently widen the gate instead of narrowing it.
     _levels: Dict = {}
     if getattr(config, "LEVEL_AWARE_STRIKES", True):
         try:
             from analysis.levels import find_levels
-            _levels = find_levels(price_data["High"].tolist(), price_data["Low"].tolist(),
-                                  price_data["Close"].tolist())
+            _lvl_src = fetcher.get_raw_price_data(ticker, period="2y")
+            if _lvl_src is None or _lvl_src.empty:
+                logger.debug("[levels] no raw history for %s; falling back to the adjusted "
+                             "series (levels will carry dividend drift)", ticker)
+                _lvl_src = price_data
+            _levels = find_levels(_lvl_src["High"].tolist(), _lvl_src["Low"].tolist(),
+                                  _lvl_src["Close"].tolist())
         except Exception as e:
             logger.warning(f"[levels] detection failed for {ticker}: {e}")
 
