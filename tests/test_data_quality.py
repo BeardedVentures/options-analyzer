@@ -27,9 +27,19 @@ def opt(bid=1.00, ask=1.10, mid=1.05, volume=500, oi=1000):
 
 @pytest.fixture
 def temp_log(tmp_path, monkeypatch):
-    f = tmp_path / "data_quality_log.json"
+    # JSONL since 2026-09-03. The legacy array path is redirected too, so a stray real
+    # data_quality_log.json can never be migrated into a test's tmp dir.
+    f = tmp_path / "data_quality_log.jsonl"
     monkeypatch.setattr(dq, "LOG_FILE", str(f))
+    monkeypatch.setattr(dq, "LEGACY_LOG_FILE", str(tmp_path / "data_quality_log.json"))
     return f
+
+
+def _lines(path):
+    """Rows as the JSONL file actually holds them."""
+    if not path.exists():
+        return []
+    return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
 # ── The metric must be able to be wrong ───────────────────────────────────────────────────────
@@ -111,7 +121,7 @@ def test_record_writes_a_readable_row(temp_log):
     row = dq.record("GDX", "yfinance", raw_count=240, usable_count=138, scan_id="s1")
     assert row["usable_ratio"] == 0.575
     assert row["score"] == 57
-    assert json.loads(temp_log.read_text(encoding="utf-8"))[0]["ticker"] == "GDX"
+    assert _lines(temp_log)[0]["ticker"] == "GDX"
 
 
 def test_record_never_raises_on_a_bad_path(monkeypatch):
@@ -121,17 +131,26 @@ def test_record_never_raises_on_a_bad_path(monkeypatch):
 
 
 def test_a_corrupt_log_does_not_take_down_a_scan(temp_log):
-    temp_log.write_text("{ this is not json", encoding="utf-8")
+    temp_log.write_text("{ this is not json\n", encoding="utf-8")
     row = dq.record("SPY", "polygon", 10, 10)
     assert row["ticker"] == "SPY"
-    assert json.loads(temp_log.read_text(encoding="utf-8"))[-1]["ticker"] == "SPY"
+    assert dq._read_all()[-1]["ticker"] == "SPY"
 
 
-def test_log_is_bounded(temp_log, monkeypatch):
-    monkeypatch.setattr(dq, "MAX_ROWS", 5)
+def test_log_is_bounded_BY_COMPACTION_not_by_every_append(temp_log, monkeypatch):
+    """The bound moved on 2026-09-03 and that is the point of the change.
+
+    Trimming on every append meant a whole-file rewrite per row, which is why the retention
+    window could not be raised past 3.6 trading days. Appends are now unconditional and cheap;
+    the trim happens once, off the hot path, on the end-of-day --mark-only run.
+    """
     for i in range(9):
         dq.record(f"T{i}", "polygon", 10, 10, scan_id="s1")
-    rows = json.loads(temp_log.read_text(encoding="utf-8"))
+    assert len(_lines(temp_log)) == 9, "appends must NOT trim"
+
+    dq.compact(max_age_days=120, max_rows=5)
+
+    rows = _lines(temp_log)
     assert len(rows) == 5 and rows[0]["ticker"] == "T4"
 
 
@@ -154,9 +173,9 @@ def test_latest_scan_reports_the_worst_ticker_not_the_average(temp_log):
 def test_latest_scan_ignores_an_earlier_cycle(temp_log):
     """Yesterday's disaster must not pollute today's read."""
     dq.record("GDX", "yfinance", 100, 5, scan_id="old")     # 0.05, yesterday's disaster
-    rows = json.loads(temp_log.read_text(encoding="utf-8"))
+    rows = _lines(temp_log)
     rows[0]["timestamp"] = "2026-08-01T09:00:00"            # genuinely a previous cycle
-    temp_log.write_text(json.dumps(rows), encoding="utf-8")
+    temp_log.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     dq.record("SPY", "polygon", 100, 95, scan_id="new")
     s = dq.latest_scan(floor=0.30)
     assert s["count"] == 1 and s["worst_ticker"] == "SPY" and s["below_floor"] == 0
@@ -272,34 +291,51 @@ def test_skew_scoring_stays_off_until_quality_is_proven():
 # These tests pin both halves: the corrupt shape must be salvaged rather than discarded, and
 # two writers must not be able to produce that shape in the first place.
 
-def _corrupt_like_the_real_incident(path, rows):
-    """Write the exact byte pattern the incident produced: a valid array, then a longer
-    document's tail. Reproduced from the logged error rather than invented."""
-    path.write_text(json.dumps(rows, indent=2) + '\n  {"ticker": "LEFTOVER"}\n]',
-                    encoding="utf-8")
+def _corrupt_one_line(path, rows, bad_at=20):
+    """Forty good readings with one unreadable line wedged among them.
+
+    The original version of this reproduced the 2026-08 incident byte-for-byte: a valid JSON
+    array followed by a longer document's tail. That corruption is not reachable any more --
+    there is no array to truncate -- so the test now reproduces the surviving hazard, which is
+    a partial line from an interrupted write. The GUARANTEE under test is unchanged: damaged
+    bytes must never silently reduce the ledger.
+    """
+    out = [json.dumps(r) for r in rows]
+    out.insert(bad_at, '{"ticker": "TRUNCA')
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
-def test_a_corrupt_log_is_salvaged_not_silently_emptied(temp_log):
-    _corrupt_like_the_real_incident(temp_log, [{"ticker": f"T{i}", "usable_ratio": 0.9}
-                                               for i in range(40)])
-    assert len(dq._read_all()) == 40, "the leading array is intact and must be recovered"
+def test_a_corrupt_line_costs_one_reading_not_the_whole_log(temp_log):
+    """In the array format one bad byte poisoned every row after it -- which is how this log
+    was destroyed five times. In JSONL the blast radius is the line."""
+    _corrupt_one_line(temp_log, [{"ticker": f"T{i}", "usable_ratio": 0.9} for i in range(40)])
+    assert len(dq._read_all()) == 40, "every intact reading must survive"
 
 
 def test_recording_onto_a_corrupt_log_keeps_the_history(temp_log):
-    """The actual data-loss path: append after a failed read. This returned a 1-row file."""
-    _corrupt_like_the_real_incident(temp_log, [{"ticker": f"T{i}", "usable_ratio": 0.9}
-                                               for i in range(40)])
+    """The original data-loss path was append-after-failed-read, which rewrote a 1-row file.
+    An append cannot do that at all now, which is the stronger version of the guarantee."""
+    _corrupt_one_line(temp_log, [{"ticker": f"T{i}", "usable_ratio": 0.9} for i in range(40)])
     dq.record("NEW", "yfinance", 100, 80)
-    assert len(json.loads(temp_log.read_text(encoding="utf-8"))) == 41
+    assert len(dq._read_all()) == 41
+    assert dq._read_all()[-1]["ticker"] == "NEW"
 
 
-def test_an_unsalvageable_log_is_quarantined_rather_than_overwritten(temp_log, monkeypatch):
-    temp_log.write_text("this is not json at all", encoding="utf-8")
-    assert dq._read_all() == []
-    dq.record("NEW", "yfinance", 100, 80)
-    saved = list(temp_log.parent.glob("data_quality_log.json.corrupt-*"))
+def test_compaction_QUARANTINES_unreadable_lines_before_rewriting(temp_log):
+    """Compaction is the only thing that rewrites, so it is the only thing that can destroy a
+    line _read_all merely skips. The array format quarantined unreadable bytes to a file;
+    losing that in the format change would trade a loud failure for a quiet one.
+
+    This is a real regression the old tests caught -- the first JSONL implementation dropped
+    those lines silently.
+    """
+    _corrupt_one_line(temp_log, [{"ticker": f"T{i}", "usable_ratio": 0.9} for i in range(40)])
+
+    dq.compact(max_age_days=120)
+
+    saved = list(temp_log.parent.glob("*.damaged-*"))
     assert len(saved) == 1, "the unreadable bytes must be kept for inspection"
-    assert saved[0].read_text(encoding="utf-8") == "this is not json at all"
+    assert "TRUNCA" in saved[0].read_text(encoding="utf-8")
 
 
 def test_the_temp_path_is_unique_per_process(temp_log, monkeypatch):
@@ -313,11 +349,19 @@ def test_the_temp_path_is_unique_per_process(temp_log, monkeypatch):
             seen.append(str(path))
         return real_open(path, *a, **k)
 
+    # The APPEND path no longer writes a temp file at all -- it appends one line -- so the
+    # hazard now lives in COMPACTION, which is the remaining whole-file rewrite. Same
+    # guarantee, moved to where the rewrite went.
+    dq.record("SEED1", "yfinance", 10, 9)
+    dq.record("SEED2", "yfinance", 10, 9)
+    dq.record("SEED3", "yfinance", 10, 9)
     monkeypatch.setattr("builtins.open", spy)
+    # max_rows must be >0 and below the row count, or compaction has nothing to trim and never
+    # reaches the temp-file write this test exists to inspect.
     monkeypatch.setattr(dq.os, "getpid", lambda: 1111)
-    dq.record("A", "yfinance", 10, 9)
+    dq.compact(max_age_days=120, max_rows=2)
     monkeypatch.setattr(dq.os, "getpid", lambda: 2222)
-    dq.record("B", "yfinance", 10, 9)
+    dq.compact(max_age_days=120, max_rows=1)
     assert len(set(seen)) == 2, f"both writers used the same temp path: {seen}"
 
 
@@ -333,10 +377,14 @@ def test_a_locked_destination_is_retried_not_dropped(temp_log, monkeypatch):
             raise OSError(32, "The process cannot access the file")
         return real_replace(src, dst)
 
-    monkeypatch.setattr(dq.os, "replace", flaky)
+    # Same move as the temp-path test: os.replace is reached through compaction now, since an
+    # append never replaces the destination.
     dq.record("RETRY", "yfinance", 10, 9)
+    dq.record("OLD", "yfinance", 10, 9)
+    monkeypatch.setattr(dq.os, "replace", flaky)
+    dq.compact(max_age_days=120, max_rows=1)
     assert calls["n"] == 3
-    assert json.loads(temp_log.read_text(encoding="utf-8"))[-1]["ticker"] == "RETRY"
+    assert dq._read_all()[-1]["ticker"] == "OLD"
 
 
 def test_no_temp_files_are_left_behind(temp_log):

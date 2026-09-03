@@ -167,6 +167,32 @@ def _token_preflight() -> Dict:
     return res
 
 
+def _compact_quality_log() -> Dict:
+    """Age out old chain-quality readings. END-OF-DAY ONLY, and that placement is the point.
+
+    Compaction rewrites the whole file. The hourly cycle runs ~15.5 min against a PT45M limit
+    (measured across seven scheduled runs on 2026-09-03), and a whole-file rewrite inside that
+    headroom is exactly the shape of thing that fits until one day it does not, and then gets
+    blamed on whatever changed most recently. The --mark-only run has the day to itself.
+
+    Appends are cheap and unconditional; only the trim is deferred, so nothing is lost by
+    waiting for the close.
+    """
+    try:
+        from data import data_quality_log as dq
+        res = dq.compact()
+    except Exception as exc:
+        _log(f"Quality-log compaction errored ({type(exc).__name__}: {exc}) — continuing.")
+        return {}
+    if res.get("error"):
+        _log(f"Quality-log compaction failed: {res['error']}")
+    elif res.get("dropped_age") or res.get("dropped_cap"):
+        _log(f"Quality log compacted {res['before']} -> {res['after']} rows "
+             f"({res['dropped_age']} older than {res['max_age_days']}d, "
+             f"{res['dropped_cap']} over the volume backstop).")
+    return res
+
+
 def _liveness_check() -> Dict:
     """Ask every measurement channel whether it has produced any graded output at all.
 
@@ -1642,6 +1668,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             _record_direction_forecasts()
             _record_crypto_premium_view()
             _grade_shadow_book()
+            _compact_quality_log()
             _run([sys.executable, "paper_desk.py", "report"])
             _run([sys.executable, "paper_desk.py", "dashboard", "--no-open"])
             _log(f"Mark-only summary: marked={marked}, closed={closed}")

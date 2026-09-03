@@ -31,6 +31,12 @@ data/iv_history/*.json
 
 # ── Chain-quality readings (one row per ticker per scan, several scans a day) ──
 data/data_quality_log.json
+# The same log after the 2026-09-03 move to JSONL, plus the one-shot migration artifact. The
+# rule above matched an exact filename, so renaming the storage would have started committing
+# the log into a PUBLIC repo -- the format change quietly escaping its own ignore rule.
+data/data_quality_log.jsonl
+data/data_quality_log.json.migrated
+data/data_quality_log.jsonl.damaged-*
 
 # ── Sentiment disk cache (NEWS_CACHE_TTL_MIN, regenerated hourly on every scan) ──
 data/cache/

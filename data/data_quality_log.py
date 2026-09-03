@@ -26,33 +26,166 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data_quality_log.json")
+# The legacy whole-file JSON array. Retained only so an existing file can be migrated once.
+LEGACY_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "data_quality_log.json")
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "data_quality_log.jsonl")
 
-# Keep the file bounded. One scan writes ~56 rows (one per watchlist ticker) and the cycle runs
-# several times a day, so an unbounded file reaches six figures of rows within a quarter and
-# every cockpit render pays to parse it.
-MAX_ROWS = 5000
+# ── RETENTION, sized against the longest LOOKBACK that might query this, not against disk ────
+#
+# The old sizing was MAX_ROWS = 5000 with the reasoning "one scan writes ~56 rows and the cycle
+# runs several times a day", implying ~400/day and a file reaching six figures "within a
+# quarter". Measured 2026-09-03: 1,391 rows/TRADING DAY -- 3.5x that -- because a cycle spawns
+# several processes and each does its own put-chain, call-chain and mark-loop fetches. So the
+# window was really 3.6 TRADING DAYS, and the file already covered only 08-31..09-03.
+#
+# That cost a real evidence path. outcome_logger.entry_vendor_basis pointed at this file as the
+# way to recover provenance for already-opened trades "from 2026-08-27 onward"; by the time
+# anyone needed it, 08-27..08-30 had been eaten. It cost nothing that time only because the
+# whole open book predates 08-27 -- which will not hold for the next finding.
+#
+# Provenance is the class of record whose value is RETROSPECTIVE: you do not know which join
+# you will need until something is found wrong weeks later. So the window is sized against a
+# trade's full life plus the lag before anyone analyses it -- MAX_DTE is 45 days -- rather than
+# against how big the file gets. This is the third rolling-window instrument here to eat its own
+# evidence (_KEEP_CANDIDATE_FILES at 20 against a 10-day horizon, snapshot pruning driving
+# first-sighting drift, now this), and the general rule is the one being applied here.
+MAX_AGE_DAYS = 120
+
+# Pathological-volume backstop ONLY. Age is the real policy; this stops a runaway writer from
+# filling the disk between compactions. ~120 days at the measured rate is ~167k rows, so this
+# is roughly 2.4x headroom and should never bind in normal operation.
+MAX_ROWS = 400_000
+
+# How many trailing lines the bounded readers pull. Every live consumer -- latest_scan for the
+# cockpit tile and the status board, read_recent for ticker_profile -- wants the TAIL, so they
+# never pay for the retention window. One cycle writes a few hundred rows, so this covers many
+# cycles' worth of any time-window question.
+TAIL_LINES = 5000
 
 
 def _now() -> str:
     return datetime.now().isoformat()
 
 
-def _read_all() -> List[Dict]:
+def _parse_lines(lines) -> List[Dict]:
+    """JSONL rows, skipping unreadable lines rather than losing the file to one of them.
+
+    The whole reason for the format change: a corrupt line in an array file poisons every row
+    after it, which is how this log was destroyed five times between 2026-08-13 and 2026-08-25.
+    One bad line in JSONL costs one reading.
+    """
+    out, bad = [], 0
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+            if isinstance(row, dict):
+                out.append(row)
+        except Exception:
+            bad += 1
+    if bad:
+        logger.warning("[data_quality] skipped %d unreadable line(s); the rest were kept", bad)
+    return out
+
+
+def _migrate_legacy_if_needed() -> None:
+    """Convert the old whole-file JSON array to JSONL, once. Never destroys the original."""
+    if os.path.exists(LOG_FILE) or not os.path.exists(LEGACY_LOG_FILE):
+        return
+    try:
+        with open(LEGACY_LOG_FILE, "r", encoding="utf-8") as f:
+            text = f.read()
+        try:
+            rows = json.loads(text)
+            if not isinstance(rows, list):
+                rows = []
+        except Exception as e:
+            rows = _salvage(text, e)
+        tmp = "%s.%d.tmp" % (LOG_FILE, os.getpid())
+        with open(tmp, "w", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps(r) + "\n")
+        _replace_with_retry(tmp, LOG_FILE)
+        # The legacy file is RENAMED, not deleted: it is the only copy of these readings and a
+        # failed migration must be recoverable by hand.
+        os.replace(LEGACY_LOG_FILE, LEGACY_LOG_FILE + ".migrated")
+        logger.info("[data_quality] migrated %d row(s) from the legacy array file to JSONL",
+                    len(rows))
+    except Exception as e:                     # pragma: no cover - defensive
+        logger.warning("[data_quality] legacy migration failed (%s); starting a fresh log", e)
+
+
+def _read_tail(limit: int) -> List[Dict]:
+    """The last `limit` rows, without reading the whole file.
+
+    Every live consumer wants the tail, so this is what keeps a 120-day window free for readers.
+    Seeks backward in chunks until enough newlines have been seen.
+    """
+    _migrate_legacy_if_needed()
+    limit = max(1, int(limit))
+    try:
+        size = os.path.getsize(LOG_FILE)
+    except OSError:
+        return []
+    if not size:
+        return []
+    chunk, data, pos = 65536, b"", size
+    try:
+        with open(LOG_FILE, "rb") as f:
+            while pos > 0 and data.count(b"\n") <= limit:
+                step = min(chunk, pos)
+                pos -= step
+                f.seek(pos)
+                data = f.read(step) + data
+    except Exception as e:                     # pragma: no cover - defensive
+        logger.warning("[data_quality] tail read failed (%s)", e)
+        return []
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    return _parse_lines(lines[-limit:])
+
+
+def _unreadable_lines() -> List[str]:
+    """The raw lines _parse_lines would skip. Used by compaction to preserve them first."""
+    out = []
     try:
         with open(LOG_FILE, "r", encoding="utf-8") as f:
-            text = f.read()
+            for line in f:
+                t = line.strip()
+                if not t:
+                    continue
+                try:
+                    if not isinstance(json.loads(t), dict):
+                        out.append(t)
+                except Exception:
+                    out.append(t)
+    except FileNotFoundError:
+        return []
+    except Exception:                          # pragma: no cover - defensive
+        return []
+    return out
+
+
+def _read_all() -> List[Dict]:
+    """EVERY row. Used by compaction and by callers that genuinely need the history.
+
+    Live paths should use _read_tail: at a 120-day window this file is large by design, and
+    reading it wholesale on a cockpit render is the cost the old MAX_ROWS was protecting
+    against. The protection now comes from bounded readers rather than from throwing evidence
+    away.
+    """
+    _migrate_legacy_if_needed()
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            return _parse_lines(f)
     except FileNotFoundError:
         return []
     except Exception as e:                     # pragma: no cover - defensive
         logger.warning("[data_quality] could not open %s (%s) — reading as empty", LOG_FILE, e)
         return []
-
-    try:
-        rows = json.loads(text)
-        return rows if isinstance(rows, list) else []
-    except Exception as e:
-        return _salvage(text, e)
 
 
 def _salvage(text: str, err: Exception) -> List[Dict]:
@@ -189,30 +322,94 @@ def record(ticker: str, chain_source: str, raw_count: int, usable_count: int,
 
 
 def _append_locked(row: Dict) -> None:
-    """The read-modify-write itself. The caller MUST hold _exclusive()."""
-    rows = _read_all()
-    rows.append(row)
-    if len(rows) > MAX_ROWS:
-        rows = rows[-MAX_ROWS:]
-    # The temp path is unique per process as well as lock-guarded. Belt and braces on purpose:
-    # a shared ".tmp" is what corrupted this log five times between 2026-08-13 and 2026-08-25,
-    # and a lock only helps the writers that take it. Anything that ever writes here without
-    # one still cannot clobber another process's temp file.
-    tmp = "%s.%d.tmp" % (LOG_FILE, os.getpid())
+    """Append ONE line. The caller MUST still hold _exclusive().
+
+    This was a full read-modify-write: read every row, append, truncate, json.dump the entire
+    list with indent=2 to a temp file, atomically replace -- per row written. At the measured
+    1,391 rows/trading day across several concurrent cycle processes, that serialised the whole
+    cycle behind a lock held for the duration of a whole-file rewrite, and it grew with the
+    file. It is why the retention window could not simply be raised: a 120-day window under the
+    old writer would have meant rewriting ~40MB on every single append.
+
+    THE LOCK STAYS. Concurrent appends from multiple processes are not reliably atomic on
+    Windows even for small writes, and this log has already been destroyed five times by
+    unserialised writers.
+    """
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+
+
+def compact(max_age_days: Optional[int] = None, max_rows: Optional[int] = None) -> Dict:
+    """Drop readings older than the retention window. Rewrites the file, so run it OFF the hot path.
+
+    Called from the end-of-day --mark-only run, deliberately not intraday: a whole-file rewrite
+    inside a cycle that has ~28 minutes of headroom against PT45M is exactly the kind of thing
+    that lands inside the budget once and then gets blamed on something else.
+
+    Age is the policy; max_rows is a pathological-volume backstop applied after it.
+    """
+    max_age_days = int(MAX_AGE_DAYS if max_age_days is None else max_age_days)
+    max_rows = int(MAX_ROWS if max_rows is None else max_rows)
+    cutoff = (datetime.now() - timedelta(days=max_age_days)).isoformat()
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(rows, f, indent=2)
-        _replace_with_retry(tmp, LOG_FILE)
-    finally:
-        if os.path.exists(tmp):
-            try:
-                os.unlink(tmp)
-            except OSError:                          # pragma: no cover - defensive
-                pass
+        with _exclusive():
+            # QUARANTINE BEFORE REWRITING. _parse_lines skips a line it cannot read, which is
+            # right for a READ -- one bad line costs one reading instead of the file. But
+            # compaction is the one place that REWRITES, so a skipped line would be silently
+            # destroyed here rather than merely ignored. The array format quarantined
+            # unreadable bytes to a file (see _salvage); losing that guarantee in the format
+            # change would be trading a loud failure for a quiet one, which is the exact defect
+            # this whole session has been chasing.
+            damaged = _unreadable_lines()
+            if damaged:
+                stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+                keep = "%s.damaged-%s" % (LOG_FILE, stamp)
+                try:
+                    with open(keep, "w", encoding="utf-8") as f:
+                        f.write("\n".join(damaged))
+                    logger.error("[data_quality] %d unreadable line(s) will NOT survive this "
+                                 "compaction; copy saved to %s", len(damaged), keep)
+                except Exception:              # pragma: no cover - defensive
+                    logger.error("[data_quality] %d unreadable line(s) could not be preserved",
+                                 len(damaged))
+
+            rows = _read_all()
+            before = len(rows)
+            kept = [r for r in rows if str(r.get("timestamp") or "") >= cutoff]
+            dropped_age = before - len(kept)
+            if len(kept) > max_rows:
+                # `kept[-0:]` is `kept[0:]` -- the WHOLE list, not an empty one. Without this
+                # guard max_rows=0 silently keeps everything while reporting nothing dropped,
+                # which is the worst of both: no trim and no complaint.
+                kept = kept[-max_rows:] if max_rows > 0 else []
+            dropped_cap = before - dropped_age - len(kept)
+            if dropped_age or dropped_cap:
+                tmp = "%s.%d.tmp" % (LOG_FILE, os.getpid())
+                try:
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        for r in kept:
+                            f.write(json.dumps(r) + "\n")
+                    _replace_with_retry(tmp, LOG_FILE)
+                finally:
+                    if os.path.exists(tmp):
+                        try:
+                            os.unlink(tmp)
+                        except OSError:              # pragma: no cover - defensive
+                            pass
+            out = {"before": before, "after": len(kept),
+                   "dropped_age": dropped_age, "dropped_cap": dropped_cap,
+                   "max_age_days": max_age_days}
+            if dropped_age or dropped_cap:
+                logger.info("[data_quality] compacted %d -> %d rows (%d aged out, %d over cap)",
+                            before, len(kept), dropped_age, dropped_cap)
+            return out
+    except Exception as e:                     # pragma: no cover - defensive
+        logger.warning("[data_quality] compaction failed (%s)", e)
+        return {"error": str(e)}
 
 
 def read_recent(limit: int = 200) -> List[Dict]:
-    return _read_all()[-int(limit):]
+    return _read_tail(limit)
 
 
 def latest_scan(floor: Optional[float] = None, window_minutes: Optional[float] = None) -> Dict:
@@ -245,7 +442,10 @@ def latest_scan(floor: Optional[float] = None, window_minutes: Optional[float] =
         except Exception:
             window_minutes = 30.0
 
-    rows = _read_all()
+    # Bounded tail, not the whole file: this runs on every cockpit render and every status
+    # board, and the question it asks is about the NEWEST time window, which is always at the
+    # end. TAIL_LINES covers many cycles' worth of readings.
+    rows = _read_tail(TAIL_LINES)
     empty = {"count": 0, "worst_ratio": None, "worst_ticker": None, "below_floor": 0,
              "floor": floor, "at": None, "sources": {}, "scan_id": None, "scan_ids": []}
     if not rows:
