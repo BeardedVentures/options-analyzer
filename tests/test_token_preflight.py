@@ -87,6 +87,14 @@ def _write_token_file(tmp_path, monkeypatch, *, expires_in=3600, obtained_at=Non
         raw["obtained_at"] = obtained_at
     p.write_text(json.dumps(raw), encoding="utf-8")
     monkeypatch.setattr(R, "_TOKEN_PATH", p)
+    # _record_auth_event writes to a REAL file, logs/vega_auth_events.jsonl, and that file is
+    # the operator's only auth signal -- its own docstring says "a non-empty tail is itself the
+    # signal". Two tests below refresh against a fixture endpoint without redirecting it, so six
+    # suite runs on 2026-09-02 appended twelve "status: refreshed, endpoint: https://t.example/tok"
+    # lines and buried the single real refresh under noise that reads as healthy. Isolated here
+    # beside _TOKEN_PATH because both are live paths this module writes. A test that wants to
+    # ASSERT on events re-patches _record_auth_event after calling this helper and wins.
+    monkeypatch.setattr(R, "_record_auth_event", lambda e: None)
     return p
 
 
