@@ -332,7 +332,11 @@ def calculate_iv_rank(ticker: str, current_iv: float, close: pd.Series) -> dict:
     # Roll to max window
     max_samples = getattr(config, "IV_HISTORY_MAX_SAMPLES", 504)
     if len(samples) > max_samples:
-        samples = samples[-max_samples:]
+        # `samples[-0:]` is `samples[0:]` -- the WHOLE list. At max_samples=0 this cap would
+        # silently keep everything while looking like it trimmed. Latent today (the default is
+        # 504) and guarded anyway: the identical shape was live in data_quality_log.compact()
+        # on 2026-09-03, where a zero cap kept every row AND reported nothing dropped.
+        samples = samples[-max_samples:] if max_samples > 0 else []
 
     # Persist updated history
     try:

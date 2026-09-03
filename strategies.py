@@ -12,7 +12,10 @@ the live engine (main.py, on the tower) and the demo seeder (seed_demo.py).
 Only DEFINED-RISK income structures + a clearly-separated speculative long call. No undefined risk.
 """
 from __future__ import annotations
+import logging
 from typing import Dict, List, Tuple
+
+logger = logging.getLogger(__name__)
 
 # News sentiment vocabulary (matches data/news.py): POSITIVE, NEUTRAL, NEGATIVE, BLOCKING
 STRATEGY_SPECS: Dict[str, Dict] = {
@@ -166,7 +169,23 @@ def evaluate(strategy: str, ctx: Dict) -> Dict:
         ))
 
     # Advisory rows never disqualify — see _chk().
-    qualified = all(c["ok"] for c in crit if not c.get("advisory"))
+    #
+    # all() OVER AN EMPTY SEQUENCE IS TRUE, so if every criterion were advisory this would
+    # qualify the trade having enforced NOTHING, and it would do it silently. Not reachable
+    # today -- every strategy path emits at least one hard criterion, verified 2026-09-03 -- but
+    # this file's whole contract is that a row added here is a hard block unless it opts out
+    # with advisory=True, and one careless advisory=True on the last hard row would flip the
+    # default from "blocks" to "passes everything". A guard that fails OPEN on an empty
+    # collection is the same family as the zero-row cap in data_quality_log and the
+    # `gate_raw > 0` skip in fetcher: a boundary where the check returns a passing value
+    # instead of an error.
+    hard = [c for c in crit if not c.get("advisory")]
+    if not hard:
+        logger.error("[strategies] %s produced NO hard criteria -- refusing to qualify. Every "
+                     "check was advisory, which means nothing was enforced.", spec["label"])
+        return {"qualified": False, "criteria": crit, "news_check": news,
+                "spec_label": spec["label"]}
+    qualified = all(c["ok"] for c in hard)
     return {"qualified": qualified, "criteria": crit, "news_check": news, "spec_label": spec["label"]}
 
 
