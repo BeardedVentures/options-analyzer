@@ -167,6 +167,37 @@ def _token_preflight() -> Dict:
     return res
 
 
+def _liveness_check() -> Dict:
+    """Ask every measurement channel whether it has produced any graded output at all.
+
+    ONLY THE BAD NEWS IS PRINTED HERE. A cycle log that lists five healthy channels every hour
+    is a cycle log nobody reads, and this whole module exists because five instruments reported
+    nothing for weeks without anyone noticing. OK channels go to the journal
+    (logs/vega_liveness.jsonl) and stay out of the operator's way; CRITICAL and NOT_BUILT come
+    to the surface. STARVED is deliberately quiet too -- a channel with nothing to record is not
+    a fault, and crying about it is how the signal gets ignored a second time.
+
+    Advisory in the strictest sense: it measures the measurements and must never be able to
+    stop a scan.
+    """
+    try:
+        from analysis import liveness
+        results = liveness.record()
+    except Exception as exc:
+        _log(f"Liveness check errored ({type(exc).__name__}: {exc}) — continuing.")
+        return {}
+
+    loud = {k: v for k, v in results.items()
+            if v.get("status") in (liveness.CRITICAL, liveness.NOT_BUILT)}
+    for name, r in sorted(loud.items()):
+        _log(f"!!! MEASUREMENT CHANNEL {r['status'].upper()}: {name} has produced "
+             f"{r.get('graded', 0)} graded outputs — {r.get('reason')}")
+    if not loud:
+        ok = sum(1 for v in results.values() if v.get("status") == liveness.OK)
+        _log(f"Liveness: {ok}/{len(results)} channels producing; no faults.")
+    return results
+
+
 def _run(cmd: List[str]) -> int:
     _log(f"RUN: {' '.join(cmd)}")
     try:
@@ -1600,6 +1631,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         _token_preflight()
+        _liveness_check()
 
         # Mark-only: resolve existing positions without opening new ones near the close.
         if args.mark_only:
