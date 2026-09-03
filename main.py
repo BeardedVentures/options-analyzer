@@ -867,6 +867,16 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         # collapse natural credit toward zero, which is the whole reason Robinhood is Tier 1.
         # Read off the short leg -- both legs come from one chain fetch, so they agree.
         "chain_source": short_put.get("chain_source"),
+        # HOW BIG the chain was that this spread was enumerated from. Recorded, never gated --
+        # see fetcher._stamp_chain_size. CHAIN_QUALITY_MIN_RATIO is a ratio and cannot fall when
+        # a quote batch is dropped, because the drop shortens numerator and denominator
+        # together: SMH went 111 contracts -> 2 and the health metric read 1.000. Without these
+        # fields a spread selected off a collapsed chain is indistinguishable, afterwards, from
+        # one selected off a full one.
+        "chain_raw_count": short_put.get("chain_raw_count"),
+        "chain_band_raw": short_put.get("chain_band_raw"),
+        "chain_band_ratio": short_put.get("chain_band_ratio"),
+        "chain_size_below_floor": short_put.get("chain_size_below_floor"),
         "expiration": short_put.get("expiration"),
         "last_trade_date": short_put.get("last_trade_date"),
         "expiration_display": short_put.get("last_trade_date") or short_put.get("expiration"),

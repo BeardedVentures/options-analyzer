@@ -459,6 +459,22 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                 best["edge_components"] = _asmt.get("edge_components") or {}
                 best["edge_points"] = _asmt.get("edge_points")
                 best["edge_score_basis"] = "pre_surface" if _blocked else "post_surface"
+                # PROVENANCE AND CHAIN SIZE, off the short leg before it is dropped.
+                #
+                # chain_source was never carried here at all, which is why vendor_basis reads
+                # "unrecorded" on all 257 ledger rows -- the cohort's fifth dimension has never
+                # held a real value because the snapshot path did not pass it along.
+                #
+                # The size fields are the new half (2026-09-03): CHAIN_QUALITY_MIN_RATIO cannot
+                # detect a dropped quote batch, because the drop shortens numerator and
+                # denominator together and the ratio holds still. Nineteen of fifty-six tickers
+                # collapsed >=50% at least once and read 1.000 while doing it. Recording this
+                # per candidate is what makes those rows identifiable later instead of
+                # accumulating as contamination nobody can separate out.
+                _sl = best.get("short_leg") or {}
+                for _k in ("chain_source", "chain_raw_count", "chain_band_raw",
+                           "chain_band_ratio", "chain_size_below_floor"):
+                    best[_k] = _sl.get(_k)
                 best.pop("short_leg", None)   # not JSON-serialisable and already summarised
                 # How the earnings gate reached its answer, so a passing result is auditable.
                 # A bare `earnings_clear: True` cannot distinguish "confirmed clear" from

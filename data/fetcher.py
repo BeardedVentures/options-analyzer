@@ -1229,6 +1229,7 @@ def get_options_chain(ticker: str,
     if records:
         _chain_gate_passed.add(ticker)
     _stamp_chain_source(records, chain_source)
+    _stamp_chain_size(records, raw_count, gate_raw, gate_ratio)
     _cache[cache_key] = records
     return records
 
@@ -1240,6 +1241,57 @@ def _record_band_drop(ticker: str, option_type: str, in_band: int, total: int) -
     slot = _band_drops.setdefault(ticker, {"band": 0, "grid": 0})
     slot["band"] += in_band
     slot["grid"] += total - in_band
+
+
+def _stamp_chain_size(records: List[Dict], raw_count: int, band_raw: int,
+                      band_ratio: float) -> None:
+    """Write HOW BIG the chain was onto every record. Records only — gates nothing.
+
+    WHY SIZE HAS TO BE RECORDED SEPARATELY FROM QUALITY. CHAIN_QUALITY_MIN_RATIO is a RATIO,
+    and _parse_robinhood_options drops any contract with no market at all before it appends. So
+    a dropped quote batch shortens the numerator and the denominator together: the chain gets
+    smaller and the ratio does not move. _option_record_is_quotable's docstring states this
+    outright -- "a dropped quote batch therefore lowers raw_count; it cannot lower this ratio."
+
+    What that costs, measured over data_quality_log on 2026-09-03:
+
+        ticker  median_raw  min_raw   drop   ratio AT the minimum
+        SMH            111        2    98%   1.000
+        META            93        2    98%   1.000
+        NEE             39        2    95%   1.000
+        NKE             26        2    92%   1.000
+        GS             162       45    72%   1.000
+
+    Nineteen of fifty-six tickers collapsed by 50% or more at least once, and the health metric
+    certified the wreckage as perfect. A two-contract chain scoring 1.000 is not a healthy
+    chain; it is 98% of a chain that went missing, wearing the badge of the 2% that survived.
+    This is the same shape as the instrument-walk truncation SKIP_TRUNCATED_CHAINS exists for,
+    reached by a different route -- the structure looks valid because the denominator was
+    shortened by the very process that shortened the numerator.
+
+    DELIBERATELY NOT A GATE. Rejecting on size would change which spreads qualify, mid-drought,
+    on a system whose cohort contract says entry rules define the population -- an operator
+    decision, and one that should be made against evidence rather than against the observed
+    distribution alone. Recording is not the selection-affecting part. Without it every cycle
+    from here accumulates rows that may have been enumerated off a collapsed chain with nothing
+    in the record marking which, and unidentifiable contamination is the expensive kind.
+
+    The absolute counts are what make this retroactively analysable: any floor can be applied
+    later to rows already written. `chain_size_below_floor` is a convenience flag on an
+    OBSERVATIONAL threshold, not a trading one -- it reuses CHAIN_QUALITY_MIN_BAND_CONTRACTS,
+    which already means "below this the band ratio is noise", rather than inventing a number
+    that would look like a gate the moment somebody read it.
+    """
+    if not records:
+        return
+    obs_floor = int(getattr(config, "CHAIN_QUALITY_MIN_BAND_CONTRACTS", 8))
+    below = bool(band_raw) and band_raw < obs_floor
+    for r in records:
+        r["chain_raw_count"] = raw_count
+        r["chain_band_raw"] = band_raw
+        r["chain_band_ratio"] = band_ratio
+        r["chain_size_below_floor"] = below
+        r["chain_size_obs_floor"] = obs_floor
 
 
 def _stamp_chain_source(records: List[Dict], chain_source: str) -> None:
@@ -1817,6 +1869,7 @@ def get_call_options_chain(ticker: str, min_dte: int = None, max_dte: int = None
     if records:
         _chain_gate_passed.add(ticker)
     _stamp_chain_source(records, chain_source)
+    _stamp_chain_size(records, raw_count, gate_raw, gate_ratio)
     _cache[cache_key] = records
     return records
 
