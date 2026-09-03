@@ -409,9 +409,36 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                 # surface read and the full narrative. Analysis follows selection.
                 from analysis import assessment as _A2
                 g = _A2.evaluate_gates(best, assess_ctx)
-                if all(g.values()):
+                _blocked = not all(g.values())
+                # SCORE EVERY SPREAD, INCLUDING REJECTS (2026-09-02).
+                #
+                # edge_score used to be computed only inside the `all(g.values())` branch, which
+                # made it PERFECTLY CONFOUNDED with gate passage: of 2,726 counterfactual rows,
+                # ZERO carried an edge_score while failing a gate. Any test of "does edge score
+                # predict outcomes" therefore ran on spreads that had already cleared all eleven
+                # gates -- a sample that cannot speak to where MIN_EDGE_SCORE belongs, because
+                # the whole range below the gates' own cut is missing by construction.
+                #
+                # edge_score is a SCORING function, not a gate. There is no reason it cannot run
+                # on a reject, and running it there is what makes the score falsifiable: with
+                # rejects scored, "do high-edge spreads get touched less often than low-edge
+                # ones" becomes answerable across the full range instead of within the survivors.
+                #
+                # The cost argument that put it inside the branch still holds for the parts that
+                # are actually expensive -- enrich_surface's DTE 5-120 pull and the narrative --
+                # and those stay conditional. enrich_surface also short-circuits outright while
+                # TERM_STRUCTURE_ENABLED is False, so scoring a reject currently costs arithmetic
+                # and no network at all.
+                #
+                # COMPARABILITY CAVEAT, recorded rather than assumed: a passing spread is scored
+                # AFTER enrich_surface and a blocked one before it, so if term structure or skew
+                # scoring is ever re-enabled the two are no longer computed on the same basis.
+                # Both are off today, which is why this is safe now; edge_score_basis says which
+                # regime produced the number so a later re-enable cannot silently pool them.
+                if not _blocked:
                     _A2.enrich_surface(assess_ctx)
-                    _asmt = _assess_candidate(best, assess_ctx)
+                _asmt = _assess_candidate(best, assess_ctx)
+                if not _blocked:
                     g = _asmt["gates"]
                     best["analysis"] = _asmt["analysis"]
                     best["narrative"] = _asmt["narrative"]
@@ -423,13 +450,15 @@ def build_candidates(ticker: str, puts: list, current_price: float,
                     # the first was true_pop arriving after the assessment that needed it — and
                     # fixing either one alone still yields None, which is why the auto-trader
                     # has always ranked on gate completeness instead of on edge.
-                    best["edge_score"] = _asmt.get("edge_score")
-                    best["edge_components"] = _asmt.get("edge_components") or {}
-                    best["edge_points"] = _asmt.get("edge_points")
                 else:
                     best["analysis"] = {}
                     best["narrative"] = ("Blocked by "
                                          + ", ".join(k for k, v in g.items() if not v) + ".")
+                # Written for BOTH branches now — see the block above.
+                best["edge_score"] = _asmt.get("edge_score")
+                best["edge_components"] = _asmt.get("edge_components") or {}
+                best["edge_points"] = _asmt.get("edge_points")
+                best["edge_score_basis"] = "pre_surface" if _blocked else "post_surface"
                 best.pop("short_leg", None)   # not JSON-serialisable and already summarised
                 # How the earnings gate reached its answer, so a passing result is auditable.
                 # A bare `earnings_clear: True` cannot distinguish "confirmed clear" from
