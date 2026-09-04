@@ -742,6 +742,34 @@ def record_modeled_trades(scan_ts: str, session_type: str, qualified_trades: Lis
                     "put_short_strike", "put_long_strike",
                     "call_short_strike", "call_long_strike",
                 ) if t.get(k) is not None} or None,
+                # THE QUOTES THE CREDIT WAS DERIVED FROM. All three builders already put these
+                # on the trade dict -- main.py:1012, multi_strategy:340 and :417 -- and every
+                # one of them was dropped here, so the ledger recorded a price with no record
+                # of the book it came from. 101 call-side recommendations carry no leg quote at
+                # all, which means no past recommendation can be audited for fill quality even
+                # in principle.
+                #
+                # That gap is not academic. The two enumeration paths apply different quote
+                # standards: main.py requires a two-sided market and a spread inside
+                # MAX_QUOTE_SPREAD_PCT, while multi_strategy._tradeable requires only `mid > 0`
+                # and a token of volume -- no spread test at all. The entire board since
+                # 2026-08-11 came from the path that never asks whether the book can be
+                # crossed, and without these fields there is no way to check after the fact
+                # whether a recorded credit was reachable.
+                #
+                # Stored raw rather than as a derived ratio: a ratio bakes in today's definition
+                # of "too wide", and the whole lesson of MAX_QUOTE_SPREAD_PCT vs the 0.80 the
+                # health metric uses is that one number can mean two things. Raw quotes can be
+                # re-judged under any threshold later; a stored verdict cannot.
+                #
+                # The condor path emits only the short BID and long ASK per wing, which is what
+                # the natural credit is computed from -- the other two sides are genuinely not
+                # captured upstream, so their absence here is a real gap and not a dropped field.
+                "leg_quotes": {k: t.get(k) for k in (
+                    "short_bid", "short_ask", "long_bid", "long_ask",
+                    "call_short_bid", "call_short_ask", "call_long_bid", "call_long_ask",
+                    "put_short_bid", "put_short_ask", "put_long_bid", "put_long_ask",
+                ) if t.get(k) is not None} or None,
                 "delta": t.get("delta"),
                 "iv_rank": t.get("iv_rank"),
                 "vrp": t.get("vrp"),

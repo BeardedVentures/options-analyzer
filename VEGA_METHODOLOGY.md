@@ -386,3 +386,18 @@ had silently returned half the data?*
   Also corrected here: `MIN_OPTION_VOLUME` is **25** and `MIN_OPTION_OPEN_INTEREST` is **100**.
   Earlier notes in this session quoted 100/500 -- those are the `getattr` DEFAULTS in main.py,
   not the configured values. Read the config, not the fallback.
+- **READ THE CONFIG, NOT THE DEFAULT.** `main.py` reads liquidity floors as
+  `getattr(config, "MIN_OPTION_VOLUME", 100)` and `getattr(config, "MIN_OPTION_OPEN_INTEREST",
+  500)`. The CONFIGURED values are 25 and 100. Quoting the fallbacks as if they were live
+  produced a 4-5x overstatement of a gate's strictness inside this session, in an argument about
+  that very gate. Same shape as MEASURED_COVERAGE carrying the close-to-close figure on a gap
+  claim and as the two `iv_rank` fields: a value that exists in two places, read from the wrong
+  one. When a number matters, print it from the running config rather than reading it out of a
+  call site.
+- **LEG QUOTES ARE NOW PERSISTED (2026-09-04), AND THEIR ABSENCE WAS THE MISSING INSTRUMENT.**
+  All three builders put leg bid/ask on the trade dict; `record_modeled_trades` dropped every
+  one, so the ledger recorded a credit with no record of the book it came from and 101 call-side
+  recommendations cannot be audited for fill quality even in principle. Stored RAW under
+  `leg_quotes`, never as a derived ratio -- a stored verdict bakes in today's definition of "too
+  wide", and the whole lesson of 0.35-vs-0.80 is that one threshold can mean two things. Raw
+  quotes can be re-judged under any threshold later.
