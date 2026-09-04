@@ -372,6 +372,23 @@ def close_cohort(record: Dict) -> str:
 # filled at NATURAL. Before it, a candidate could clear a $19 scaled floor on $31 of mid credit
 # and open for $9 — see the comment block in vega_candidates.build_candidates. Trades opened
 # before this were selected on a price basis the system could not execute.
+#
+# ONE CONSTANT, TWO PATHS WITH DIFFERENT FIX DATES — verified 2026-09-04 and correct, but only
+# because of the order three changes landed in. vega_candidates' gates moved to natural on
+# 2026-08-07; main.py's moved on 2026-08-10 17:46 (d6255b9). A single boundary at 08-08 would
+# therefore MISLABEL any trade selected by main.py's board between 08-08 and 08-10 17:46 as
+# gate_basis=natural when its gates were still reading the mid.
+#
+# No such trade exists. The desk did not open from main.py's board until e088e3e landed at
+# 2026-08-10 19:14 — 88 minutes AFTER the gates it reads were fixed — so every position opened
+# on or before 08-10 came from the vega_candidates snapshot (natural since 08-07) and every
+# position opened after came from a board already fixed. The four positions actually opened on
+# 08-10 are stamped 09:38:52, hours before either commit, and are correctly labelled.
+#
+# Recorded because the gap is real and only closed by timing: if the desk had switched to the
+# board before the board was fixed, this constant would be silently wrong for that window. Do
+# not "correct" it to 08-10 or 08-11 — that would mislabel the vega_candidates-selected
+# population, which is all 57 natural-fill closed rows.
 GATE_BASIS_FIX_DATE = "2026-08-08"
 
 
@@ -506,7 +523,10 @@ def cohort(record: Dict) -> str:
 
     `fill_model | gate_basis | close_logic | entry_epoch`. All four matter and the ledger
     proves it for the first three — split by fill_model alone, mid-fill trades won 13 of 18
-    and natural-fill trades won 0 of 46, because mid overstated the achievable credit by ~75%
+    and natural-fill trades won 0 of 46 AS OF 2026-08-11 (re-measured 2026-09-04: still 13 of 18
+    on the mid side, now 11 of 57 on the natural side, every one of those wins closing after the
+    original note was written — the natural basis does reach a profit target, and expectancy is
+    still -$56/contract), because mid overstated the achievable credit by ~75%
     and a target set at 65% of an inflated credit is a different trade from one set at 65% of
     a real one. Pooling across any of them produces a number that describes no population that
     ever existed.

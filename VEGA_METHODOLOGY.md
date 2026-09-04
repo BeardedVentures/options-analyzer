@@ -540,3 +540,18 @@ had silently returned half the data?*
   the highest-variance place a threshold can sit. `>=10 vol OR >=50 oi` admits ~75% of the tail
   on both sides and costs ~5% on liquid names, which is the natural meeting point if one
   constant has to serve both paths. NOT CHANGED: picking it is a selection decision.
+- **`gate_basis` CHECKED AND CORRECT — a negative result worth recording, because the hazard is
+  real and only timing closed it.** `GATE_BASIS_FIX_DATE = "2026-08-08"` is one constant
+  describing two paths fixed on different dates: vega_candidates on 08-07, main.py on 08-10
+  17:46. A single 08-08 boundary would mislabel any trade selected by main.py's board between
+  08-08 and 08-10 17:46 as `natural` while its gates still read the mid.
+
+  **No such trade exists.** The desk did not open from main.py's board until `e088e3e` landed at
+  2026-08-10 **19:14** — 88 minutes after the gates it reads were fixed. Every position opened on
+  or before 08-10 came from the vega_candidates snapshot; the four opened that day are stamped
+  09:38:52, hours before either commit. The field means what its name says.
+
+  Do NOT "correct" the constant to 08-10 or 08-11: that would mislabel the
+  vega_candidates-selected population, which is all 57 natural-fill closed rows. The reasoning
+  is now pinned in the constant's own comment so the next reader does not re-derive it and get
+  it backwards.
