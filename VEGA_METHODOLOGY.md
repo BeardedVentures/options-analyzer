@@ -494,3 +494,49 @@ had silently returned half the data?*
   win rate of 63%, and mean loss (-80.74) is 1.7x mean win (+47.45). The mid cohort's +$10.61
   expectancy at a 72% win rate remains the artifact -- it needs 68% to break even and got 72% on
   prices no fill could achieve. Two cohorts, still never pooled.
+- **THE -$56/CONTRACT EXPECTANCY DESCRIBES A POPULATION THAT NO LONGER EXISTS.** Split on ENTRY
+  date, because that is when the gates applied:
+
+        natural cohort, entered <= 2026-08-10 (pre-fix)   n=57   exp -$56.00
+        natural cohort, entered 08-11 .. 08-17            n= 0
+        natural cohort, entered >= 2026-08-18 (post-fix)  n= 0
+
+  **ALL 57 were entered between 08-04 and 08-10.** So were all 75 closed rows, and so were all
+  four open positions (NKE 08-04, AMGN 08-06, SMH 08-07, NEE 08-07). **Zero trades entered under
+  post-fix pricing have closed or are open.** Entries stopped the day the fix landed, so the
+  ledger's entire outcome record predates it.
+
+  The consequence is the opposite of the obvious reading: **caps_v1 is NOT starting from a
+  measured negative.** It has no prior at all under current rules. "The same rules on the same
+  basis produced -$56/contract over 57 trades" is wrong -- the basis fed to those gates was the
+  MID until 2026-08-10 17:46, so the trades were selected by gates reading prices no fill could
+  achieve, then recorded at the natural credit on the way in. Honest fill model, dishonest
+  selection. The 30-trade target really is "find out whether this works", not "find out whether
+  the fixes moved a measured negative".
+
+  This is the entry-epoch boundary the cohort contract already names, made concrete: an entry
+  rule change defines a new population, and 100% of the outcome record sits on the far side of
+  one. Do not quote the -$56 as a prior for anything caps_v1 opens.
+- **ANY RECORDED COUNT THAT CAN STILL GROW CARRIES THE DATE IT WAS MEASURED, and gets
+  re-measured before it is used as an argument.** Three times this week a stale figure directed
+  reasoning: "zero qualified since 08-10" (the board qualified 76 more through 09-01), the
+  100/500 liquidity floors (configured 25/100 -- those were getattr defaults), and "natural
+  0/46" (now 11/57, and every win closed after that note was written). Each was correct when
+  written and consulted later as current. "natural 0/46 AS OF 2026-08-11" would have been safe.
+  Correct such a figure IN PLACE rather than adding a second record beside it.
+- **THE LIQUIDITY FLOOR IS A TAIL INSTRUMENT AND NOTHING ELSE.** Measured with the spread cap
+  held constant, so the floor is the only variable:
+
+        floor                      tail call   tail put   liquid call   liquid put
+        >=1 vol OR >=10 oi  (call)   87/89      161/170     130/130       291/291
+        >=5 vol OR >=25 oi           77/89      147/170     129/130       288/291
+        >=10 vol OR >=50 oi          67/89      127/170     124/130       277/291
+        >=25 vol OR >=100 oi (put)   52/89       92/170     118/130       247/291
+        >=50 vol OR >=250 oi         42/89       60/170     103/130       208/291
+
+  On liquid names every candidate admits 91-100%: the constant is irrelevant there. On the tail
+  it moves admission from 98% to 58% between the two constants currently live. The tail's median
+  OI is 158 (call) / 114 (put), so `>=25 vol OR >=100 oi` cuts almost exactly at the median --
+  the highest-variance place a threshold can sit. `>=10 vol OR >=50 oi` admits ~75% of the tail
+  on both sides and costs ~5% on liquid names, which is the natural meeting point if one
+  constant has to serve both paths. NOT CHANGED: picking it is a selection decision.
