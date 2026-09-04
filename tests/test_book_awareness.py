@@ -127,3 +127,86 @@ def test_a_call_side_width_does_not_produce_negative_risk(ledger):
     tickers, rows = main._get_open_position_tickers(Path("logs"))
     _, risk = main._annotate_book_awareness([], tickers, rows)
     assert risk == pytest.approx(400.0)
+
+
+# ── decay alerts: the second consumer of the same absent file ────────────────
+#
+# `compute_decay_alerts` read open_positions.json too, which has never existed, so it returned
+# [] on every close scan and NEVER FIRED. Silently -- an empty alert list is indistinguishable
+# from "nothing has decayed yet". Found only because book awareness was fixed first.
+
+def _pos(ticker="NKE", entry=1.00, mark=0.20, **kw):
+    r = {"ticker": ticker, "status": "open", "strategy": "bull_put_spread",
+         "short_strike": 100.0, "long_strike": 95.0, "expiration": "2026-09-18",
+         "actual_fill_credit": entry, "current_mark": mark, "mark_status": "LIVE"}
+    r.update(kw)
+    return r
+
+
+def test_decay_alerts_read_ledger_field_names():
+    """entry_credit -> actual_fill_credit, current_price -> current_mark."""
+    alerts = main.compute_decay_alerts([_pos(entry=1.00, mark=0.20)])   # 80% of max
+    assert len(alerts) == 1 and alerts[0]["ticker"] == "NKE"
+
+
+def test_a_position_short_of_target_does_not_alert():
+    import config
+    entry, mark = 1.00, 1.00 * (1 - config.TARGET_PROFIT_PCT) + 0.10
+    assert main.compute_decay_alerts([_pos(entry=entry, mark=mark)]) == []
+
+
+def test_a_stale_mark_never_produces_a_decay_alert():
+    """AMGN sat at MARK-UNAVAILABLE for five days on a last-good mark of 0.91.
+
+    Alerting off that would tell the operator to close a position on a price nobody is quoting
+    -- and `_reprice_and_close_open` already refuses to evaluate stop/target in that state, so
+    an alert path that ignored it would contradict the engine.
+    """
+    stale = _pos(entry=1.00, mark=0.05, mark_status="DATA_UNAVAILABLE")
+    assert main.compute_decay_alerts([stale]) == []
+
+
+def test_a_row_predating_the_mark_instrumentation_still_alerts():
+    """Absence of mark_status is not a stated problem. Fail open on shape, closed on status."""
+    old = _pos(entry=1.00, mark=0.20)
+    del old["mark_status"]
+    assert len(main.compute_decay_alerts([old])) == 1
+
+
+def test_the_natural_credit_is_the_fallback_entry_basis():
+    r = _pos(entry=None, mark=0.20)
+    r["actual_fill_credit"] = None
+    r["natural_credit_per_share"] = 1.00
+    assert len(main.compute_decay_alerts([r])) == 1
+
+
+def test_a_row_with_no_usable_price_is_skipped_not_crashed():
+    r = _pos(entry=None, mark=None)
+    r["actual_fill_credit"] = None
+    r["natural_credit_per_share"] = None
+    r["current_mark"] = None
+    assert main.compute_decay_alerts([r]) == []
+
+
+def test_the_dead_file_reader_is_gone():
+    """One absent path, two consumers, found separately. Neither may come back.
+
+    Checked against the parsed source with DOCSTRINGS EXCLUDED, because the comments explaining
+    why the file is gone name it deliberately -- an assertion its own documentation can trip is
+    an assertion that gets deleted rather than fixed.
+    """
+    import ast
+    assert not hasattr(main, "load_open_positions")
+    tree = ast.parse(open(main.__file__, encoding="utf-8-sig").read())
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            d = ast.get_docstring(node, clean=False)
+            if d:
+                docstrings.add(d)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if node.value in docstrings:
+                continue
+            assert "open_positions.json" not in node.value, (
+                f"main.py still references the absent file in code: {node.value!r}")

@@ -1170,17 +1170,38 @@ def compute_eod_setups(tech_map: Dict[str, Dict], sentiment_map: Dict[str, Dict]
     return setups
 
 
-def load_open_positions(log_dir: Path) -> List[Dict]:
-    path = log_dir / "open_positions.json"
-    data = load_json(path, [])
-    return data if isinstance(data, list) else []
-
-
 def compute_decay_alerts(open_positions: List[Dict]) -> List[Dict]:
+    """Positions that have decayed past the profit target, from the OUTCOME LEDGER.
+
+    This read `open_positions.json` until 2026-09-04. That file has never existed, so
+    `load_open_positions` returned [] on every close scan and DECAY ALERTS HAVE NEVER FIRED --
+    silently, because an empty alert list is indistinguishable from "nothing has decayed yet".
+    Second consumer of the same absent path; book awareness was the first.
+
+    The fields it wanted exist on the ledger rows under different names: `entry_credit` is the
+    fill (`actual_fill_credit`, falling back to the natural credit the row was modelled at), and
+    `current_price` is `current_mark`, written by the cycle's reprice pass.
+
+    A STALE MARK IS NOT A DECAY SIGNAL. `_reprice_and_close_open` already refuses to evaluate
+    stop/target on a position it could not mark this cycle -- AMGN sat at MARK-UNAVAILABLE for
+    five days with a last-good mark of 0.91 -- and an alert path that ignored that would tell
+    the operator to close a position on a price nobody is quoting. Only LIVE marks alert.
+    """
     alerts = []
     for pos in open_positions:
         entry_credit = pos.get("entry_credit")
+        if entry_credit is None:
+            entry_credit = (pos.get("actual_fill_credit")
+                            or pos.get("natural_credit_per_share"))
         current_price = pos.get("current_price")
+        if current_price is None:
+            # Only a mark the reprice pass vouches for THIS cycle. `mark_status` is absent on
+            # rows written before the mark instrumentation, so absence is treated as usable and
+            # only an explicit non-LIVE status is refused -- failing open on shape, closed on a
+            # stated problem.
+            status = str(pos.get("mark_status") or "LIVE").upper()
+            if status == "LIVE":
+                current_price = pos.get("current_mark")
         if entry_credit is None or current_price is None:
             continue
         if entry_credit <= 0:
@@ -1702,7 +1723,9 @@ def run_scan(session_type: str) -> None:
     log_dir = BASE_DIR / config.LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    open_positions = load_open_positions(log_dir)
+    # The same rows book awareness read, rather than a second load from a different store --
+    # which is how the two came to disagree in the first place.
+    open_positions = open_rows
     decay_alerts = compute_decay_alerts(open_positions) if session_type == "close" else []
 
     eod_setups = compute_eod_setups(tech_map, sentiment_map) if session_type == "close" else []

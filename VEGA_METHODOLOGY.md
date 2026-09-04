@@ -146,3 +146,17 @@ had silently returned half the data?*
   that justified the format change has no execution path. Ask Level 2 of your own work, not only
   of the code you inherited: *does the path that supposedly runs this actually run in
   production?* Confirm it against the scheduler, not against the source.
+- **`direction_overnight` and `direction_1d` were RETIRED on 2026-09-04, and they are absent on
+  purpose.** Resolution 0.0000 at an effective N of 96 blocks each -- what shuffling the
+  outcomes produces -- against a gradeability floor of 10. They had a fair test and failed it.
+  A future session will see an obvious gap where a short-horizon direction forecaster should be;
+  the numbers live in `analysis/direction_forecast.HORIZONS` so it is not rebuilt from scratch.
+  This project has already paid once for orphaned-but-tested code (the earnings gate). Note the
+  asymmetry honestly: what was retired is what is PROVEN worthless, what is kept (`1w`, `1m`) is
+  UNPROVEN -- `1m` has never resolved a claim and cannot before 2026-09-24 -- so the channel has
+  zero demonstrated skill at any horizon today.
+- **Read a hit-rate gap only next to the decomposition.** The tilted and baseline direction
+  variants scored 18.5% and 64.6%, which reads as "the signal is actively harmful" and is not:
+  they predict different CATEGORIES (the baseline always says "flat", a wide target), Brier
+  actually favours the tilt, and both have resolution 0.000. The correct verdict was "neither
+  discriminates", and the hit rates alone would have supported a confident wrong conclusion.

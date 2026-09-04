@@ -80,9 +80,39 @@ TRADING_DAYS_PER_YEAR = 252
 # Brier decomposition to have anything to decompose.
 EQUAL_THIRDS_SIGMAS = 0.4307
 
+# RETIRED 2026-09-04, WITH THE NUMBERS, SO NOBODY REBUILDS THEM
+# ------------------------------------------------------------
+# `direction_1d` and `direction_overnight` are deliberately absent from this tuple. They ran
+# from 2026-08-15 to 2026-09-04 and were measured to carry NO information whatsoever:
+#
+#     claim type                    raw    effective   hit%   Brier    skill   RESOLUTION
+#     direction_overnight           336        96      18.5   0.174   -0.154     0.0000
+#     direction_overnight_baseline  336        96      64.6   0.326   -0.427     0.0000
+#     direction_1d                  336        96      29.8   0.211   -0.007     0.0000
+#     direction_1d_baseline         336        96      36.9   0.234   -0.006     0.0000
+#
+# RESOLUTION is the number that matters and it is the reason for the retirement. Resolution
+# 0.0000 is what shuffling the outcomes produces: the forecasts do not distinguish one day from
+# another. Read the hit rates only alongside it -- the tilted and baseline variants predict
+# DIFFERENT CATEGORIES (the baseline always says "flat", a wide and easy target), so the 18.5%
+# vs 64.6% gap is not evidence the tilt is harmful, and Brier actually favours the tilt. Both
+# carry zero skill; that is the finding.
+#
+# These were not retired early. Effective sample size after clustering by overlapping horizon
+# and market factor is 96 blocks each, against a gradeability floor of 10. They had a fair test
+# and failed it.
+#
+# 1W AND 1M ARE KEPT, AND THE ASYMMETRY IS DELIBERATE AND UNCOMFORTABLE: the two horizons being
+# retired are the two that are PROVEN worthless, and the two being kept are UNPROVEN.
+# `direction_1w` sits at effective N 16 with resolution 0.0013; `direction_1m` has never
+# resolved a single claim and cannot before 2026-09-24. So the honest statement is that this
+# channel currently has zero demonstrated skill at ANY horizon, and the horizon closest to the
+# 35-DTE trade window has not spoken yet. Retire the rest on the same rule -- resolution ~0 at
+# an effective N past the floor -- and record the numbers here when you do.
+#
+# Restoring a horizon means re-adding its tuple entry; nothing else was deleted, and the claim
+# types and scorers remain in `predictions` so the historical rows stay gradeable.
 HORIZONS = (
-    (pred.DIRECTION_1D, 1, "close", EQUAL_THIRDS_SIGMAS),
-    (pred.DIRECTION_OVERNIGHT, 1, "open", EQUAL_THIRDS_SIGMAS),
     (pred.DIRECTION_1W, 5, "close", EQUAL_THIRDS_SIGMAS),
     (pred.DIRECTION_1M, 21, "close", EQUAL_THIRDS_SIGMAS),
 )
