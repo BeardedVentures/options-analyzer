@@ -389,6 +389,13 @@ def close_cohort(record: Dict) -> str:
 # board before the board was fixed, this constant would be silently wrong for that window. Do
 # not "correct" it to 08-10 or 08-11 — that would mislabel the vega_candidates-selected
 # population, which is all 57 natural-fill closed rows.
+#
+# THE CORRECTNESS IS CONDITIONAL ON THE POPULATION, NOT ON THE DATE. It holds because no trade
+# was ever opened in the 08-08 → 08-10 17:46 window by a path reading the mid. Anything that
+# RECONSTRUCTS, BACKFILLS or IMPORTS trades into that window breaks it, because such a trade
+# could carry either basis and this boundary cannot tell. If that ever happens the fix is not a
+# different date — it is a stored gate_basis on the affected rows, which is what should have
+# existed all along and was skipped only because there was no field to write at the time.
 GATE_BASIS_FIX_DATE = "2026-08-08"
 
 
@@ -860,9 +867,45 @@ def set_fill(trade_id: str, actual_fill_credit: float) -> bool:
     return False
 
 
+def exit_cross_per_contract(exit_legs: Optional[Dict]) -> Optional[float]:
+    """What closing this vertical costs beyond the mark, in dollars per contract.
+
+    Closing a credit spread BUYS BACK the short (pay its ask) and SELLS the long (take its bid).
+    The mark is the mid of both, so the cross actually paid is
+    `(short_ask - short_mid) + (long_mid - long_bid)`, times 100.
+
+    WHY THIS EXISTS. `estimated_round_trip_cost_per_contract` is COMMISSIONS ONLY -- per_leg x
+    legs x 2 = $2.16 -- and `set_close` subtracted only that, so every net P/L this ledger has
+    ever reported assumed the exit was free. Measured 2026-09-04 against the real books on the
+    four open positions, the exit cross was $2.00 (NKE), $4.00 (NEE) and $28.50 (SMH) -- 5.3x
+    the modelled round trip on the three LIVE-marked ones, and 30% of SMH's entry credit.
+
+    And it cannot be inferred from the spread cap. MAX_QUOTE_SPREAD_PCT is a RATIO and this is
+    DOLLARS: SMH cleared the cap comfortably on both legs (9.9% and 7.7%) and still cost $28.50,
+    because its legs are $3+ each. A 10% spread on a $3.50 leg costs more to cross than a 35%
+    spread on a $0.50 leg. Nothing derived from the ratio can see that, which is why this is
+    measured from the book at close rather than estimated at open.
+
+    Returns None when any of the four quotes is missing, so a caller that could not read the
+    book records absence rather than a zero that reads as "free".
+    """
+    if not exit_legs:
+        return None
+    try:
+        sb = float(exit_legs.get("short_bid")); sa = float(exit_legs.get("short_ask"))
+        lb = float(exit_legs.get("long_bid"));  la = float(exit_legs.get("long_ask"))
+    except (TypeError, ValueError):
+        return None
+    if min(sb, sa, lb, la) <= 0 or sa < sb or la < lb:
+        return None
+    smid, lmid = (sb + sa) / 2.0, (lb + la) / 2.0
+    return round(((sa - smid) + (lmid - lb)) * 100.0, 2)
+
+
 def set_close(trade_id: str, exit_price: float, outcome: str,
               reason: Optional[str] = None,
-              effective_stop_multiplier: Optional[float] = None) -> bool:
+              effective_stop_multiplier: Optional[float] = None,
+              exit_legs: Optional[Dict] = None) -> bool:
     """
     Close a trade. exit_price = spread mark per share when you exited (what you paid to close).
     realized gross P/L per contract = (actual_fill_credit - exit_price) * 100.
@@ -888,7 +931,22 @@ def set_close(trade_id: str, exit_price: float, outcome: str,
             r["exit_price"] = round(float(exit_price), 2)
             gross_pl = round((float(fill) - float(exit_price)) * 100, 2)
             est_cost = float(r.get("estimated_round_trip_cost_per_contract") or 0.0)
-            net_pl = round(gross_pl - est_cost, 2)
+            # THE EXIT CROSS, MEASURED FROM THE BOOK RATHER THAN ASSUMED AWAY.
+            #
+            # Every net P/L before 2026-09-04 was gross minus commissions, which assumed closing
+            # was free. It is not: $28.50 on SMH against a $95 credit. Where the closing book was
+            # readable the real cross is subtracted; where it was not, absence is recorded rather
+            # than a zero, and `net_basis` says which happened on THIS row.
+            #
+            # `net_basis` exists so no row silently changes meaning. A cohort keyed on it cannot
+            # pool a trade whose net includes the exit cross with one whose net does not -- the
+            # same rule fill_basis and gate_basis enforce for the entry side, applied to the exit.
+            cross = exit_cross_per_contract(exit_legs)
+            r["exit_leg_quotes"] = exit_legs or None
+            r["realized_exit_cross_per_contract"] = cross
+            r["net_basis"] = ("commissions_plus_exit_cross" if cross is not None
+                              else "commissions_only")
+            net_pl = round(gross_pl - est_cost - (cross or 0.0), 2)
             r["realized_gross_pl_per_contract"] = gross_pl
             r["realized_net_pl_per_contract"] = net_pl
             # Backward-compatible field now points to net P/L.

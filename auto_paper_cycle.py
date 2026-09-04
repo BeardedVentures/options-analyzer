@@ -258,8 +258,18 @@ def _current_dte(expiration) -> Optional[int]:
         return None
 
 
+def _legs_book(short_leg, long_leg) -> Optional[Dict]:
+    """The closing book, as the four raw quotes set_close needs to price the exit cross."""
+    if not short_leg or not long_leg:
+        return None
+    q = {"short_bid": short_leg.get("bid"), "short_ask": short_leg.get("ask"),
+         "long_bid": long_leg.get("bid"), "long_ask": long_leg.get("ask")}
+    return q if all(v is not None for v in q.values()) else None
+
+
 def _apply_close_rules(r: Dict, mark_price: float, dte, roundtrip_cost: float,
-                       target_profit_pct: float, stop_mult: float) -> bool:
+                       target_profit_pct: float, stop_mult: float,
+                       exit_legs: Optional[Dict] = None) -> bool:
     """Close an open paper trade if it hit the 50% profit target, the 2x stop, or the DTE window.
     Shared by the normal cycle and the mark-only (end-of-day) run."""
     entry = r.get("actual_fill_credit")
@@ -283,6 +293,7 @@ def _apply_close_rules(r: Dict, mark_price: float, dte, roundtrip_cost: float,
     # The wolf floor (3.0x) fires from _ravens_or_legacy_close and stamps its own value.
     eff_mult = stop_mult if reason == "auto-stop-loss" else None
     if should_close and ol.set_close(r.get("id"), float(mark_price), outcome, reason,
+                                     exit_legs=exit_legs,
                                      effective_stop_multiplier=eff_mult):
         _log(f"AUTO-CLOSE {r.get('id')} | exit={float(mark_price):.2f} outcome={outcome} reason={reason}")
         return True
@@ -974,14 +985,16 @@ def _ravens_or_legacy_close(r: Dict, mark, decision_mark, short_leg, long_leg, e
         # Profit target first — it is not in dispute and needs no raven.
         if float(decision_mark) <= float(entry) * (1.0 - target_profit_pct):
             return _apply_close_rules(r, mark, _current_dte(exp), roundtrip_cost,
-                                      target_profit_pct, stop_mult)
+                                      target_profit_pct, stop_mult,
+                                      exit_legs=_legs_book(short_leg, long_leg))
 
     synthesis = _ravens_close_check(r, decision_mark, short_leg, long_leg, exp)
     if synthesis is None:
         # No raven read available — fall back to the legacy rules so a position is never left
         # completely unmanaged.
         return _apply_close_rules(r, mark, _current_dte(exp), roundtrip_cost,
-                                  target_profit_pct, stop_mult)
+                                  target_profit_pct, stop_mult,
+                                  exit_legs=_legs_book(short_leg, long_leg))
 
     rec = synthesis["recommendation"]
     if rec in ("WOLF_CLOSE", "CLOSE"):
@@ -992,7 +1005,8 @@ def _ravens_or_legacy_close(r: Dict, mark, decision_mark, short_leg, long_leg, e
         wolf_mult = (float(getattr(config, "WOLF_STOP_MULTIPLIER", 3.0))
                      if rec == "WOLF_CLOSE" else None)
         if ol.set_close(r.get("id"), float(mark), outcome, reason,
-                        effective_stop_multiplier=wolf_mult):
+                        effective_stop_multiplier=wolf_mult,
+                        exit_legs=_legs_book(short_leg, long_leg)):
             _log(f"RAVEN-CLOSE {r.get('id')} [{rec}] {synthesis['plain_english']}")
             return True
         return False

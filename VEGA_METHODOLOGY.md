@@ -518,7 +518,14 @@ had silently returned half the data?*
   rule change defines a new population, and 100% of the outcome record sits on the far side of
   one. Do not quote the -$56 as a prior for anything caps_v1 opens.
 - **ANY RECORDED COUNT THAT CAN STILL GROW CARRIES THE DATE IT WAS MEASURED, and gets
-  re-measured before it is used as an argument.** Three times this week a stale figure directed
+  re-measured before it is used as an argument. THIS APPLIES TO DOCSTRINGS WITH MORE FORCE THAN
+  TO REPORTS.** A report is superseded by the next report; a code comment is read as current
+  indefinitely, by everyone, forever. The fourth instance this week was `cohort()`'s own
+  docstring arguing for the fill_model dimension on "natural-fill trades won 0 of 46" -- a
+  figure that had been wrong for three weeks, sitting in the justification for a cohort key.
+  The argument survived its number being wrong (fill model matters because mid and natural are
+  different PRICES, not because one won zero times), which is luck rather than design. Put the
+  measurement date inside the docstring or do not put the number there. Three times this week a stale figure directed
   reasoning: "zero qualified since 08-10" (the board qualified 76 more through 09-01), the
   100/500 liquidity floors (configured 25/100 -- those were getattr defaults), and "natural
   0/46" (now 11/57, and every win closed after that note was written). Each was correct when
