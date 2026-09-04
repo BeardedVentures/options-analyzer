@@ -465,3 +465,32 @@ had silently returned half the data?*
   for what those 101 looked like, and it is a proxy: a different day, a fresh builder run, not
   the recommendations that were actually made. Do not read 47% as a property of them.
   `leg_quotes` and `leg_liquidity` close this going forward only.
+- **THE EXIT-COST CORRECTION IS HYGIENE, NOT A COHORT PROBLEM -- MEASURED, NOT ASSUMED.**
+  Cannot be measured directly (no closed row carries leg quotes; historical option books are not
+  retrievable), so it was run as a sensitivity: how much exit cross each closed row absorbs
+  before its verdict changes. The asymmetry that decides it: a stop-loss exit only gets WORSE
+  with added cost, so a loss cannot become a win and only the 24 wins can flip.
+
+        exit cross applied to every row      wins flipped to loss
+        $2.00 / $4.00 / $10.00 flat                 0 / 24
+        $28.50 flat (the SMH worst case)            6 / 24
+        5% / 11% / 30% OF CREDIT                    0 / 24
+
+  The proportional row is the one that matters, because the cross scales with leg price and leg
+  price scales with credit. Every win closed at 57-95% of its entry credit -- they exited at a
+  profit target -- so a cross of 30% of credit still leaves all 24 positive. **No verdict flips.**
+
+  **Magnitude is a different question and it is material:** cohort net goes -3,163 as recorded to
+  **-3,913** at $10/contract and **-5,300** at $28.50. The direction was never in doubt; the size
+  of the loss is understated by 24-68%. Fix the estimator for accounting, not because the
+  win/loss record is wrong.
+- **STALE MEMORY CORRECTED: the natural-fill cohort is no longer 0-win.** The standing finding
+  was "mid 13/18, natural 0/46". Measured 2026-09-04: **mid 13/18 (72.2%) -- still exact -- and
+  natural 11/57 (19.3%)**. All eleven natural wins closed between 2026-08-12 and 2026-09-03, all
+  at `auto-target-profit`, after that finding was written. So the natural basis DOES reach a
+  profit target; the claim that it never had was true when made and is not now.
+
+  It does not rescue the cohort. Natural expectancy is **-$56.00/contract** against a breakeven
+  win rate of 63%, and mean loss (-80.74) is 1.7x mean win (+47.45). The mid cohort's +$10.61
+  expectancy at a 72% win rate remains the artifact -- it needs 68% to break even and got 72% on
+  prices no fill could achieve. Two cohorts, still never pooled.
