@@ -578,6 +578,13 @@ def analysis_eligible(record: Dict) -> bool:
     """
     if record.get("status") == "modeled":
         return False                      # cockpit projection, never an executed trade
+    # A trade closed on a MODELLED credit rather than an achieved fill is the same category of
+    # thing as a mid-fill: an outcome from a price nobody paid. Absence of the field means
+    # "actual" and not "unknown" — every row written before it existed carried a real
+    # actual_fill_credit (75 of 75, verified 2026-09-04), so there is no third possibility to
+    # preserve here.
+    if record.get("fill_provenance") == "modeled_fallback":
+        return False
     return (record.get("fill_model") == "natural") and gate_basis(record) == "natural"
 
 
@@ -939,12 +946,43 @@ def net_basis_note(rows) -> Optional[str]:
 def set_close(trade_id: str, exit_price: float, outcome: str,
               reason: Optional[str] = None,
               effective_stop_multiplier: Optional[float] = None,
-              exit_legs: Optional[Dict] = None) -> bool:
+              exit_legs: Optional[Dict] = None,
+              allow_modeled_fallback: bool = False) -> bool:
     """
     Close a trade. exit_price = spread mark per share when you exited (what you paid to close).
     realized gross P/L per contract = (actual_fill_credit - exit_price) * 100.
-    realized net P/L per contract = gross P/L - estimated round-trip costs.
-    Returns True if the id was found.
+    realized net P/L per contract = gross P/L - round-trip costs.
+    Returns True if the id was found AND the close was recorded.
+
+    REFUSES TO CLOSE A TRADE THAT WAS NEVER FILLED.
+
+    This used to fall back to `modeled_credit_per_share or 0.0`, log a warning, and record the
+    row as `closed` anyway. The warning was honest and the row was not: nothing downstream could
+    tell that trade from one that actually happened. `analysis_eligible()` gates on fill_model
+    and gate_basis, neither of which knows whether a fill occurred, so a modelled close would
+    have counted toward the cohort — a Level 1 defect, because `status == "closed"` did not mean
+    what every consumer assumes it means.
+
+    Worse, the `or 0.0` made the failure silent in the other direction: a row with no modelled
+    credit either would close at an entry of zero, making its "realised" P/L exactly the exit
+    price with the sign flipped, and its outcome arbitrary.
+
+    Measured 2026-09-04 before this changed: 75 closed rows, ALL carrying a float
+    actual_fill_credit, none at 0.0 — so the path had never fired. It is fixed as a landmine,
+    not as a repair, and the ledger needs no correction.
+
+    Failing closed is safe on every call site, which was checked rather than assumed:
+      * `_apply_close_rules` already refuses a row with no numeric fill, so it cannot reach here.
+      * The ravens WOLF_CLOSE / CLOSE branch CAN — it coerces with `float(entry or 0)`. A refusal
+        there leaves the position open and logs an error every cycle, which is loud and
+        recoverable; recording a fictional close is neither.
+      * The three operator paths (log_outcome, paper_desk, the dashboard POST) return the
+        failure to a human who can supply the real fill.
+
+    `allow_modeled_fallback=True` still permits it, deliberately and never by default, and stamps
+    `fill_provenance="modeled_fallback"` so the row says so forever. Stamped at write time rather
+    than inferred later, for the same reason `net_basis` is: a derived guess about a row can
+    drift from the row; a stored fact cannot.
     """
     # MONEY PATH — failures here silently lose realized outcomes, which is the one thing the
     # Gate-1 ledger exists to capture. Log loudly and re-raise; never swallow.
@@ -957,11 +995,24 @@ def set_close(trade_id: str, exit_price: float, outcome: str,
     for r in rows:
         if r.get("id") == trade_id:
             fill = r.get("actual_fill_credit")
+            fill_provenance = "actual"
             if fill is None:
+                if not allow_modeled_fallback:
+                    logger.error(
+                        "[CLOSE] %s has no actual_fill_credit — REFUSING to record it as closed. "
+                        "A trade that was never filled has no realised outcome, and a row closed "
+                        "on a modelled credit is indistinguishable downstream from one that "
+                        "happened. Supply the achieved fill, or pass allow_modeled_fallback=True "
+                        "to close it as explicitly modelled (excluded from analysis_eligible).",
+                        trade_id)
+                    return False
                 fill = r.get("modeled_credit_per_share") or 0.0
+                fill_provenance = "modeled_fallback"
                 logger.warning(
-                    "[CLOSE] %s has no actual_fill_credit; falling back to modeled credit %s. "
-                    "Realized P&L for this trade is modelled, not achieved.", trade_id, fill)
+                    "[CLOSE] %s closed on a MODELLED credit of %s, not an achieved fill. "
+                    "Stamped fill_provenance=modeled_fallback and excluded from the analysis "
+                    "cohort.", trade_id, fill)
+            r["fill_provenance"] = fill_provenance
             r["exit_price"] = round(float(exit_price), 2)
             gross_pl = round((float(fill) - float(exit_price)) * 100, 2)
             est_cost = float(r.get("estimated_round_trip_cost_per_contract") or 0.0)
