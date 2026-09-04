@@ -352,3 +352,37 @@ had silently returned half the data?*
   the enumeration path already does for `delta_cap` and `otm_buffer`, and is the cheaper of the
   two. Deferred deliberately: it changes selection, and selection changes belong to a decided
   cohort, not to a drought.
+- **THE TWO ENUMERATION PATHS APPLY DIFFERENT QUOTE STANDARDS, AND IT IS THE PREDICATE, NOT THE
+  MARKET.** Measured 2026-09-04 on six names, both predicates run over both chains at the same
+  moment:
+
+        predicate                       admits of call band   admits of put band
+        multi_strategy._tradeable            95%                   99%
+        main.py (put path)                   69%                   75%
+
+  `main.py` requires bid>0 AND ask>0 AND mid>0 AND (ask-bid)/mid <= MAX_QUOTE_SPREAD_PCT (0.35)
+  AND volume>=25 OR OI>=100. `multi_strategy._tradeable` requires **mid>0 AND (volume>=1 OR
+  OI>=10)** -- no two-sided quote, NO SPREAD THRESHOLD AT ALL, and a liquidity floor 10-25x
+  looser. Of the strikes the call path admits and the put path refuses, two thirds fail on
+  liquidity and one third on spread.
+
+  **Put chains are NOT wider.** Median relative spread in band: put 0.008, call 0.028, and the
+  put band carries twice the strikes (181 vs 91) despite reaching deeper OTM (0.12-0.30 vs
+  0.16-0.30), which biases against this conclusion rather than toward it. So bull puts going to
+  exactly zero while bear calls kept producing 0-3/day is substantially the PREDICATE, not a
+  worse market on the put side.
+
+  **The operator consequence is the point:** the bear calls and condors recommended since 08-11
+  -- the entire board -- were selected under a standard that never checks whether the book can
+  be crossed. The call path prices at the natural credit and requires credit-to-width > 0, which
+  catches the worst cases economically, but "positive natural credit" is a far weaker condition
+  than "spread under 35% of mid". Nothing here says those recommendations are unfillable; it
+  says nothing has checked, and the one path that would check is the one that stopped producing.
+
+  Sample limits: six tickers, one moment, skewed liquid (SPY and NVDA sit near 0.01). The 22
+  tickers that enumerate nothing are the illiquid tail, where KO and WMT show 33% and 60% of the
+  put band wider than 0.35. Re-measure across the tail before treating the ratio as general.
+
+  Also corrected here: `MIN_OPTION_VOLUME` is **25** and `MIN_OPTION_OPEN_INTEREST` is **100**.
+  Earlier notes in this session quoted 100/500 -- those are the `getattr` DEFAULTS in main.py,
+  not the configured values. Read the config, not the fallback.
