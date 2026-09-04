@@ -26,10 +26,10 @@ which bars are pivots at all. The mechanism was real and the prediction was stil
 
 ---
 
-## 2. Definition-first preflight — Levels 0-2
+## 2. Definition-first preflight — Levels 0-3
 
-Mandatory before any analysis. Three levels, not seven: a longer checklist gets skipped as
-ceremony, and these are the three this project has actually missed.
+Mandatory before any analysis. Four levels, not seven: a longer checklist gets skipped as
+ceremony, and these are the four this project has actually missed.
 
 ### Level 0 — Population
 What rows are *supposed* to exist? What is the unit of observation? When does a row enter the
@@ -65,6 +65,30 @@ opposite, and flags whose short-circuit position is assumed rather than traced.
 
 Reading the code is not Level 2. Runtime evidence is: an artifact on disk, a log line with a
 timestamp, a coverage profile, a counter that moved.
+
+### Level 3 — Locality of the consequence
+**Does the thing you are worried about LIVE where you are worried about it?** Geometry first,
+consequence second. Added 2026-09-04 after this check caught two confidently-argued escalations
+in forty-eight hours, both of which had reasoned from a mechanism to its consequences without
+confirming the mechanism operates in the relevant region.
+
+- **The HAR blend that was not there.** An argument that a 5-day realised-vol component was
+  biasing the equity forecast, built on a model VEGA does not use. The equity forecaster is a
+  20/120 mean-reversion blend; HAR windows exist only in `crypto_vol_forecast`, which computes
+  on w=30. One grep would have ended it.
+- **The tail that spreads never reach.** The overnight band understates the far gap by ~53% at
+  the 99% level, which looked like it must reach POP and sizing. Real spreads take max loss at
+  about **-0.8 sigma**: zero of 2,899 ledger spreads have a max-loss boundary beyond -2.576
+  sigma. Ten minutes reading the ledger's OTM distribution would have ended it.
+
+The check is cheap and it is nearly always available before the first paragraph is written:
+locate the defect on the same axis as the decision, then ask whether the two overlap.
+
+**And measure where the BOOK is, not where the reasoning started.** The put-side POP result was
+established on bull-put geometry while every modeled recommendation since 2026-08-11 has been a
+call structure — 17 iron condors and 14 bear calls, zero bull puts. Running the mirrored test
+found the opposite sign (below). A conclusion established on the half of the book you happened
+to start with is a conclusion about that half.
 
 ---
 
@@ -188,3 +212,51 @@ had silently returned half the data?*
   the ledger's OTM distribution would have shown this before a word was written about risk of
   ruin. Level 0 for consequences, not just for definitions: *does the thing I am worried about
   live where I am worried about it?*
+- **ZERO DRIFT IS NOT NEUTRAL BETWEEN THE TWO SIDES OF THE BOOK.** `price_projection.project()`
+  drops drift deliberately and the reasoning is sound -- drift estimated from a sample measures
+  the sample, and sector relative strength was tested as an input and rejected at rank
+  correlations of +0.01 to -0.04. But the CONSEQUENCE is asymmetric and was never recorded.
+  Measured 2026-09-04 over 14,076 observations at 21 sessions, the sample drifted **+0.19 sigma**
+  (positive on 11 of 12 names), and modelled-vs-actual breach at real ledger geometry came out:
+
+        put  long median (-7.56%)   modelled 16.53%  actual 13.55%   +2.97  conservative
+        call short p10   (+6.77%)   modelled 20.12%  actual 24.25%   -4.13  OPTIMISTIC
+        call short median(+10.25%)  modelled 12.50%  actual 14.94%   -2.44  OPTIMISTIC
+        call long median (+11.47%)  modelled 10.67%  actual 12.45%   -1.78  OPTIMISTIC
+
+  Drift accounts for the sign and most of the size on both sides; body over-dispersion partially
+  offsets it (residuals +1.3 to +1.7 on puts, -0.8 to -2.2 on calls). This is NOT a fat upside
+  tail -- that hypothesis was tested and drift explains the asymmetry.
+
+  The rule that follows: **in an up-trending sample a zero-drift model is conservative on puts
+  and optimistic on calls, and the sign flips with the trend.** Do not read "conservative at
+  every real strike" from a put-side measurement onto a call-side book. Do not add a drift term
+  to fix it either -- that reintroduces the rejected estimator. Record the asymmetry, size it,
+  and let it inform which side of the book carries unmodelled risk in a given regime.
+- **RESOLVED 2026-09-04, on the pre-registered reading: the drought is the market.** The
+  09-04 09:35 scan is the first to carry the split counters. Across the 22 tickers that
+  enumerated no valid spread: `quote_spread_too_wide` **683 (79.2%)**, `quote_absent` **179
+  (20.8%)**, `quote_crossed` **0**. Per the reading fixed in advance, that is wide books on the
+  strikes the strategy wants and selection correctly refusing to cross them -- not a fetch-path
+  fault. The same scan reported `scan_coverage` at 87% healthy (47/54) while 22 of those 54
+  produced nothing, so the follow-on stands: the health predicate tolerates a spread up to 0.80
+  of mid where selection requires 0.35, and the metric is more than twice as loose as the gate
+  it purports to describe. Fix the metric or rename it; do not touch MAX_QUOTE_SPREAD_PCT.
+- **The working tree IS production.** The scheduled task names a path, not a branch, so an edit
+  on a session branch is live on the next cycle. Confirmed 2026-09-04: split counters written
+  that morning appeared in the 09:35 scan from an uncommitted-to-main branch. Useful for getting
+  a diagnostic answered same-day; dangerous for anything else. Know which one you are doing.
+- **Selection ranks on credit-to-width and then gates on POP, and the two are inversely
+  ordered**, so a ticker can die at the POP floor while a sibling spread that would have cleared
+  it was discarded upstream. GDX, 2026-09-03: the selected 93/90 carried true_pop 0.713 against
+  a 0.72 floor, while 90/84 (0.7543) and 91/89 (0.7435) both cleared it and both passed every
+  other gate. Structural rather than incidental -- more credit means closer to the money means
+  lower POP -- so it recurs whenever a ticker's surviving spreads straddle the floor. Recorded,
+  NOT fixed: changing the ranking key is a selection change and belongs to a decided cohort.
+- **`MIN_PROBABILITY_OF_PROFIT = 0.72` was set in the INITIAL COMMIT** (2026-03-31, comment
+  "true probability not just delta") and has never been calibrated against the scale it gates.
+  That matters now that the scale is measured: modelled breach is ~3pp PESSIMISTIC on the put
+  side and ~2-4pp OPTIMISTIC on the call side, so one constant is effectively stricter on puts
+  and looser on calls. This is a units question of the same family as decimal-vs-points and
+  MEASURED_COVERAGE carrying the close-to-close figure on a gap claim -- not an argument for
+  moving the floor.
