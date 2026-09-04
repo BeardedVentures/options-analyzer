@@ -106,6 +106,14 @@ had silently returned half the data?*
   about to change. Three of eight items in the 2026-09-03 build doc were already complete when
   it was written; acting on it unchecked would have paused a live grading channel to wait for a
   fix that shipped on 2026-08-10. Confirm before executing. Cost: minutes.
+- **A figure quoted INTO a decision carries its effective N inline, and a figure under ~30
+  independent blocks cannot be a load-bearing premise.** This is the consumption rule, and it is
+  the one that was missing. `cluster_sample()` printed `n_effective = 6` on the same output line
+  as the 86.1% coverage figure; the number was read, the effective N beside it was not, and a
+  build doc then made "the vol forecast is biased high" its headline task on that basis.
+  Producing the uncertainty correctly bought nothing, because the failure was entirely
+  downstream of production. When you cite a number you did not just derive, look up its power
+  before you build on it — and if you cannot find its power, that is the finding.
 - **A coverage, hit rate, or bias figure is quoted with its interval or it is not quoted.** The
   same walk-forward of the same unchanged code reported 1-day band coverage at 78.8% one day
   and 89.7% the next, because 416 claims across 8 correlated names is ~6 independent blocks.
@@ -113,6 +121,15 @@ had silently returned half the data?*
   headline task of the next build doc. `predictions.cluster_sample()` exists to make the
   effective count visible; run the estimate at a sample size that can support the claim, and
   report the interval beside the point estimate.
+- **Check that your YARDSTICK is unbiased before concluding the thing you measured is.** The
+  "forecast is biased high by +2.33 vol points at one week" finding was 1.72 points of estimator
+  artifact: realised vol computed as the square root of an unbiased variance is a DOWNWARD-biased
+  estimate of sigma at small sample sizes (Jensen), by ~6% on 5 returns and ~1% on 21. The
+  apparent bias decayed with horizon exactly as that correction does. It also explains why the
+  bias test and the band-coverage test appeared to contradict each other: coverage never
+  estimates a volatility at all, it compares a price to an interval, so it was the test with the
+  intact yardstick. Two measurements of the same quantity disagreeing is a fact about one of the
+  measurements until proven otherwise.
 - **Correcting a measured mis-specification is not tuning; the difference is whether the number
   came from outside the thing being fixed.** The overnight band over-covered because it was
   charged a full session of sigma and graded on the close-to-open gap. The fix estimates the
@@ -120,3 +137,12 @@ had silently returned half the data?*
   over-coverage (96.2% predicted, 97.4% observed) before being applied. Adjusting the same
   parameter until coverage read 80% would have been the curve-fit. Ask: was the correction
   derived from the outcome it is judged on?
+- **Level 2 applies to code this process wrote 48 hours ago, and it was not applied.** The
+  2026-09-03 session moved the quality log to JSONL append so retention could rise to 120 days,
+  and deferred `compact()` to the `--mark-only` run to keep a whole-file rewrite off the hot
+  path. The reasoning was right and the commit message argued it carefully. **Nothing schedules
+  `--mark-only`** — one Windows task exists and it runs `run_auto_paper_cycle.ps1` — so
+  `compact()` has exactly one caller and that caller has never executed. The retention policy
+  that justified the format change has no execution path. Ask Level 2 of your own work, not only
+  of the code you inherited: *does the path that supposedly runs this actually run in
+  production?* Confirm it against the scheduler, not against the source.

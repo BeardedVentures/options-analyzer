@@ -350,3 +350,45 @@ def test_record_ticker_with_opens_writes_the_overnight_horizon_too():
     assert len(ov) == 1
     assert ov[0]["context"]["gap_variance_share"] is not None
     assert ov[0]["context"]["score_field"] == "open"
+
+
+# ── the gap band carries the gap population's coverage ───────────────────────
+
+def test_an_overnight_claim_records_gap_coverage_not_the_close_to_close_table():
+    """One field, two populations, is how `credit_per_share` became meaningless.
+
+    price_projection.MEASURED_COVERAGE was measured on close-to-close outcomes and reads 0.815
+    at the 80% level. The overnight band was recording that as its own expected coverage while
+    actually delivering 0.868 against real opens.
+    """
+    closes, opens = _oc()
+    gap = bf.band_for("TEST", closes, 1, score_field="open", opens=opens)
+    day = bf.band_for("TEST", closes, 5, score_field="close")
+    conf = round(bf.confidence(), 2)
+    assert gap["forecast"]["measured_coverage"] == bf.GAP_MEASURED_COVERAGE[conf]
+    assert day["forecast"]["measured_coverage"] == ppj.MEASURED_COVERAGE[conf]
+    assert gap["forecast"]["measured_coverage"] != day["forecast"]["measured_coverage"]
+
+
+def test_the_gap_coverage_table_is_monotone_and_converges_at_95():
+    """The shape claim, pinned: over-coverage shrinks as the level rises and vanishes at 95%.
+
+    This is what refuted the first attribution. "Leptokurtosis" predicts UNDER-coverage at 95%
+    if 1.96 sigma is out in the fat tail; for overnight gaps the empirical and normal |z|
+    quantiles cross at ~1.91, essentially exactly the 95% level, so 95% is where the band is
+    calibrated rather than where it inverts.
+    """
+    levels = sorted(bf.GAP_MEASURED_COVERAGE)
+    errs = [bf.GAP_MEASURED_COVERAGE[c] - c for c in levels]
+    assert all(a > b for a, b in zip(errs, errs[1:])), "error must shrink as confidence rises"
+    assert errs[-1] == pytest.approx(0.0, abs=0.01), "95% must be calibrated"
+    assert errs[0] > 0.10, "50% must be badly over-covering"
+
+
+def test_every_supported_confidence_level_has_a_measured_gap_coverage():
+    """A level with no measured entry would record None and read as 'never checked'."""
+    for conf in (0.50, 0.68, 0.80, 0.90):
+        assert conf in bf.GAP_MEASURED_COVERAGE
+        closes, opens = _oc()
+        b = bf.band_for("TEST", closes, 1, conf=conf, score_field="open", opens=opens)
+        assert b["forecast"]["measured_coverage"] is not None

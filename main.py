@@ -1338,35 +1338,48 @@ def _deduplicate_by_underlying(qualified_trades: List[Dict]) -> List[Dict]:
 
 
 def _get_open_position_tickers(log_dir: Path) -> Tuple[set, List[Dict]]:
-    """
-    Best-effort set of tickers with OPEN positions plus the open rows, for book
-    awareness (spec §3.4). Tries the JARVIS tower's /vega/outcomes?status=open first
-    (authoritative once trades are logged there), then falls back to the local
-    open_positions.json ledger. Never raises — book awareness is advisory.
+    """Tickers with OPEN positions, read from THE STORE THE COHORT COUNTS FROM.
+
+    ONE STORE. That is the whole content of this function and it was not true until
+    2026-09-04.
+
+    It used to ask the JARVIS tower for /vega/outcomes?status=open and fall back to a local
+    open_positions.json. Neither is the ledger anything else in this system reasons about:
+    `analysis.outcome_logger` owns logs/vega_outcomes.jsonl, the caps cohort counts from it,
+    `log_outcome.py` and the dashboard's manual form write to it, and the shadow book grades
+    from it. Book awareness was the one reader pointed somewhere else.
+
+    WHAT THAT COST. On 2026-09-04 the tower returned 200 open rows spanning 25 distinct
+    tickers -- WMT x30, GS x22, QCOM x18 -- against a real book of FOUR: NKE, AMGN, SMH, NEE.
+    So 25 of a 54-name watchlist were being flagged ALREADY IN POSITION, and the flag was wrong
+    in both directions: 24 names falsely held, and 3 of the 4 genuinely held names missing from
+    it. The local fallback could not have rescued it either -- open_positions.json does not
+    exist, so the fallback returned nothing and the phantom rows were the only source.
+
+    Nothing here ever DROPPED a candidate -- `already_in_position` reaches only verdict text
+    and two display paths, and ALLOW_SAME_TICKER gates no code -- which is why three audits
+    filed this as display-only and moved on. It was not. The operator reads that text and
+    declines trades on it, so the suppression a code audit went looking for was happening
+    outside the code. A wrong number on the board is not cosmetic just because no branch reads
+    it.
+
+    Never raises: book awareness is advisory, and a ledger that cannot be read must not take
+    the scan down with it.
     """
     open_rows: List[Dict] = []
     try:
-        import os as _os
-        import json as _json
-        import urllib.request as _rq
-
-        host = _os.environ.get("JARVIS_HOST", "http://192.168.0.222:8000")
-        if host:
-            url = f"{host}/vega/outcomes?status=open&limit=200"
-            with _rq.urlopen(url, timeout=4) as resp:
-                data = _json.loads(resp.read().decode("utf-8"))
-            if isinstance(data, dict):
-                open_rows = data.get("outcomes", []) or []
+        from analysis import outcome_logger as ol
+        open_rows = [r for r in ol.load_records() if r.get("status") == "open"]
     except Exception as e:
-        logger.debug(f"[book] JARVIS open-outcomes unavailable ({e}); using local ledger")
-
-    if not open_rows:
-        try:
-            open_rows = load_open_positions(log_dir)
-        except Exception:
-            open_rows = []
+        logger.warning(
+            "[book] could not read the outcome ledger (%s: %s) — the board will show NO open "
+            "positions this scan. That is a missing annotation, not an empty book.",
+            type(e).__name__, e)
+        open_rows = []
 
     tickers = {str(r.get("ticker", "")).upper() for r in open_rows if r.get("ticker")}
+    logger.info("[book] %d open position(s) across %d ticker(s) from %s",
+                len(open_rows), len(tickers), "logs/vega_outcomes.jsonl")
     return tickers, open_rows
 
 
@@ -1387,13 +1400,33 @@ def _annotate_book_awareness(
                 "ALREADY IN POSITION — open exposure already exists in this underlying"
             )
 
+    # Max loss per contract, derived when the row does not carry it outright. Outcome-ledger
+    # rows record width and credit rather than a max_loss field, so reading only max_loss_usd
+    # returned $0.00 for every row -- a book of four spreads reporting zero risk, which reads
+    # as "no exposure" rather than as "not computed". Anything genuinely unpriceable is counted
+    # and reported, never silently folded in as zero.
     book_risk = 0.0
+    unpriced = 0
     for r in open_rows:
         ml = r.get("max_loss_usd", r.get("max_loss"))
+        if ml is None:
+            width = r.get("spread_width")
+            credit = (r.get("actual_fill_credit")
+                      or r.get("natural_credit_per_share")
+                      or r.get("modeled_credit_per_share"))
+            try:
+                if width is not None and credit is not None:
+                    ml = (abs(float(width)) - float(credit)) * 100.0
+            except (TypeError, ValueError):
+                ml = None
         try:
-            book_risk += float(ml or 0)
+            book_risk += float(ml)
         except (TypeError, ValueError):
-            continue
+            unpriced += 1
+    if unpriced:
+        logger.warning("[book] %d of %d open row(s) carry no priceable max loss — book risk "
+                       "$%.2f is a FLOOR, not the exposure.", unpriced, len(open_rows),
+                       book_risk)
     return qualified_trades, round(book_risk, 2)
 
 

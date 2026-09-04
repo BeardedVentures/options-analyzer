@@ -95,11 +95,20 @@ is a correction, not a tuning, and the difference is testable: the share was mea
 used to PREDICT 96.2% coverage for the uncorrected band, against 97.4% observed. Applying it
 moves overnight from 97.4% to 86.2% and leaves 1d, 1w and 1m bit-identical.
 
-The residual ~6pp is a distributional shape effect, not a scale one: gap returns are markedly
-leptokurtic, and a lognormal interval sized at ±1.28σ contains more than 80% of a fat-tailed,
-sharp-peaked distribution. Fixing that means a different distributional assumption, which is a
-much larger change than this channel has earned. It is NOT tuned away, and the honest reading
-of the overnight horizon today is "usable and known ~6pp conservative".
+The residual ~6pp is a distributional SHAPE effect, not a scale one, and its size depends
+entirely on the confidence level claimed — see GAP_MEASURED_COVERAGE below, which is the table
+an overnight claim now records instead of the close-to-close one.
+
+That residual was first attributed here to leptokurtosis with the prediction that a 95% gap
+band would UNDER-cover, since ±1.96σ was assumed to be out where the fat tail lives. THE
+PREDICTION FAILED: the 95% band covers 95.3%. The empirical and normal |z| quantiles for
+overnight gaps cross at ~1.91 — essentially exactly the 95% level — so the body of the
+distribution is sharply more peaked than lognormal while the tail has already converged. The
+named mechanism survives; the specific prediction about where it inverts did not, and it was
+worth stating in advance precisely because it was checkable.
+
+Nothing is tuned away. A different distributional assumption would fix it and is a much larger
+change than this channel has earned.
 
 SKILL AND RESOLUTION ARE MEANINGLESS FOR THIS CHANNEL, BY CONSTRUCTION. Every band claim carries
 the SAME probability — the stated confidence — so there is no spread of forecasts for resolution
@@ -129,6 +138,35 @@ from analysis import vol_forecast as vf
 from analysis.direction_forecast import claim_dates, realised_vol
 
 logger = logging.getLogger(__name__)
+
+# Measured coverage of the GAP band, by claimed confidence. 16 names, 5 years, every third
+# session, resolved against real opens (n=5,296 per level), AFTER the variance-share correction.
+#
+#     claimed   actual   error
+#        50%     64.3%   +14.3
+#        68%     78.8%   +10.8
+#        80%     86.8%    +6.8
+#        90%     92.8%    +2.8
+#        95%     95.3%    +0.3
+#
+# A SEPARATE TABLE FROM price_projection.MEASURED_COVERAGE, AND THAT IS THE POINT. That table
+# was measured on close-to-close outcomes and reads 0.815 at the 80% level; the overnight claim
+# was recording it as its own expected coverage while actually delivering 0.868. One field, two
+# populations, no way to tell them apart after the fact — the `credit_per_share` defect exactly.
+#
+# The error is monotone in the confidence level and vanishes at 95%, because the standardised
+# gap is far more PEAKED than a lognormal through the body and converges to it in the tail:
+#
+#     |z| quantile     50%    68%    80%    90%    95%
+#     empirical      0.476  0.748  1.026  1.446  1.910
+#     normal         0.674  0.995  1.282  1.645  1.960
+#
+# Consequence worth knowing before anyone picks a level: the overnight horizon is CALIBRATED AT
+# 95% as it stands, and 80% is its second-worst practical choice. The default is deliberately
+# left alone — choosing a confidence level because it makes the coverage look right is the
+# curve-fit the variance-share correction was careful not to be — but a claim recorded here now
+# carries the coverage it actually delivers rather than one borrowed from another population.
+GAP_MEASURED_COVERAGE = {0.50: 0.643, 0.68: 0.788, 0.80: 0.868, 0.90: 0.928, 0.95: 0.953}
 
 # Sessions of open/close history used to estimate the overnight variance share. Two years, so
 # the estimate is stable, and long enough that one earnings gap cannot move it far.
@@ -347,7 +385,12 @@ def band_for(ticker: str,
 
     def _draw(vol_pp):
         v = vol_pp * math.sqrt(gap_share) if gap_share is not None else vol_pp
-        return ppj.project(spot, dte_cal, v, confidence=conf, trading_days_override=days)
+        band = ppj.project(spot, dte_cal, v, confidence=conf, trading_days_override=days)
+        if band and gap_share is not None:
+            # This band is graded against GAP outcomes, so it must carry the gap population's
+            # measured coverage, not the close-to-close table project() defaults to.
+            band["measured_coverage"] = GAP_MEASURED_COVERAGE.get(round(conf, 2))
+        return band
 
     fcast = _draw(fc_pp)
     base = _draw(recent)
