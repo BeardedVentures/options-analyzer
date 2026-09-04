@@ -114,7 +114,66 @@ had silently returned half the data?*
 
 ---
 
-## 4. Recorded so a future session does not "correct" it back
+## 4. When a finding may act, and when it may only be written down
+
+**Measurements that would change BEHAVIOUR get recorded. Measurements that change what a NUMBER
+MEANS get acted on immediately.**
+
+This replaces "do not change gates mid-drought", which was the working rule for a month and is a
+worse one: it states a prohibition without a reason, so it cannot tell you what the exception
+looks like. The rule above explains itself, and it decides cases that the prohibition leaves
+ambiguous — including several where the right answer is to act.
+
+The test is not "is this risky" or "am I confident". It is **what does the change alter?**
+
+- If it alters which trades the system would take, the population changes, and a population
+  change mid-experiment destroys the experiment. Record the measurement, size the decision, and
+  hand it to the operator. A gate is an entry rule and entry rules define the cohort.
+- If it alters what an already-recorded number means — a field that was mislabelled, a cost that
+  was omitted, a basis that was implied and never stated — then NOT acting is the corruption.
+  Every day it waits produces more rows measured on a definition nobody can reconstruct later.
+
+Worked, 2026-09-04, seven findings in one day and every one decided by that single test:
+
+    ACTED ON — changed what a number means
+      net P/L omitted the exit cross              -> measured it, added net_basis
+      the ledger stored no leg quotes             -> persisted them, and leg liquidity
+      chain_coverage implied tradeability         -> renamed to say quotability
+
+    RECORDED ONLY — would have changed behaviour
+      the liquidity floors differ 10-25x          -> decision table, constants untouched
+      the two paths run different quote gates     -> exposure sized, predicates untouched
+      the exit cross can eat a profit target      -> projected onto candidates, gates nothing
+      the ranker opposes the POP gate             -> rate measured, ranking key untouched
+
+Two corollaries that fall out of it, and both were load-bearing today:
+
+**A measurement that cannot be redone later is not optional.** Instrumentation gaps are permanent
+in a way analysis gaps are not: analysis can be re-run against the same rows, but the rows for a
+period are created by the code running during that period. 101 recommendations between 08-11 and
+09-04 can never be audited for fill quality because their quotes were never stored. That is why
+persisting leg quotes was urgent while gating on them was not.
+
+**Absence is informative or it is not, and which one decides how to record it.** The same day
+produced two opposite treatments of a missing value, both correct: an unreadable closing book
+records `None` for the exit cross, because the cost is genuinely unknown and a zero would read
+as "the exit was free" — and a missing `net_basis` counts as `commissions_only`, because every
+row written before that field existed was priced that way and there is no other possibility.
+Ask whether the absence carries information before deciding whether to preserve it.
+
+**Prefer derived to stored.** A stored copy of a computable value is a second field that can
+disagree with the first. `gate_basis`, `entry_vendor_basis`, `cohort` and the projected exit
+cross are all derived, and derived fields have a property stored ones do not: they cannot drift.
+Store the RAW inputs — quotes, liquidity, dates — and compute everything else on read.
+
+**And make comparisons commensurable by construction.** The projected exit cross and the realised
+one use the same function against different books, so the eventual disagreement between them is
+model error and nothing else. Had they been computed two ways, the first divergence would have
+been uninterpretable — a real difference or a definition mismatch, with no way to tell which.
+
+---
+
+## 5. Recorded so a future session does not "correct" it back
 
 - **The scheduler fix landed by removing `StopAtDurationEnd`, not by extending `Duration`.** The
   prescribed `PT7H` is moot. The empirical record is eight clean days.
