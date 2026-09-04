@@ -160,3 +160,31 @@ had silently returned half the data?*
   they predict different CATEGORIES (the baseline always says "flat", a wide target), Brier
   actually favours the tilt, and both have resolution 0.000. The correct verdict was "neither
   discriminates", and the hit rates alone would have supported a confident wrong conclusion.
+- **PRE-REGISTERED, 2026-09-04: what the next scan's quote counters mean.** The 19-of-54
+  enumeration block is 501 `quote_not_tradeable` + 240 `liquidity_below_floor` = 68% of all
+  rejections, and `_quote_verdict` now splits the first into `quote_absent` / `quote_crossed` /
+  `quote_spread_too_wide`. Deciding the reading BEFORE the numbers arrive, so this does not
+  become a third round of interpretation:
+    - **Mostly `quote_spread_too_wide`** -> the market is quoting wide books on those strikes
+      and selection is CORRECTLY refusing them. The drought is the market. The follow-on is
+      then the threshold mismatch, not the fetch: `_option_record_is_quotable` tolerates a
+      spread up to 0.80 of mid while selection requires 0.35, so the health metric is set more
+      than twice as loose as the gate it is supposed to describe, and reporting "54/54 healthy"
+      while 15 of them enumerate nothing is the metric's fault, not the market's.
+    - **Mostly `quote_absent`** -> a strike with a positive mid and a missing side. Strikes with
+      no price at all are already caught one gate earlier as `short_missing_price_delta`, so
+      this is specifically a one-sided book. That is a FETCH-PATH question first (does our
+      chain carry both sides for these strikes?) and a market question second.
+    - **Mostly `quote_crossed`** -> a broken feed. Neither market nor threshold; fix the source.
+  Do not loosen `MAX_QUOTE_SPREAD_PCT` or the liquidity floors on any of these outcomes. The
+  floors may be right and the metric wrong, which is the whole reason the split exists.
+- **Before reasoning about a defect's consequences, check whether the defect LIVES where the
+  consequence would be.** The overnight band's 99% level under-covers by 1.5pp, which looked
+  like it must reach POP and sizing -- a defined-risk spread takes max loss on a large adverse
+  move. It does not. The fat tail is a one-day property that aggregates away by 21 sessions, and
+  real spreads take max loss at about -0.8 sigma: ZERO of 2,899 ledger spreads have a max-loss
+  boundary beyond -2.576 sigma. Measured against real geometry the model OVERSTATES breach
+  probability at every strike location (+3.00pp at the median long strike). Ten minutes reading
+  the ledger's OTM distribution would have shown this before a word was written about risk of
+  ruin. Level 0 for consequences, not just for definitions: *does the thing I am worried about
+  live where I am worried about it?*

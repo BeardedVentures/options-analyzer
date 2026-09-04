@@ -110,6 +110,33 @@ worth stating in advance precisely because it was checkable.
 Nothing is tuned away. A different distributional assumption would fix it and is a much larger
 change than this channel has earned.
 
+THE TAIL DEFECT DOES NOT REACH POP OR SIZING, AND THAT WAS MEASURED RATHER THAN ASSUMED
+
+The 99% gap band under-covers (97.5% actual) and empirical |z| at 99% is 3.952 against an
+assumed 2.576, so this model understates the far one-day gap by ~53%. That looks like it should
+reach short-strike selection and POP, since a defined-risk spread takes its full max loss in
+the direction of a large adverse move. Measured 2026-09-04, it does not, for two reasons:
+
+1. The fat tail is a ONE-DAY property. Standardised downside returns at the trade horizon are
+   indistinguishable from normal at the 1% and 0.5% quantiles (1m: -0.048 and -0.178 vs normal;
+   35d: +0.067 and -0.014) and CONSERVATIVE everywhere shallower. ~24 daily returns aggregate.
+
+2. Real spreads take max loss in the BODY. The ledger's long strike sits 7.56% below spot at the
+   median -- about -0.8 sigma. Zero of 2,899 counterfactual spreads have a max-loss boundary
+   beyond -2.576 sigma; 0.17% are beyond -2.0.
+
+Measured against real geometry over 24 sessions (18,720 observations per row), the model
+OVERSTATES the chance of breaching the long strike at every real location -- +3.00pp at the
+median (16.52% modelled vs 13.52% actual), +1.83 at p90, +4.49 at p10, with every confidence
+interval entirely below the modelled figure. A modelled POP is pessimistic in the body, not
+optimistic in the tail.
+
+The two findings are one statement: this lognormal is TOO WIDE WHERE IT TRADES and too narrow
+where it does not, crossing at ~1.96 sigma. Do not read the tail defect as a sizing input, and
+do not read the body conservatism as licence to sell closer to the money -- it is measured on a
+2021-2026 sample with no crisis in it, and it is the margin that makes a defined-risk book
+survivable.
+
 SKILL AND RESOLUTION ARE MEANINGLESS FOR THIS CHANNEL, BY CONSTRUCTION. Every band claim carries
 the SAME probability — the stated confidence — so there is no spread of forecasts for resolution
 to measure and `grade()` will report ~0 discrimination forever. That is not a defect to be
