@@ -1009,6 +1009,11 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         "natural_credit_per_share": metrics.get("natural_credit_per_share"),
         "natural_credit_usd": metrics.get("natural_credit_usd"),
         "natural_credit_to_width": metrics.get("natural_credit_to_width"),
+        # Volume / OI travel with the quotes because the strict crossability test is BOTH a
+        # spread cap and a liquidity floor, and a stored verdict would freeze today's constants.
+        # With these four numbers a later reader can re-run either predicate under any threshold.
+        "short_volume": short_put.get("volume"), "short_oi": short_put.get("open_interest"),
+        "long_volume": long_put.get("volume"), "long_oi": long_put.get("open_interest"),
         "short_bid": short_put.get("bid"), "short_ask": short_put.get("ask"),
         "short_mid": short_put.get("mid"),
         "long_bid": long_put.get("bid"), "long_ask": long_put.get("ask"),

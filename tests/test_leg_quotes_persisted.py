@@ -99,3 +99,51 @@ def test_every_builder_field_name_is_covered():
     assert emitted, "no builder emits leg quotes — the sources moved"
     missing = [n for n in emitted if f'"{n}"' not in src]
     assert not missing, f"builders emit {missing} and the ledger writer does not persist them"
+
+
+# ── liquidity, for the half of the strict test the quotes cannot answer ──────
+
+def test_leg_liquidity_is_persisted_beside_the_quotes():
+    """The strict crossability test is a spread cap AND a floor of volume>=25 or OI>=100.
+
+    Storing only quotes would let a later audit re-run half of it. Measured 2026-09-04, the
+    liquidity half is the LARGER half in the illiquid tail: of the structures the strict test
+    refuses, 4 of 8 fail on liquidity alone, several with tighter spreads than strikes that pass
+    (GE 350C: 8.2% spread, volume 1, OI 26).
+    """
+    r = _row_for(_trade(short_bid=1.30, short_ask=1.45, long_bid=0.18, long_ask=0.25,
+                        short_volume=6, short_oi=78, long_volume=0, long_oi=64))
+    q = r["leg_liquidity"]
+    assert q["short_volume"] == 6 and q["short_oi"] == 78
+    assert q["long_volume"] == 0 and q["long_oi"] == 64
+
+
+def test_the_strict_predicate_is_reconstructible_from_what_is_stored():
+    """The whole point: both halves of main.py's test, re-runnable under any threshold."""
+    import config
+    r = _row_for(_trade(short_bid=0.43, short_ask=0.62, long_bid=0.16, long_ask=0.28,
+                        short_volume=0, short_oi=13, long_volume=0, long_oi=14))
+    q, L = r["leg_quotes"], r["leg_liquidity"]
+    mid = (q["short_bid"] + q["short_ask"]) / 2
+    too_wide = (q["short_ask"] - q["short_bid"]) / mid > config.MAX_QUOTE_SPREAD_PCT
+    thin = not (L["short_volume"] >= getattr(config, "MIN_OPTION_VOLUME", 25)
+                or L["short_oi"] >= getattr(config, "MIN_OPTION_OPEN_INTEREST", 100))
+    assert too_wide and thin        # this is the real USB 66C book from 2026-09-04
+
+
+def test_liquidity_is_stored_raw_not_as_a_pass_fail():
+    """The two paths disagree about this floor by 10-25x.
+
+    `main.py` gates on volume>=25 or OI>=100; `multi_strategy._tradeable` on volume>=1 or
+    OI>=10. Whichever constant survives that decision has to be applicable retroactively, which
+    a stored boolean would prevent.
+    """
+    r = _row_for(_trade(short_bid=1.0, short_ask=1.1, long_bid=0.2, long_ask=0.3,
+                        short_volume=6, short_oi=78))
+    assert set(r["leg_liquidity"]) <= {"short_volume", "short_oi", "long_volume", "long_oi"}
+    assert not any(isinstance(v, bool) for v in r["leg_liquidity"].values())
+
+
+def test_absent_liquidity_records_null():
+    r = _row_for(_trade(short_bid=1.0, short_ask=1.1))
+    assert r["leg_liquidity"] is None

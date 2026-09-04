@@ -770,6 +770,16 @@ def record_modeled_trades(scan_ts: str, session_type: str, qualified_trades: Lis
                     "call_short_bid", "call_short_ask", "call_long_bid", "call_long_ask",
                     "put_short_bid", "put_short_ask", "put_long_bid", "put_long_ask",
                 ) if t.get(k) is not None} or None,
+                # Liquidity beside the quotes, for the same reason and under the same rule. The
+                # strict crossability test is a spread cap AND a floor of volume>=25 or OI>=100;
+                # storing only the quotes would let a later audit re-run half of it. Raw, never a
+                # verdict -- the two paths disagree about this floor by 10-25x and whichever
+                # constant survives that decision has to be applicable retroactively.
+                "leg_liquidity": {k: t.get(k) for k in (
+                    "short_volume", "short_oi", "long_volume", "long_oi",
+                    "call_short_volume", "call_short_oi",
+                    "put_short_volume", "put_short_oi",
+                ) if t.get(k) is not None} or None,
                 "delta": t.get("delta"),
                 "iv_rank": t.get("iv_rank"),
                 "vrp": t.get("vrp"),

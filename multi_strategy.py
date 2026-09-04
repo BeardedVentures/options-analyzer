@@ -337,6 +337,11 @@ def build_bear_call(ticker, price, calls, prices_hist, tech, sentiment, earnings
         "natural_credit_to_width": round(credit_ps / width, 4) if width else 0,
         "mid_credit_per_share": mid_ps, "mid_credit_usd": round(mid_ps * 100, 0),
         "fill_basis": _fb["fill_basis"], "quotes_live": _fb["quotes_live"],
+        # See main.py: raw liquidity travels with the raw quotes so the strict predicate can be
+        # re-run later. This path applies NO spread test of its own, which is exactly why the
+        # inputs to one have to survive into the ledger.
+        "short_volume": short.get("volume"), "short_oi": short.get("open_interest"),
+        "long_volume": long_.get("volume"), "long_oi": long_.get("open_interest"),
         "short_bid": short.get("bid"), "short_ask": short.get("ask"),
         "long_bid": long_.get("bid"), "long_ask": long_.get("ask"), "width": width,
         "credit_to_width_pct": round(credit_ps / width * 100, 1), "true_pop": true_pop,
@@ -414,6 +419,8 @@ def build_iron_condor(ticker, price, calls, puts, prices_hist, tech, sentiment, 
         "natural_credit_to_width": round(credit_ps / width, 4) if width else 0,
         "mid_credit_per_share": mid_ps, "mid_credit_usd": round(mid_ps * 100, 0),
         "fill_basis": _fb["fill_basis"], "quotes_live": _fb["quotes_live"],
+        "call_short_volume": cs.get("volume"), "call_short_oi": cs.get("open_interest"),
+        "put_short_volume": ps.get("volume"), "put_short_oi": ps.get("open_interest"),
         "call_short_bid": cs.get("bid"), "call_long_ask": cl.get("ask"),
         "put_short_bid": ps.get("bid"), "put_long_ask": pl.get("ask"), "width": width,
         "delta": round((abs(cs.get("delta") or 0) - abs(ps.get("delta") or 0)), 3),

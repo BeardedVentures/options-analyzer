@@ -432,3 +432,36 @@ had silently returned half the data?*
   floors differ 10-25x (`volume>=1 or OI>=10` against `volume>=25 or OI>=100`) and neither was
   chosen against the other; that is a decision, not a bug fix.
   Full measurement: `reports/claude_VEGA_PredicateExposure_2026-09-04.md`.
+- **`estimated_round_trip_cost_per_contract` IS COMMISSIONS ONLY, AND NET P/L SUBTRACTS NOTHING
+  ELSE.** `_round_trip_cost_per_contract()` returns `per_leg * legs * 2` = **$2.16**. The exit
+  cross is not in it, and `outcome_logger:614` computes net P/L as `gross - that figure` -- so
+  every net number this project has reported assumes closing the position is free. Measured
+  2026-09-04 against the real books on the open positions:
+
+        ticker  short rel  long rel  35% gate  exit cross   entry credit   cross as % of credit
+        NKE        3.7%     28.6%     PASS       $ 2.00        $38             5%
+        NEE       25.6%     54.5%     FAIL       $ 4.00        $36            11%
+        SMH        9.9%      7.7%     PASS       $28.50        $95            30%
+        AMGN      90.9%    175.0%     FAIL       $57.50        $65            88%
+
+  On the three LIVE-marked positions the exit cross is **$34.50 against $6.48 modelled -- 5.3x**.
+  AMGN is excluded from that ratio deliberately: the engine already flags its mark unusable, and
+  measuring off a book it refuses to trust would be the same error as trusting a stale mark.
+
+  **THE GATE IS RELATIVE AND THE COST IS ABSOLUTE, AND THAT IS THE STRUCTURAL POINT.** SMH clears
+  MAX_QUOTE_SPREAD_PCT comfortably on both legs -- 9.9% and 7.7% -- and still costs $28.50 to
+  cross, because the legs are $3+ each. NKE at 3.7% costs $2.00. **A 10% spread on a $3.50 leg
+  costs more to cross than a 35% spread on a $0.50 leg**, and neither the ratio gate nor a flat
+  $2.16 constant can see the difference. Any future work on exit economics starts here, not at
+  the spread cap.
+
+  Not changed: the estimator feeds net P/L on every row, and rewriting it re-prices the whole
+  ledger. That is a decision about trade economics, not a bug fix.
+- **101 RECOMMENDATIONS CAN NEVER BE AUDITED, AND THAT IS A PERMANENT HOLE.** Every structure
+  recommended between 2026-08-11 and 2026-09-04 was written without its leg quotes, so no
+  retrospective fill-quality check on them is possible even in principle -- and that window is
+  exactly the period the board has been exclusively call-side, produced by the path with no
+  crossability test. The 7-of-15 survival rate measured 2026-09-04 is the best available proxy
+  for what those 101 looked like, and it is a proxy: a different day, a fresh builder run, not
+  the recommendations that were actually made. Do not read 47% as a property of them.
+  `leg_quotes` and `leg_liquidity` close this going forward only.
