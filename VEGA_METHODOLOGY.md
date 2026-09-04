@@ -313,7 +313,32 @@ had silently returned half the data?*
   defect, measured at entry instead of at exit. "No trades" is the correct output of a correct
   system in this tape; it only looks like failure if the reason is not written down.
 
-  Full series: `reports/claude_VEGA_QualificationSeries_2026-09-04.md`.
+  **Deduplicated, the split is 88/12 (92/8 excluding two 1-2 scan days), not 91/9.** The raw
+  per-scan measure overstates the fall by ~30%, because at 26-45 scans/day one candidate can
+  qualify repeatedly and at 7/day it cannot. The modeled ledger is keyed on
+  ticker+strikes+expiration+date and is therefore already deduplicated: 16.67/day -> 1.94/day
+  -> 0.00/day, an 8.6x drop rather than 11.5x. Quote a cadence-free measure whenever a rate is
+  compared across a scheduler change.
+
+  **There is no 08-07 control, and the claim that multi_strategy was "already fixed on 08-07"
+  is WRONG** -- that date belongs to `vega_candidates`, a different module. Bear calls run
+  7/8/11 through 08-06, read 1 and 2 on 08-07 and 08-08 (two scans and one scan -- a sampling
+  artifact), bounce to 12 on 08-10, and go to 0 on 08-11 alongside bull puts. Both paths drop
+  together, exactly as d6255b9's message says ("on every strategy"). One commit, one date, both
+  paths -- a stronger claim than two dates, but resting on a single step.
+
+  **Why the board is 100% call-side is therefore NOT "the call path was pre-adjusted."** After
+  08-11 bull puts go to exactly zero and stay; bear calls keep producing 0-3/day. The put path
+  dies at ENUMERATION -- 79.2% `quote_spread_too_wide` -- while multi_strategy runs its own
+  enumeration and survives more often.
+
+  **SPY rv20 is an index backdrop, not the per-name mechanism.** Its series low of 7.2 falls on
+  09-01, the only productive day of the final week -- because that day's single qualifier was
+  META, whose own rv20 was 29.9. Do not read a per-name, per-strike decision against an
+  index-level series; the quote split is measured at the level the decision is made and is what
+  carries the final step.
+
+  Full series and the three checks: `reports/claude_VEGA_QualificationSeries_2026-09-04.md` §G.
 - **A RANKING KEY THAT OPPOSES A GATE IS A DEFECT, NOT AN OPEN QUESTION.** Recorded here with a
   mechanism and a rate so it is not re-litigated: `select_bull_put_pair` sorts on
   `natural_credit_to_width` and the POP gate is applied to the winner; credit-to-width is
