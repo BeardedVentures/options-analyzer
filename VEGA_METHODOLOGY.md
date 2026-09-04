@@ -560,10 +560,19 @@ been uninterpretable — a real difference or a definition mismatch, with no way
         natural cohort, entered 08-11 .. 08-17            n= 0
         natural cohort, entered >= 2026-08-18 (post-fix)  n= 0
 
-  **ALL 57 were entered between 08-04 and 08-10.** So were all 75 closed rows, and so were all
-  four open positions (NKE 08-04, AMGN 08-06, SMH 08-07, NEE 08-07). **Zero trades entered under
-  post-fix pricing have closed or are open.** Entries stopped the day the fix landed, so the
-  ledger's entire outcome record predates it.
+  **ALL 57 NATURAL-FILL rows were entered between 08-04 and 08-10**, as were all four open
+  positions (NKE 08-04, AMGN 08-06, SMH 08-07, NEE 08-07). **Zero trades entered under post-fix
+  pricing have closed or are open.** Entries stopped the day the fix landed, so the ledger's
+  entire outcome record predates it.
+
+  CORRECTED 2026-09-04 after an independent review: an earlier version of this entry said "so
+  were all 75 closed rows". That is FALSE. **18 closed rows entered before 08-04**, the earliest
+  on 2026-07-09, and all 18 are the `mid` cohort. The histogram behind the claim covered the
+  natural cohort only and was generalised to the whole ledger without re-checking — the same
+  cite-a-number-without-checking-its-population error this file names twice elsewhere, made
+  while writing the entry that names it. The CONCLUSION is unaffected and slightly strengthened:
+  the closed population reaches further back than stated, and still contains zero post-fix
+  entries.
 
   The consequence is the opposite of the obvious reading: **caps_v1 is NOT starting from a
   measured negative.** It has no prior at all under current rules. "The same rules on the same

@@ -105,8 +105,14 @@ repeatedly; at 7/day it cannot. So `raw/scan` may overstate the early rate for r
 nothing to do with the fill model.
 
 Two cadence-free measures. The second is decisive: `record_modeled_trades` keys on
-ticker + strikes + expiration + scan date, so **the modeled ledger is already deduplicated by
-full spread identity**.
+ticker + strikes + expiration + scan date, so **the modeled ledger is deduplicated by strikes and
+date**.
+
+*Corrected 2026-09-04: an earlier version said "full spread identity". The key carries no
+strategy, and an iron condor stores `None/None` strikes — so two same-day condors on one ticker
+and expiry would collide on id and the second would be silently skipped. Measured: 178 modeled
+rows, 178 unique ids, 43 condors, **zero colliding groups**. The numbers below stand; the claim
+about why they can be trusted was stronger than the key supports.*
 
 | regime | days | raw/scan | distinct tickers/day | **modeled/day (full dedup)** |
 |---|---|---|---|---|
