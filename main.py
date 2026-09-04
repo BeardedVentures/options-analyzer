@@ -179,6 +179,37 @@ def select_long_put_contract(options: List[Dict], short_strike: float, short_exp
     return candidates[0]
 
 
+def _quote_verdict(opt: Dict) -> Optional[str]:
+    """None when the quote is tradeable, else WHY it is not.
+
+    Two very different failures used to share one counter, and the distinction is the whole
+    question now that this gate is known to dominate. On the 2026-09-03 close scan
+    `quote_not_tradeable` was 501 of ~1,100 enumeration rejections across the 19 tickers
+    that produced no spread at all -- the largest single block in the funnel -- and nothing
+    could say whether those strikes had NO TWO-SIDED QUOTE (a data-path question, and the
+    scan-coverage metric reported 54/54 healthy on the same run) or a quote too WIDE to
+    cross (genuine illiquidity, and a correct refusal).
+
+    Those call for opposite responses. Reported separately so the next scan answers it
+    rather than the next session re-deriving it. The gate decision is unchanged.
+    """
+    bid = float(opt.get("bid", 0) or 0)
+    ask = float(opt.get("ask", 0) or 0)
+    mid = float(opt.get("mid", 0) or 0)
+    if bid <= 0 or ask <= 0 or mid <= 0:
+        return "quote_absent"
+    if ask < bid:
+        return "quote_crossed"
+    spread_pct = (ask - bid) / mid if mid else 1.0
+    if spread_pct > config.MAX_QUOTE_SPREAD_PCT:
+        return "quote_spread_too_wide"
+    return None
+
+
+def _quote_is_tradeable(opt: Dict) -> bool:
+    return _quote_verdict(opt) is None
+
+
 def select_bull_put_pair(
     options: List[Dict],
     current_price: float,
@@ -203,16 +234,6 @@ def select_bull_put_pair(
     def _bump(reason: str) -> None:
         diag_counts[reason] = diag_counts.get(reason, 0) + 1
 
-    def _quote_is_tradeable(opt: Dict) -> bool:
-        bid = float(opt.get("bid", 0) or 0)
-        ask = float(opt.get("ask", 0) or 0)
-        mid = float(opt.get("mid", 0) or 0)
-        if bid <= 0 or ask <= 0 or mid <= 0:
-            return False
-        if ask < bid:
-            return False
-        spread_pct = (ask - bid) / mid if mid else 1.0
-        return spread_pct <= config.MAX_QUOTE_SPREAD_PCT
 
     short_candidates: List[Tuple[float, Dict]] = []
     target_delta = config.SHORT_STRIKE_TARGET_DELTA
@@ -237,8 +258,9 @@ def select_bull_put_pair(
         if not strike or delta is None or mid <= 0:
             _bump("short_missing_price_delta")
             continue
-        if not _quote_is_tradeable(opt):
-            _bump("short_quote_not_tradeable")
+        _qv = _quote_verdict(opt)
+        if _qv:
+            _bump(f"short_{_qv}")
             continue
         if opt.get("volume", 0) < min_vol and opt.get("open_interest", 0) < min_oi:
             _bump("short_liquidity_below_floor")
@@ -307,8 +329,9 @@ def select_bull_put_pair(
         long_candidates.sort(key=lambda opt: opt.get("strike", 0), reverse=True)
 
         for long_put in long_candidates:
-            if not _quote_is_tradeable(long_put):
-                _bump("long_quote_not_tradeable")
+            _lqv = _quote_verdict(long_put)
+            if _lqv:
+                _bump(f"long_{_lqv}")
                 continue
             if long_put.get("volume", 0) < min_vol and long_put.get("open_interest", 0) < min_oi:
                 _bump("long_liquidity_below_floor")
