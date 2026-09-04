@@ -1362,8 +1362,30 @@ def chain_coverage() -> Dict[str, Any]:
         # without it, retries silently degrade to a single attempt and the only symptom is a
         # coverage regression with no stated cause. See robinhood_mcp._unrecognized_errors.
         "unrecognized_errors": unrecognized,
-        "reason": (f"{len(passed)}/{attempted} tickers ({ratio:.0%}) cleared the chain-quality "
-                   f"floor, minimum is {floor:.0%}"
+        # WORDED AS QUOTABILITY, NOT QUALITY, AND THE DISTINCTION IS LOAD-BEARING.
+        #
+        # This ratio counts strikes carrying a two-sided price loose enough to believe -- the
+        # predicate tolerates a spread up to 0.80 of mid. SELECTION requires 0.35. So a strike
+        # quoting 0.40/0.90 is counted here and is unsellable there, and the metric is more than
+        # twice as loose as the gate its old wording implied it described.
+        #
+        # Measured 2026-09-04: this reported "47/54 (87%) cleared the chain-quality floor" on a
+        # scan where 22 of those 54 tickers enumerated no valid spread at all, and 79% of their
+        # enumeration rejections were quotes too wide to cross. A reader who took "quality" to
+        # mean "tradeable" would conclude the chains were fine and look elsewhere for the
+        # drought -- which is what happened, for weeks.
+        #
+        # Renamed rather than unified, deliberately. Tightening this predicate to 0.35 would
+        # change which underlyings the scan looks at, mid-drought, and the floor may well be
+        # right while only the label was wrong. Saying what it measures costs nothing and
+        # removes the false implication.
+        "measures": "quotability (two-sided price present, spread <= 0.80 of mid) — NOT "
+                    "tradeability; selection additionally requires spread <= "
+                    f"{getattr(config, 'MAX_QUOTE_SPREAD_PCT', 0.35):.0%} and a positive bid",
+        "reason": (f"{len(passed)}/{attempted} tickers ({ratio:.0%}) cleared the chain-QUOTABILITY "
+                   f"floor, minimum is {floor:.0%}. This is not a tradeability figure: strikes "
+                   f"quoting up to 0.80 of mid count as quotable here and are refused by "
+                   f"selection."
                    if attempted else "no chain was fetched this run"),
     }
 

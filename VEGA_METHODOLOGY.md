@@ -260,3 +260,42 @@ had silently returned half the data?*
   and looser on calls. This is a units question of the same family as decimal-vs-points and
   MEASURED_COVERAGE carrying the close-to-close figure on a gap claim -- not an argument for
   moving the floor.
+- **THE DROUGHT'S START DATE IS A COMMIT, NOT A MARKET MOVE.** `d6255b9` landed 2026-08-10 at
+  17:46 CDT -- after that day's last cycle -- and made main.py gate bull puts on the NATURAL
+  credit instead of the MID. The first cycle to run it was 08-11 08:35. From the scan log,
+  qualified trades per scan:
+
+        08-05  0,0,0,6,5,5,3,5,5,7,4,5,5,6,5,5,4,4,4,5,...   (mid-priced gating)
+        08-10  3,4,3,3,4,5,6,4,0,0,2,5,5,5,5,5
+        08-11  1,1,1,1,1,0,0,0,0,1,1,1                        (natural-credit gating)
+        08-12+ mostly 0, occasional 1-2
+        09-02+ 0 on every scan
+
+  The multi_strategy call side had already been fixed on 2026-08-07, so it was already
+  producing at its honest rate; main.py's bull-put path was still quoting mids until 08-10.
+  That is the whole explanation for the board going 100% call-side on 08-11 -- the put path
+  lost an inflated pass rate, the call path had already taken the hit. It is NOT a market
+  signal and NOT a delta-band artifact. **The drought is substantially the system becoming
+  honest about fills**, which is the same finding as the 72%-on-mid vs 8%-on-natural split, seen
+  from the entry side instead of the outcome side.
+
+  Correction to the standing framing while here: "zero qualified since 08-10" is wrong. The
+  board qualified 1-2 per scan on most days through 2026-09-01. TRUE zero began 2026-09-02 --
+  three trading days before this was written.
+- **A ranking key inversely ordered with a gate manufactures rejections that are not
+  rejections.** `select_bull_put_pair` ranks on natural credit-to-width and the POP gate is
+  applied to the winner, but more credit means closer to the money means lower POP -- so the
+  ranker hands the gate the lowest-POP member of each family by construction. Measured over 593
+  ticker-days (2026-08-07 .. 09-03): **33 (5.6%)** are cases where the ranked winner failed a
+  post-selection gate while a sibling that also cleared enumeration passed everything -- 36.3%
+  of all ticker-days where the winner failed one. Killers: pop 27, support_shelter 9. So a
+  funnel line reading "GDX failed POP" sometimes means "VEGA chose the one GDX spread that
+  fails POP", and roughly a third of POP-labelled deaths are of that kind. Enumeration deaths
+  (64.6% of ticker-days, "nothing cleared enumeration") and ticker-level gates (IV rank, news,
+  VRP) are NOT affected, so the funnel's large buckets stand. Recorded, not fixed: changing the
+  ranking key is a selection change and belongs to a decided cohort.
+
+  A first pass at this measurement reported **18.5%** by treating delta_cap and otm_buffer as
+  post-selection gates when main.py rejects them DURING enumeration. Spreads failing them were
+  never selectable, so counting their failure as a ranking artifact was a category error. Draw
+  the enumeration/selection boundary where the code draws it before counting across it.
