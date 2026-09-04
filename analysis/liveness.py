@@ -128,6 +128,12 @@ def _check_counterfactuals() -> Dict:
                        f"retention shorter than the horizon, so nothing could ever mature.")}
 
 
+# The date the last path that could write an unpriceable recommendation was fixed. main.py's
+# bull-put path landed the natural credit on 2026-08-10 and multi_strategy's call side on
+# 2026-08-18; the later date is the one a row has to postdate to be the writer's fault.
+_WRITER_FIXED_ON = "2026-08-18"
+
+
 def _check_shadow_book() -> Dict:
     rows = _read_jsonl(LOG_DIR / "vega_shadow_book.jsonl")
     priced = sum(1 for r in rows if r.get("priced"))
@@ -139,11 +145,32 @@ def _check_shadow_book() -> Dict:
     if not expired:
         return {"status": STARVED, "graded": 0,
                 "reason": f"{len(rows)} rows but none has expired yet"}
-    return {"status": CRITICAL, "graded": 0, "rows": len(rows), "expired": expired,
-            "reason": (f"{expired} of {len(rows)} rows have expired and NOT ONE is priced. The "
-                       f"known cause is modelled_credit_per_share carrying the MID on the "
-                       f"bull-put path and the NATURAL on the call side, so no P&L can be "
-                       f"computed. Breach/hold is being recorded; grading is not.")}
+    # Is the writer still producing rows that cannot be priced, or is this a closed historical
+    # set? The two need different responses and the old message conflated them -- it named an
+    # ongoing writer defect, which sent three reviews looking for a bug that had been fixed on
+    # 2026-08-10 (main.py, bull-put path) and 2026-08-18 (multi_strategy, call side). Every
+    # recommendation written since carries a natural credit. A CRITICAL that names a cause
+    # already fixed is worse than no message: it directs effort at the wrong thing and it
+    # trains the reader to discount the channel.
+    fresh_unpriced = [r for r in rows
+                      if not r.get("natural_credit_per_share")
+                      and str(r.get("scan_date") or "") > _WRITER_FIXED_ON]
+    if fresh_unpriced:
+        return {"status": CRITICAL, "graded": 0, "rows": len(rows), "expired": expired,
+                "reason": (f"{expired} of {len(rows)} rows have expired and NOT ONE is priced, "
+                           f"and {len(fresh_unpriced)} row(s) written AFTER "
+                           f"{_WRITER_FIXED_ON} still carry no natural credit — the writer is "
+                           f"producing unpriceable rows again.")}
+    return {"status": STARVED, "graded": 0, "rows": len(rows), "expired": expired,
+            "reason": (f"{expired} of {len(rows)} rows have expired and none is priced, but "
+                       f"every one of them predates the fill-basis fix "
+                       f"({_WRITER_FIXED_ON}) and no row written since lacks a natural credit. "
+                       f"This is a CLOSED historical set, not a live fault: the basis those "
+                       f"rows were priced on is unrecoverable, so they are correctly refused "
+                       f"rather than graded against a price that never existed. The channel "
+                       f"produces its first grade when a recommendation written after the fix "
+                       f"reaches expiry — which needs ENTRY_HOLD lifted or the board "
+                       f"qualifying again, not a code change here.")}
 
 
 def _check_caps_cohort() -> Dict:
@@ -192,11 +219,53 @@ def _check_predictions() -> Dict:
                      "so the resolved-slice hit rate is not an accuracy estimate")}
 
 
+def _check_band_forecasts() -> Dict:
+    """The range channel, checked SEPARATELY from the prediction ledger it shares a file with.
+
+    Sharing a file is exactly why this needs its own check. `_check_predictions` above reads OK
+    on 3,000 direction claims whether or not a single band was ever written -- and for the whole
+    life of this project that is what it did: the band scorer and its claim type existed, were
+    registered, and had never been fed. A channel that is built and starved looks identical to a
+    healthy one from the row count of the file it lives in.
+
+    Band claims are graded per horizon and never pooled, so a horizon that stops being written
+    -- an abstention path that starts firing for every ticker, say -- shows up here as a missing
+    type rather than as a slightly smaller total.
+    """
+    rows = [r for r in _read_jsonl(LOG_DIR / "vega_predictions.jsonl")
+            if str(r.get("claim_type") or "").startswith("band_contains")]
+    if not rows:
+        return {"status": STARVED, "graded": 0, "rows": 0,
+                "reason": ("no range claims recorded yet. price_projection has drawn these "
+                           "bands, and quoted a backtest coverage table for them, since it "
+                           "shipped; until rows land here that table is the only evidence the "
+                           "band is calibrated, and a backtest cannot see a live vol forecast "
+                           "that has stopped updating.")}
+    resolved = sum(1 for r in rows if r.get("status") == "resolved")
+    horizons = {str(r.get("claim_type")) for r in rows
+                if not str(r.get("claim_type")).endswith("_baseline")}
+    if not resolved:
+        # Not yet a fault: the shortest horizon settles the next session, so a channel switched
+        # on today has nothing due. It becomes one once claims are older than their horizons.
+        return {"status": STARVED, "graded": 0, "rows": len(rows),
+                "horizons": sorted(horizons),
+                "reason": (f"{len(rows)} range claims recorded and none resolved yet — expected "
+                           f"on the day the channel starts, a fault if it persists past the "
+                           f"first settlement.")}
+    return {"status": OK, "graded": resolved, "rows": len(rows),
+            "open": len(rows) - resolved, "horizons": sorted(horizons),
+            "note": ("coverage is the measurement here, not hit rate: an 80% band that contains "
+                     "price 95% of the time is mis-specified, not good. Discrimination is "
+                     "meaningless for this channel -- every claim carries the same stated "
+                     "confidence, so resolution is ~0 by construction.")}
+
+
 CHANNELS: Dict[str, Callable[[], Dict]] = {
     "counterfactual_ledger": _check_counterfactuals,
     "shadow_book": _check_shadow_book,
     "caps_cohort": _check_caps_cohort,
     "prediction_ledger": _check_predictions,
+    "band_forecast": _check_band_forecasts,
 }
 
 

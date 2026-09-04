@@ -53,11 +53,35 @@ def test_young_counterfactuals_are_STARVED_not_CRITICAL(tmp_path, monkeypatch):
 
 # ── shadow book ───────────────────────────────────────────────────────────────
 
-def test_shadow_book_reports_CRITICAL_when_expired_rows_are_unpriced(tmp_path, monkeypatch):
-    rows = [{"expired": True, "priced": False} for _ in range(5)]
+def test_shadow_book_is_CRITICAL_only_when_the_WRITER_is_still_at_fault(tmp_path, monkeypatch):
+    """Expired-and-unpriced is not by itself a fault, and treating it as one misdirected three
+    reviews at a bug that had already been fixed.
+
+    The question CRITICAL is supposed to answer is "is something still producing rows that can
+    never be graded". A row written after the fill-basis fix with no natural credit answers yes.
+    """
+    rows = [{"expired": True, "priced": False, "scan_date": "2026-08-28",
+             "natural_credit_per_share": None} for _ in range(5)]
     _write(tmp_path, monkeypatch, "vega_shadow_book.jsonl", rows)
     r = L._check_shadow_book()
     assert r["status"] == L.CRITICAL and r["graded"] == 0
+    assert "writer is producing unpriceable rows again" in r["reason"]
+
+
+def test_shadow_book_unpriced_rows_that_all_predate_the_fix_are_a_closed_set(tmp_path, monkeypatch):
+    """Same observable state -- expired, unpriced, zero graded -- and a different verdict.
+
+    These rows are unrecoverable rather than wrong, and the channel says so instead of naming a
+    cause that no longer exists. A CRITICAL that points at a fixed bug trains the reader to
+    discount the channel, which is more expensive than the missing grade.
+    """
+    rows = [{"expired": True, "priced": False, "scan_date": "2026-08-04",
+             "natural_credit_per_share": None} for _ in range(5)]
+    _write(tmp_path, monkeypatch, "vega_shadow_book.jsonl", rows)
+    r = L._check_shadow_book()
+    assert r["status"] == L.STARVED and r["graded"] == 0
+    assert "CLOSED historical set" in r["reason"]
+    assert "predates the fill-basis fix" in r["reason"]
 
 
 def test_shadow_book_reports_OK_when_something_is_priced(tmp_path, monkeypatch):
@@ -123,11 +147,38 @@ def test_the_decision_ledger_is_registered_even_though_it_does_not_exist():
     assert L.check_all()["decision_ledger"]["status"] == L.NOT_BUILT
 
 
-def test_all_five_channels_are_registered():
-    """Five instruments were reporting nothing on 2026-09-02 and only four had been listed."""
+def test_every_measurement_channel_is_registered():
+    """Five instruments were reporting nothing on 2026-09-02 and only four had been listed.
+
+    Pinned as an exact set rather than a count, so ADDING a channel without registering it
+    fails here. That is the whole failure mode: `band_forecast` shared a ledger file with the
+    direction claims, so `prediction_ledger` read OK on 3,000 rows while the band scorer had
+    never been fed once. A starved channel hiding inside a healthy one is invisible to
+    everything except an explicit list.
+    """
     names = set(L.CHANNELS) | set(L._no_production_ledgers)
     assert names == {"counterfactual_ledger", "shadow_book", "caps_cohort",
-                     "prediction_ledger", "decision_ledger"}, names
+                     "prediction_ledger", "band_forecast", "decision_ledger"}, names
+
+
+def test_band_forecast_is_checked_separately_from_the_ledger_it_shares(tmp_path, monkeypatch):
+    """A file full of direction claims must not make the band channel read as healthy."""
+    _write(tmp_path, monkeypatch, "vega_predictions.jsonl",
+           [{"claim_type": "direction_1w", "status": "resolved"} for _ in range(500)])
+    assert L._check_predictions()["status"] == L.OK
+    band = L._check_band_forecasts()
+    assert band["status"] == L.STARVED and band["graded"] == 0
+    assert "no range claims recorded yet" in band["reason"]
+
+
+def test_band_forecast_reports_its_horizons_so_a_missing_one_is_visible(tmp_path, monkeypatch):
+    rows = [{"claim_type": ct, "status": "resolved"}
+            for ct in ("band_contains_1d", "band_contains_1w", "band_contains_1w_baseline")]
+    _write(tmp_path, monkeypatch, "vega_predictions.jsonl", rows)
+    r = L._check_band_forecasts()
+    assert r["status"] == L.OK and r["graded"] == 3
+    # Baselines are not horizons; a horizon that stops being written goes missing from this list.
+    assert r["horizons"] == ["band_contains_1d", "band_contains_1w"]
 
 
 def test_a_check_that_raises_is_reported_CRITICAL_not_swallowed(monkeypatch):

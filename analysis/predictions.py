@@ -81,7 +81,25 @@ MOVE_EXCEEDS = "move_exceeds"
 # Did price finish inside the band the engine drew? price_projection states a range at a stated
 # confidence and nothing has ever checked the coverage in production. A 68% band that contains
 # price 45% of the time is not a tighter band, it is a wrong one, and only this catches it.
+#
+# The constant existed with a working scorer from the day the band was drawn, and NOTHING EVER
+# WROTE ONE. Zero rows carried this type on 2026-09-03 while price_projection had been quoting
+# coverage numbers from a 14,900-observation backtest as though they were production evidence.
+# A measurement channel that is built, registered and never fed reads exactly like a healthy
+# one from the outside; that is the failure this whole module exists to make impossible.
 BAND_CONTAINS = "band_contains"
+
+# One type per horizon, because a band is only meaningful against the horizon it was drawn for.
+# Pooling an overnight band with a monthly one produces a coverage number describing neither --
+# the same defect as pooling mid-fill and natural-fill trade outcomes, and `grade()` buckets by
+# claim_type, so separate types is all separate grading takes.
+BAND_CONTAINS_1D = "band_contains_1d"
+BAND_CONTAINS_OVERNIGHT = "band_contains_overnight"
+BAND_CONTAINS_1W = "band_contains_1w"
+BAND_CONTAINS_1M = "band_contains_1m"
+
+BAND_TYPES = (BAND_CONTAINS, BAND_CONTAINS_1D, BAND_CONTAINS_OVERNIGHT,
+              BAND_CONTAINS_1W, BAND_CONTAINS_1M)
 
 DIRECTION_TYPES = (DIRECTION, DIRECTION_1D, DIRECTION_OVERNIGHT, DIRECTION_1W, DIRECTION_1M)
 
@@ -95,6 +113,18 @@ def is_direction_claim(claim_type: Optional[str]) -> bool:
     and mark a whole population unresolvable while the ledger still looks healthy.
     """
     return bool(claim_type) and str(claim_type).startswith("direction")
+
+
+def is_band_claim(claim_type: Optional[str]) -> bool:
+    """Same prefix rule as `is_direction_claim`, and for the same reason.
+
+    A per-horizon type added without touching the scorer would fall through to "no scorer for
+    claim type" and mark its whole population unresolvable, while the ledger kept reporting a
+    healthy row count. Matching by prefix means a new horizon is gradeable the moment it is
+    written. The `_baseline` twins match too, which is intended -- the trailing-vol band is
+    scored by exactly the same rule as the forecast band or the comparison is not a comparison.
+    """
+    return bool(claim_type) and str(claim_type).startswith("band_contains")
 
 
 def _cfg(name, default):
@@ -492,7 +522,7 @@ def _score(r: Dict, bars: Sequence) -> tuple:
         return got, (f"needed {side} {need:.1f}%, {basis} reached {reached:.2f} "
                      f"from {entry_px:.2f} ({moved:+.1f}%)")
 
-    if ct == BAND_CONTAINS:
+    if is_band_claim(ct):
         lo, hi = ctx.get("band_low"), ctx.get("band_high")
         if lo is None or hi is None:
             return None, "no band in context"
@@ -685,6 +715,76 @@ def decompose(pairs: Sequence[tuple], n_bins: Optional[int] = None,
     }
 
 
+def cluster_sample(rows: Sequence[Dict]) -> Dict:
+    """How many INDEPENDENT observations a set of claims of one type really represents.
+
+    A raw resolved count is not a sample size here, and reporting one is a defect rather than a
+    simplification. Three things make these rows dependent, and all three are live:
+
+    1. OVERLAPPING HORIZONS. A 21-day claim written every session shares 20 of its 21 days with
+       the claim written the day before. Ninety of them are not ninety draws; they are closer to
+       four. This is the identical error already found in the HAR work, where 2,045 "out-of-
+       sample" predictions from daily-stepped 30-day windows were an effective ~68 blocks.
+
+    2. CROSS-SECTIONAL CORRELATION. SPY, QQQ, IWM and the megacaps are one bet on one market.
+       When it gaps they miss together. Tickers are therefore counted by their SECTOR PROXY --
+       the same grouping vol_forecast already uses -- rather than individually.
+
+    3. SAME-DAY MULTIPLICITY. Several claims about one ticker on one day are one observation of
+       that ticker on that day, whatever they are about.
+
+    The estimate is deliberately CONSERVATIVE: independent time blocks multiplied by distinct
+    cross-sectional clusters, capped by the raw count. It is not a variance-corrected effective
+    sample size and does not pretend to be; it is a number that cannot flatter the sample, which
+    is the only property that matters when the failure mode being guarded against is a
+    confident conclusion drawn from a thousand correlated readings of the same week.
+    """
+    import math as _math
+    rows = list(rows)
+    if not rows:
+        return {"n_raw": 0, "n_ticker_days": 0, "n_time_blocks": 0,
+                "n_clusters": 0, "n_effective": 0, "horizon_days": None}
+
+    def _day(r):
+        return str(r.get("made_at") or "")[:10]
+
+    ticker_days = {(str(r.get("ticker") or "?").upper(), _day(r)) for r in rows}
+    days = {d for _, d in ticker_days if d}
+
+    horizons = [(r.get("context") or {}).get("horizon_days") for r in rows]
+    horizons = [int(h) for h in horizons if isinstance(h, (int, float)) and h and h > 0]
+    # The LONGEST horizon present, not the average: overlap is set by the widest window in the
+    # bucket, and averaging would credit the sample with independence the long claims destroy.
+    horizon = max(horizons) if horizons else 1
+
+    # Distinct calendar days a claim was made on, divided into non-overlapping windows.
+    n_days = len(days) or 1
+    time_blocks = max(1, int(_math.ceil(n_days / float(horizon))))
+
+    clusters = set()
+    for r in rows:
+        tk = str(r.get("ticker") or "?").upper()
+        ctx = r.get("context") or {}
+        proxy = ctx.get("sector_proxy")
+        if not proxy:
+            try:
+                from analysis import vol_forecast as _vf
+                proxy = _vf.sector_proxy_for(tk)
+            except Exception:
+                proxy = None
+        clusters.add(proxy or tk)
+
+    n_eff = min(len(rows), time_blocks * max(1, len(clusters)))
+    return {
+        "n_raw": len(rows),
+        "n_ticker_days": len(ticker_days),
+        "n_time_blocks": time_blocks,
+        "n_clusters": len(clusters),
+        "n_effective": n_eff,
+        "horizon_days": horizon,
+    }
+
+
 def grade(rows: Optional[Sequence[Dict]] = None, cohort: Optional[str] = None) -> Dict:
     """Per claim type: how often it was right, and whether its confidence was earned.
 
@@ -703,6 +803,7 @@ def grade(rows: Optional[Sequence[Dict]] = None, cohort: Optional[str] = None) -
         b = by_type.setdefault(t, {"n": 0, "hits": 0, "probs": [], "briers": [], "pairs": []})
         b["n"] += 1
         b["hits"] += 1 if r["correct"] else 0
+        b.setdefault("rows", []).append(r)
         p = r.get("probability")
         if p is not None:
             b["probs"].append(p)
@@ -718,8 +819,14 @@ def grade(rows: Optional[Sequence[Dict]] = None, cohort: Optional[str] = None) -
         # The decomposition, not just the aggregate. Raw Brier cannot tell a model that knows
         # something from one that has memorised the base rate; resolution can.
         dec = decompose(b["pairs"])
+        # Both counts, side by side, always. A headline quoting only the raw one is the defect
+        # this pair exists to prevent -- see cluster_sample().
+        clus = cluster_sample(b.get("rows") or [])
         out[t] = {
             "n": b["n"],
+            "n_effective": clus["n_effective"],
+            "n_ticker_days": clus["n_ticker_days"],
+            "clustering": clus,
             "hit_rate": round(hit * 100, 1),
             "avg_confidence": round(avg_p * 100, 1) if avg_p is not None else None,
             "brier": round(brier, 4) if brier is not None else None,
@@ -730,8 +837,12 @@ def grade(rows: Optional[Sequence[Dict]] = None, cohort: Optional[str] = None) -
             "skill": dec["skill"],
             "resolution_ci": dec["resolution_ci"],
             "forecast_spread": dec["forecast_spread"],
-            "gradeable": b["n"] >= min_n,
-            "verdict": _verdict(b["n"], min_n, hit, avg_p, brier, dec),
+            # Gradeability is judged on the EFFECTIVE count. Ten correlated readings of one
+            # week are not ten observations, and letting them clear the floor is how a channel
+            # starts issuing verdicts before it has earned one.
+            "gradeable": clus["n_effective"] >= min_n,
+            "verdict": _verdict(b["n"], min_n, hit, avg_p, brier, dec,
+                                n_effective=clus["n_effective"]),
         }
     return {
         "total_claims": len(rows),
@@ -743,7 +854,8 @@ def grade(rows: Optional[Sequence[Dict]] = None, cohort: Optional[str] = None) -
 
 
 def _verdict(n: int, min_n: int, hit: float, avg_p: Optional[float],
-             brier: Optional[float], dec: Optional[Dict] = None) -> str:
+             brier: Optional[float], dec: Optional[Dict] = None,
+             n_effective: Optional[int] = None) -> str:
     """Leads with RESOLUTION, because that is the question raw Brier cannot answer.
 
     "78% correct, Brier 0.17, well calibrated" is what a forecaster saying the base rate about
@@ -751,7 +863,12 @@ def _verdict(n: int, min_n: int, hit: float, avg_p: Optional[float],
     distinguish one trade from another. A claim type can be perfectly calibrated and carry no
     information at all, and only the second sentence catches it.
     """
-    if n < min_n:
+    n_eff = n if n_effective is None else int(n_effective)
+    if n_eff < min_n:
+        if n_eff < n:
+            return (f"{n} resolved, but only ~{n_eff} INDEPENDENT after clustering by "
+                    f"overlapping horizon and market factor — not gradeable yet "
+                    f"({min_n} needed)")
         return f"only {n} resolved — not gradeable yet ({min_n} needed)"
     if avg_p is None:
         return f"{hit*100:.0f}% correct over {n}, but no confidence was recorded to calibrate"

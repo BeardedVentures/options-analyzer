@@ -201,10 +201,20 @@ def test_resolution_is_idempotent():
 # ── Grading ───────────────────────────────────────────────────────────────────────────────────
 
 def _seed(n, correct, prob, ctype=P.STRIKE_HOLDS):
+    """n resolved claims, each on a DISTINCT ticker and a distinct day.
+
+    The distinctness is load-bearing, not decoration. `grade()` judges gradeability on the
+    CLUSTERED count, and twenty claims that share one ticker and one date are one observation
+    however many rows they occupy -- so a fixture that stamped them all "AAA" with no date
+    would be asking these tests to assert calibration language about a sample of one. Spreading
+    them is what an honest twenty-observation sample looks like; the probabilities and outcomes
+    each test cares about are untouched.
+    """
     rows = []
     for i in range(n):
-        rows.append({"id": f"x{i}", "trade_id": f"t{i}", "ticker": "AAA",
+        rows.append({"id": f"x{i}", "trade_id": f"t{i}", "ticker": f"AA{i:03d}",
                      "claim_type": ctype, "claim": "c", "probability": prob,
+                     "made_at": f"2026-0{1 + i // 28}-{1 + i % 28:02d}T12:00:00",
                      "status": "resolved", "correct": correct, "context": {}})
     return rows
 
@@ -442,7 +452,10 @@ def test_grade_exposes_the_decomposition_per_claim_type():
 def test_the_verdict_says_when_a_type_does_not_discriminate():
     """'78% correct, well calibrated' is what a base-rate parrot scores too. The verdict has to
     name the difference or the ledger launders ignorance as calibration."""
+    # Distinct ticker and day per row: gradeability is judged on the CLUSTERED count, and ten
+    # rows sharing one name on one date are one observation, not ten.
     rows = [{"claim_type": "strike_holds", "status": "resolved", "correct": i < 7,
+             "ticker": f"AA{i:03d}", "made_at": f"2026-01-{1 + i:02d}T12:00:00",
              "probability": 0.7, "context": {}} for i in range(10)]
     v = P.grade(rows)["by_type"]["strike_holds"]["verdict"]
     assert "does NOT discriminate" in v
@@ -451,6 +464,7 @@ def test_the_verdict_says_when_a_type_does_not_discriminate():
 
 def test_the_verdict_credits_a_type_that_does_discriminate():
     rows = [{"claim_type": "strike_holds", "status": "resolved", "correct": i < 15,
+             "ticker": f"AA{i:03d}", "made_at": f"2026-01-{1 + i:02d}T12:00:00",
              "probability": 0.95 if i < 15 else 0.05, "context": {}} for i in range(20)]
     v = P.grade(rows)["by_type"]["strike_holds"]["verdict"]
     assert "DISCRIMINATES" in v
@@ -539,3 +553,94 @@ def test_a_bad_resolution_date_is_still_refused_inside_a_batch(tmp_path, monkeyp
     with P.batch():
         assert P.record("t1", "C", "direction_1d", "c", 0.5, "2026-13-18") is None
     assert P.load() == []
+
+
+# -- Clustered sample size ------------------------------------------------------------------------
+#
+# A raw resolved count is not a sample size when the rows overlap in time and correlate across
+# names. Reporting one is the defect these tests exist to prevent.
+
+def test_many_claims_on_one_ticker_day_are_one_observation():
+    rows = [{"claim_type": "c", "ticker": "SPY", "made_at": "2026-09-01T12:00:00",
+             "status": "resolved", "correct": True, "probability": 0.8,
+             "context": {"horizon_days": 1}} for _ in range(50)]
+    c = P.cluster_sample(rows)
+    assert c["n_raw"] == 50
+    assert c["n_ticker_days"] == 1
+    assert c["n_effective"] == 1
+
+
+def test_overlapping_horizons_do_not_count_as_independent_draws():
+    """A 21-day claim written every session shares 20 of its 21 days with yesterday's.
+
+    Ninety of them are closer to four draws than ninety. This is the same error found in the
+    HAR work, where 2,045 daily-stepped 30-day windows were an effective ~68 blocks.
+    """
+    rows = [{"claim_type": "c", "ticker": "SPY", "made_at": f"2026-09-{d:02d}T12:00:00",
+             "status": "resolved", "correct": True, "probability": 0.8,
+             "context": {"horizon_days": 21}} for d in range(1, 22)]
+    c = P.cluster_sample(rows)
+    assert c["n_raw"] == 21
+    assert c["n_ticker_days"] == 21          # 21 distinct ticker-days...
+    assert c["n_time_blocks"] == 1           # ...but one non-overlapping 21-day window
+    assert c["n_effective"] == 1
+
+
+def test_the_longest_horizon_present_sets_the_overlap_not_the_average():
+    """Averaging would credit the sample with independence the long claims destroy."""
+    rows = [{"claim_type": "c", "ticker": "SPY", "made_at": f"2026-09-{d:02d}T12:00:00",
+             "status": "resolved", "correct": True, "probability": 0.8,
+             "context": {"horizon_days": 1 if d % 2 else 21}} for d in range(1, 22)]
+    assert P.cluster_sample(rows)["horizon_days"] == 21
+
+
+def test_correlated_names_collapse_into_one_cross_sectional_cluster():
+    """SPY, QQQ and IWM are one bet on one market. When it gaps they miss together."""
+    rows = [{"claim_type": "c", "ticker": tk, "made_at": "2026-09-01T12:00:00",
+             "status": "resolved", "correct": True, "probability": 0.8,
+             "context": {"horizon_days": 1, "sector_proxy": "SPY"}}
+            for tk in ("SPY", "QQQ", "IWM")]
+    c = P.cluster_sample(rows)
+    assert c["n_raw"] == 3
+    assert c["n_clusters"] == 1
+    assert c["n_effective"] == 1
+
+
+def test_distinct_clusters_on_distinct_days_do_accumulate():
+    rows = []
+    for d in range(1, 11):
+        for proxy in ("SPY", "XLE", "XLV"):
+            rows.append({"claim_type": "c", "ticker": f"{proxy}{d}",
+                         "made_at": f"2026-09-{d:02d}T12:00:00", "status": "resolved",
+                         "correct": True, "probability": 0.8,
+                         "context": {"horizon_days": 1, "sector_proxy": proxy}})
+    c = P.cluster_sample(rows)
+    assert c["n_time_blocks"] == 10 and c["n_clusters"] == 3
+    assert c["n_effective"] == 30
+
+
+def test_effective_count_never_exceeds_the_raw_count():
+    rows = [{"claim_type": "c", "ticker": f"T{i}", "made_at": f"2026-09-{1 + i:02d}T12:00:00",
+             "status": "resolved", "correct": True, "probability": 0.8,
+             "context": {"horizon_days": 1, "sector_proxy": f"P{i}"}} for i in range(5)]
+    c = P.cluster_sample(rows)
+    assert c["n_effective"] <= c["n_raw"] == 5
+
+
+def test_grade_reports_both_counts_side_by_side():
+    """A headline quoting only the raw number is the defect. Both, always."""
+    rows = [{"claim_type": "strike_holds", "ticker": "SPY",
+             "made_at": "2026-09-01T12:00:00", "status": "resolved",
+             "correct": i < 14, "probability": 0.8,
+             "context": {"horizon_days": 21}} for i in range(20)]
+    d = P.grade(rows)["by_type"]["strike_holds"]
+    assert d["n"] == 20
+    assert d["n_effective"] == 1
+    assert d["gradeable"] is False               # 20 raw rows, one real observation
+    assert "INDEPENDENT" in d["verdict"]
+    assert "20 resolved" in d["verdict"]
+
+
+def test_empty_input_does_not_divide_by_zero():
+    c = P.cluster_sample([])
+    assert c["n_effective"] == 0 and c["n_raw"] == 0

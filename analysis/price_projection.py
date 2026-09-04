@@ -99,12 +99,22 @@ def _z_for(conf: float) -> float:
 
 
 def project(spot: Optional[float], dte: Optional[int], forecast_vol_pp: Optional[float],
-            confidence: float = None) -> Optional[Dict]:
+            confidence: float = None,
+            trading_days_override: Optional[float] = None) -> Optional[Dict]:
     """The price window at expiration.
 
     `forecast_vol_pp` is annualised vol in POINTS (28.4 for 28.4%), which is what
     vol_forecast.forecast_rv returns. Returns None when any input is missing — a band drawn
     from a guessed volatility is worse than no band, because it looks identical to a real one.
+
+    `trading_days_override` exists because a graded band forecast counts its horizon in TRADING
+    days (a "5-day" claim settles on the fifth session) while an option's dte is CALENDAR days,
+    and round-tripping one into the other loses the short horizons entirely: a 1-trading-day
+    claim is 1.45 calendar days, `int()` takes it to 1, and `trading_days(1)` hands back 0.69 —
+    a 31% understatement of the horizon on exactly the band with the least room for it. Callers
+    that already know the horizon in trading days pass it here instead of laundering it through
+    a calendar figure. Everything else, `dte` included, is unchanged: one band definition, one
+    place it is computed.
     """
     conf = DEFAULT_CONFIDENCE if confidence is None else float(confidence)
     try:
@@ -114,14 +124,17 @@ def project(spot: Optional[float], dte: Optional[int], forecast_vol_pp: Optional
     if spot <= 0 or dte <= 0 or vol <= 0:
         return None
 
-    sigma_h = (vol / 100.0) * math.sqrt(trading_days(dte) / TRADING_DAYS)
+    td = trading_days(dte) if trading_days_override is None else float(trading_days_override)
+    if td <= 0:
+        return None
+    sigma_h = (vol / 100.0) * math.sqrt(td / TRADING_DAYS)
     z = _z_for(conf)
     low = spot * math.exp(-z * sigma_h)
     high = spot * math.exp(z * sigma_h)
     return {
         "spot": round(spot, 2),
         "dte": dte,
-        "trading_days": round(trading_days(dte), 1),
+        "trading_days": round(td, 1),
         "confidence": conf,
         "measured_coverage": MEASURED_COVERAGE.get(round(conf, 2)),
         "low": round(low, 2),

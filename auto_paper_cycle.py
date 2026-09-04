@@ -1403,6 +1403,42 @@ def _record_direction_forecasts() -> Dict:
         return {}
 
 
+def _record_band_forecasts() -> Dict:
+    """One dated RANGE claim per watchlist ticker per horizon, once a day.
+
+    The direction sweep above asks which WAY price goes. This asks HOW FAR — the quantity every
+    strike, credit floor and POP in the system is actually derived from, and the one VEGA has
+    never measured in production. `price_projection` has drawn these bands and quoted a
+    coverage table from a 14,900-observation backtest since the day it shipped; the ledger held
+    3,606 claims on 2026-09-03 and not one of them was a band. A backtest cannot see a live vol
+    forecast that stops updating or a spot that goes stale, so until now nothing could.
+
+    Same gate hour and same idempotence as the direction sweep, and deliberately the same
+    settlement calendar, so the two channels can be joined on the day rather than merely
+    compared in aggregate.
+
+    MEASURING INSTRUMENT ONLY. Nothing here reaches selection, sizing, or execution. A band that
+    has never been graded live is a hypothesis, and an ungraded hypothesis moving a strike is
+    how a disciplined system turns into a conviction trade.
+    """
+    if not getattr(config, "BAND_FORECAST_ENABLED", True):
+        return {}
+    after = int(os.getenv("VEGA_DIRECTION_AFTER_HOUR",
+                          str(getattr(config, "DIRECTION_RECORD_AFTER_HOUR", 14))))
+    if datetime.now().hour < after:
+        return {}
+    try:
+        from analysis import band_forecast as bf
+        stats = bf.record_watchlist()
+        _log(f"BAND FORECAST recorded={stats['recorded']} claims across "
+             f"{stats['tickers']} tickers (abstained={stats['abstained']} "
+             f"failed={stats['failed']} with_implied={stats['with_implied']})")
+        return stats
+    except Exception as e:
+        _log(f"Band forecast failed: {e}")
+        return {}
+
+
 def _record_crypto_premium_view() -> Optional[str]:
     """One dated claim per day about whether IBIT premium is worth selling.
 
@@ -1666,6 +1702,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             _record_btc_forecast()
             _resolve_predictions()
             _record_direction_forecasts()
+            _record_band_forecasts()
             _record_crypto_premium_view()
             _grade_shadow_book()
             _compact_quality_log()
@@ -1705,6 +1742,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         _record_btc_forecast()
         _resolve_predictions()
         _record_direction_forecasts()
+        _record_band_forecasts()
         _record_crypto_premium_view()
         _record_counterfactuals()
         _grade_shadow_book()
