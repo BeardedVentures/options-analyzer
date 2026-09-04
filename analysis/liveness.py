@@ -30,7 +30,8 @@ channel that cannot answer "how many graded outputs have you produced" is not in
 
 WHAT A CHECK MAY NOT DO. It may not say a channel is broken when the honest answer is that it
 is STARVED. caps_v1 has zero rows because ENTRY_HOLD is on and the board has qualified almost
-nothing since 2026-08-10 -- the channel is wired correctly and has nothing to record. Reporting
+very little since 2026-08-10 (1-2 per scan through 09-01, true zero from 09-02) -- the
+channel is wired correctly and has almost nothing to record. Reporting
 that as CRITICAL every cycle would train the operator to ignore the file, which is how the
 signal dies a second time. Starvation is reported as STARVED, with its reason, and only becomes
 CRITICAL when the reason stops being true.

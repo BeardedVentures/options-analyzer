@@ -251,7 +251,7 @@ The strike-selection hook was **not built** — see §H.
 
 ### Item 8 — `/vega/ingest` writer
 
-`vega_ingest.post_to_jarvis` forwards `scan_entry` verbatim; `_enrich_qualified_trades` is an explicit no-op. It writes no credit basis of its own and adds no fields, so it cannot be a source of bad rows independent of the scanner — and the scanner has carried a natural credit since 2026-08-10. It has also posted **zero qualified trades** for the entire drought. No live defect found; no change made.
+`vega_ingest.post_to_jarvis` forwards `scan_entry` verbatim; `_enrich_qualified_trades` is an explicit no-op. It writes no credit basis of its own and adds no fields, so it cannot be a source of bad rows independent of the scanner — and the scanner has carried a natural credit since 2026-08-10. It has also posted very few qualified trades through the drought [see correction below]. No live defect found; no change made.
 
 ### Registration (§0)
 
@@ -307,3 +307,5 @@ It **is** registered as its own **liveness channel**, because sharing a file is 
 **5. Three of the eight ordered items were already complete before the session started** (item 6's writer fix, item 7's projection overlay, most of items 4–5's prediction engine). The build doc was written against a repo state older than the repo. Given its own session-history caveat, I would treat "verify this is still true" as a required first step on any future doc of this kind — the cost of checking is minutes and the cost of not checking, this time, would have been a paused grading channel waiting for a fix that shipped on 2026-08-10.
 
 **6. One claim I am not confident in.** The `n_effective` estimate is deliberately conservative and is *not* a variance-corrected effective sample size — it is `blocks × clusters`, capped by the raw count. It cannot flatter a sample, which is the property that matters here, but it should not be quoted as though it came from a proper cluster-robust variance estimate. If the band channel ever reaches a decision boundary on these numbers, that estimator deserves replacing with a real one.
+
+> **CORRECTION, 2026-09-04.** The claim above that the board has qualified zero trades since 2026-08-10 is WRONG, and it was load-bearing in several documents this week. From `scan_log.json`: the board qualified **1-2 per scan on most days through 2026-09-01** (76 qualified across 193 scans). TRUE zero began **2026-09-02**. What happened on 2026-08-10 was commit `d6255b9`, which moved bull puts from mid to natural credit and cut the rate from 4.47/scan to 0.39/scan -- 91% of the drop. The remaining 9% is the market. See `reports/claude_VEGA_QualificationSeries_2026-09-04.md`.

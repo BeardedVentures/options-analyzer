@@ -299,3 +299,31 @@ had silently returned half the data?*
   post-selection gates when main.py rejects them DURING enumeration. Spreads failing them were
   never selectable, so counting their failure as a ranking artifact was a category error. Draw
   the enumeration/selection boundary where the code draws it before counting across it.
+- **THE DROUGHT SPLITS 91/9, AND THE LARGE HALF IS A CORRECTED MEASUREMENT.** Qualified trades
+  per scan: **4.47** under mid-credit gating (120 scans, through 08-10), **0.39** under
+  natural-credit gating (193 scans, 08-11 .. 09-01), **0.00** since 09-02 (16 scans). So 91% of
+  the fall is `d6255b9` -- VEGA no longer counting credit it cannot collect -- and 9% is the
+  tape. VIX moves 2.5 points across the entire window and explains none of the step; SPY's
+  20-day realised vol is the column that moves, and it moves LATE (13.3 -> 7.2 across the last
+  week of August), lining up with the 0.39 -> 0.00, not with 08-11. Two causes, two dates.
+
+  **State it plainly whenever the drought is discussed: the prior rate was fiction.** A board
+  qualifying six spreads a day on prices no fill could achieve was not working better in July,
+  and the mid-vs-natural defect that produced a 72% win rate against a real 8% is the same
+  defect, measured at entry instead of at exit. "No trades" is the correct output of a correct
+  system in this tape; it only looks like failure if the reason is not written down.
+
+  Full series: `reports/claude_VEGA_QualificationSeries_2026-09-04.md`.
+- **A RANKING KEY THAT OPPOSES A GATE IS A DEFECT, NOT AN OPEN QUESTION.** Recorded here with a
+  mechanism and a rate so it is not re-litigated: `select_bull_put_pair` sorts on
+  `natural_credit_to_width` and the POP gate is applied to the winner; credit-to-width is
+  monotonically anti-correlated with POP, so the ranker hands the gate the worst-POP member of
+  every family, on every ticker, by construction. Measured: 33 of 593 ticker-days (5.6%), and
+  **36.3% of the ticker-days where the winner failed a post-selection gate** had a sibling that
+  cleared everything. `pop` is 27 of 36 killers.
+
+  **The fix has a shape, for whoever takes it:** either rank on something the gates do not
+  oppose, or evaluate the post-selection gates BEFORE ranking rather than after -- which is what
+  the enumeration path already does for `delta_cap` and `otm_buffer`, and is the cheaper of the
+  two. Deferred deliberately: it changes selection, and selection changes belong to a decided
+  cohort, not to a drought.
