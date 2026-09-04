@@ -562,3 +562,24 @@ had silently returned half the data?*
   vega_candidates-selected population, which is all 57 natural-fill closed rows. The reasoning
   is now pinned in the constant's own comment so the next reader does not re-derive it and get
   it backwards.
+- **`commissions_plus_exit_cross` IS A NEW BASIS WITH NO ROWS, AND THE BOUNDARY IS ONE-WAY.**
+  All 75 closed rows are `commissions_only` and can never be otherwise -- the closing books they
+  were priced from are gone. So the first cohort gradeable on true net is one that has not
+  started, and every comparison across the boundary compares two definitions of `net` rather
+  than two populations. The new basis is STRICTLY MORE EXPENSIVE, which makes two opposite
+  errors available: "net got worse" is trivially true the moment the first
+  commissions_plus_exit_cross row closes, and "net improved" is trivially arguable by comparing
+  a new gross against an old net. `outcome_logger.net_basis_note()` returns the warning and the
+  paper-desk cohort report prints it; any new reporter that aggregates net should call it.
+- **THE EXIT CROSS IS MEASURED AND DELIBERATELY NOT GATED.** Nothing at selection time has ever
+  seen it, so a candidate whose exit would eat its own profit target passes every gate -- SMH at
+  30% of credit and AMGN at 88% both did. `projected_exit_cross_per_contract` and
+  `..._pct_of_credit` now ride on every candidate, computed from the entry book by the same
+  formula the realised cross uses. They gate nothing, and a test asserts they gate nothing.
+  Turning the ratio into a floor changes what the board builds and belongs WITH the
+  liquidity-floor decision, not ahead of it. Same shape as the chain-size instrumentation of
+  2026-09-03: measure first, decide once there are rows to decide against.
+
+  Not persisted, on purpose. The leg quotes are, so the projection is recomputable from the
+  ledger at any time, and storing it too would be a second field that can disagree with the
+  first -- exactly what `set_mark`'s docstring refuses for gross and net.

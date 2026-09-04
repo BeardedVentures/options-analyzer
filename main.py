@@ -1012,6 +1012,26 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
         # Volume / OI travel with the quotes because the strict crossability test is BOTH a
         # spread cap and a liquidity floor, and a stored verdict would freeze today's constants.
         # With these four numbers a later reader can re-run either predicate under any threshold.
+        # PROJECTED EXIT COST, MEASURED AND NOT GATED.
+        #
+        # What it would cost to cross back out of this spread if the book at exit looked like
+        # the book at entry: buy the short at its ask, sell the long at its bid, against the
+        # mark. On the four positions actually open on 2026-09-04 the realised version ran
+        # $2.00 (NKE) to $28.50 (SMH) -- and SMH cleared MAX_QUOTE_SPREAD_PCT on BOTH legs at
+        # 9.9% and 7.7%, because that gate is a ratio and this is dollars. Nothing at selection
+        # time has ever seen this number, so a candidate whose exit would eat its own profit
+        # target passes every gate: SMH at 30% of credit and AMGN at 88% both did.
+        #
+        # RECORDED, NOT ACTED ON. Turning it into a gate changes what the board builds, and that
+        # belongs with the liquidity-floor decision rather than ahead of it. Same shape as the
+        # chain-size instrumentation from 2026-09-03: measure first, decide once there are rows.
+        #
+        # Deliberately NOT persisted by record_modeled_trades. It is a pure function of the leg
+        # quotes, which ARE persisted, so storing it would be a second field that can disagree
+        # with the first -- the defect set_mark's docstring already names.
+        "projected_exit_cross_per_contract": _exit_cross_proj(short_put, long_put),
+        "projected_exit_cross_pct_of_credit": _exit_cross_pct(
+            _exit_cross_proj(short_put, long_put), metrics.get("natural_credit_per_share")),
         "short_volume": short_put.get("volume"), "short_oi": short_put.get("open_interest"),
         "long_volume": long_put.get("volume"), "long_oi": long_put.get("open_interest"),
         "short_bid": short_put.get("bid"), "short_ask": short_put.get("ask"),
@@ -1897,3 +1917,24 @@ if __name__ == "__main__":
     logger.info(f"[main] Running {session} scan"
                 + ("" if args.session else " (session auto-detected from clock)"))
     run_scan(session)
+
+
+def _exit_cross_proj(short_leg, long_leg):
+    """Projected cost of crossing back out, from the entry book. See the call site."""
+    try:
+        from analysis.outcome_logger import exit_cross_per_contract
+        return exit_cross_per_contract({
+            "short_bid": (short_leg or {}).get("bid"), "short_ask": (short_leg or {}).get("ask"),
+            "long_bid": (long_leg or {}).get("bid"), "long_ask": (long_leg or {}).get("ask")})
+    except Exception:
+        return None
+
+
+def _exit_cross_pct(cross, credit_per_share):
+    """The cross as a share of the credit collected -- the number that decides whether a profit
+    target is reachable. SMH 30%, AMGN 88% on 2026-09-04; both passed every gate."""
+    try:
+        c = float(credit_per_share) * 100.0
+        return round(float(cross) / c, 4) if (cross is not None and c > 0) else None
+    except (TypeError, ValueError):
+        return None

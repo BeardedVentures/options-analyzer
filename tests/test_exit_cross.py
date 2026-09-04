@@ -97,3 +97,84 @@ def test_net_basis_makes_the_two_populations_unpoolable():
     b = _open_and_close(None)
     assert a["net_basis"] != b["net_basis"]
     assert a["realized_net_pl_per_contract"] < b["realized_net_pl_per_contract"]
+
+
+# ── the mixed-basis guard ────────────────────────────────────────────────────
+
+def test_a_single_basis_produces_no_warning():
+    rows = [{"status": "closed", "net_basis": "commissions_only"} for _ in range(5)]
+    assert ol.net_basis_note(rows) is None
+
+
+def test_mixing_the_two_bases_warns_and_names_both():
+    """`net` changed definition on 2026-09-04 and the new one is strictly more expensive.
+
+    All 75 pre-existing rows are commissions_only and can never be otherwise -- the books they
+    were priced from are gone -- so any report spanning the boundary compares two arithmetics.
+    """
+    rows = ([{"status": "closed", "net_basis": "commissions_only"} for _ in range(75)]
+            + [{"status": "closed", "net_basis": "commissions_plus_exit_cross"}])
+    note = ol.net_basis_note(rows)
+    assert note and "MIXED NET BASIS" in note
+    assert "75 commissions_only" in note and "1 commissions_plus_exit_cross" in note
+    assert "not read a difference between them as a change in performance" in note
+
+
+def test_open_rows_do_not_trigger_the_warning():
+    rows = [{"status": "closed", "net_basis": "commissions_only"},
+            {"status": "open"}, {"status": "modeled"}]
+    assert ol.net_basis_note(rows) is None
+
+
+def test_a_row_without_the_field_counts_as_commissions_only():
+    """Every row written before the field existed was priced that way. Absence is not unknown."""
+    rows = [{"status": "closed"}, {"status": "closed", "net_basis": "commissions_only"}]
+    assert ol.net_basis_note(rows) is None
+
+
+# ── the projected cross is instrumentation, not a gate ───────────────────────
+
+def test_the_projection_uses_the_same_formula_as_the_realised_cross():
+    import main
+    leg_s = {"bid": 3.35, "ask": 3.70}
+    leg_l = {"bid": 2.76, "ask": 2.98}
+    assert main._exit_cross_proj(leg_s, leg_l) == pytest.approx(28.50)   # the real SMH book
+
+
+def test_the_projection_is_expressed_against_the_credit():
+    import main
+    # SMH: $28.50 cross against a $0.95 credit = 30% of the credit
+    assert main._exit_cross_pct(28.50, 0.95) == pytest.approx(0.30, abs=0.005)
+
+
+def test_the_projection_refuses_rather_than_guessing():
+    import main
+    assert main._exit_cross_proj(None, {"bid": 1, "ask": 2}) is None
+    assert main._exit_cross_proj({"bid": 0, "ask": 2}, {"bid": 1, "ask": 2}) is None
+    assert main._exit_cross_pct(None, 1.0) is None
+    assert main._exit_cross_pct(10.0, 0) is None
+
+
+def test_the_projection_is_NOT_persisted_because_it_is_derivable():
+    """A stored derivation is a second field that can disagree with the first.
+
+    The leg quotes ARE persisted, so this number is recomputable from the ledger at any time.
+    Storing it too would reproduce exactly what set_mark's docstring refuses.
+    """
+    import inspect
+    src = inspect.getsource(ol.record_modeled_trades)
+    assert "projected_exit_cross" not in src
+
+
+def test_it_gates_nothing():
+    """Recorded, not acted on -- turning it into a gate changes what the board builds."""
+    import inspect
+    import main, multi_strategy
+    for mod in (main, multi_strategy):
+        src = inspect.getsource(mod)
+        i = src.find("projected_exit_cross_per_contract")
+        assert i > 0
+        # no comparison operator applied to the projection anywhere
+        assert "projected_exit_cross_per_contract >" not in src
+        assert "projected_exit_cross_pct_of_credit >" not in src
+        assert "MAX_EXIT_CROSS" not in src

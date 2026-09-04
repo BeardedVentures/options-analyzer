@@ -356,6 +356,12 @@ def _print_fill_cohorts(closed):
               f"avg ${sum(pl)/len(pl):+7.2f}/trade")
     if "natural" not in groups:
         print("   natural  — no closed trades yet; live-comparable track record starts at n=0.")
+    # Fill model is not the only basis these rows can disagree on. `net` itself changed
+    # definition on 2026-09-04, and a report that groups by fill model while straddling that
+    # boundary compares two arithmetics and calls it performance.
+    _nb = ol.net_basis_note([r for rs in groups.values() for r in rs])
+    if _nb:
+        print(f"   !! {_nb}")
     print("=" * 62)
 
 

@@ -902,6 +902,40 @@ def exit_cross_per_contract(exit_legs: Optional[Dict]) -> Optional[float]:
     return round(((sa - smid) + (lmid - lb)) * 100.0, 2)
 
 
+def net_basis_note(rows) -> Optional[str]:
+    """A warning when a set of closed rows does not share one definition of `net`, else None.
+
+    `net_basis` split the ledger on 2026-09-04: rows closed before it are `commissions_only`,
+    rows closed after are `commissions_plus_exit_cross` wherever the closing book was readable.
+    The second basis is STRICTLY MORE EXPENSIVE -- it subtracts a cost the first pretended was
+    zero -- so any comparison across the boundary is a comparison of two definitions, not of two
+    populations.
+
+    That makes two opposite errors available, and both are easy to make by accident:
+
+      * "net P/L got worse" -- trivially true the moment the first commissions_plus_exit_cross
+        row closes, for the reason above and not because anything changed about the trading.
+      * "net P/L improved" -- trivially arguable by comparing a new row's gross against an old
+        row's net, which is the same units mistake in the other direction.
+
+    All 75 rows closed before this change are commissions_only and can never be otherwise: the
+    closing books they were priced from are gone. So the first cohort gradeable on true net is
+    one that has not started, and this note exists so no report quietly straddles that line.
+    """
+    seen = {}
+    for r in rows or ():
+        if r.get("status") != "closed":
+            continue
+        seen[r.get("net_basis") or "commissions_only"] = seen.get(
+            r.get("net_basis") or "commissions_only", 0) + 1
+    if len(seen) < 2:
+        return None
+    parts = ", ".join(f"{n} {b}" for b, n in sorted(seen.items()))
+    return ("MIXED NET BASIS (" + parts + ") — these rows do not share a definition of `net`. "
+            "commissions_plus_exit_cross subtracts the exit cross; commissions_only assumes it "
+            "was zero. Do not read a difference between them as a change in performance.")
+
+
 def set_close(trade_id: str, exit_price: float, outcome: str,
               reason: Optional[str] = None,
               effective_stop_multiplier: Optional[float] = None,
