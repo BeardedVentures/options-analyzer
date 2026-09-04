@@ -401,3 +401,34 @@ had silently returned half the data?*
   `leg_quotes`, never as a derived ratio -- a stored verdict bakes in today's definition of "too
   wide", and the whole lesson of 0.35-vs-0.80 is that one threshold can mean two things. Raw
   quotes can be re-judged under any threshold later.
+- **THE LOOSE PREDICATE'S EXPOSURE, SIZED 2026-09-04 — and it is a DIFFERENT defect from
+  mid-vs-natural, not the same one wearing a mask.** Measured on the 18 reachable tickers that
+  enumerated nothing on the 09-04 09:35 scan:
+
+        population        band strikes   loose admits   strict admits
+        illiquid tail          164        119 (73%)       48 (29%)
+        liquid sample (6)       91         86 (95%)       63 (69%)
+
+  The gap is **2.5x in the tail against 1.4x in the liquid sample** -- the earlier six-name
+  reading understated it because SPY and NVDA sit near a 0.01 relative spread. Of the structures
+  `_best_wing` builds on those names right now, **7 of 15 survive the strict test**; of the 8
+  refusals, 4 are liquidity alone and 4 involve a too-wide leg.
+
+  **The recorded credits are NOT fiction, and saying so was my error.** The call path prices at
+  the NATURAL credit -- sell the short bid, buy the long ask -- which is the fillable price by
+  construction. A wide book does not make it unreachable; it makes it smaller, and the credit
+  floors then judge it. mid-vs-natural recorded a price obtainable in principle by nobody. This
+  records a real price whose SIZE, EXIT and LIVENESS are untested.
+
+  **And the tail failures are thin markets, not wide ones.** GE 350C: spread 8.2%, volume 1,
+  OI 26. BAC 65C: spread 13.1%, volume 6, OI 78. USB 66C: volume 0, OI 13. Most refused legs are
+  quoted more tightly than strikes that pass; what catches them is the liquidity floor. So the
+  live risk is not the entry price -- it is that the exit crosses the same spread again on a
+  strike with single-digit volume, and that a multi-contract order has no demonstrated
+  counterparty. The strict predicate was protecting the ROUND TRIP.
+
+  Not fixed: bringing `_tradeable` to parity changes what the board builds, mid-drought, on the
+  only path still producing -- and "no volume today" is not "cannot be traded". The liquidity
+  floors differ 10-25x (`volume>=1 or OI>=10` against `volume>=25 or OI>=100`) and neither was
+  chosen against the other; that is a decision, not a bug fix.
+  Full measurement: `reports/claude_VEGA_PredicateExposure_2026-09-04.md`.
