@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -219,6 +219,28 @@ def _check_predictions() -> Dict:
                      "so the resolved-slice hit rate is not an accuracy estimate")}
 
 
+def _weekdays_since(day_iso: str, today: Optional[date] = None) -> Optional[int]:
+    """Weekdays between an ISO date and today, or None if the date is unreadable.
+
+    Weekdays, not calendar days, so a Friday write is not two days stale on Sunday. Holidays are
+    not modelled here for the same reason direction_forecast declines to model them; the caller
+    carries a tolerance instead.
+    """
+    try:
+        d = date.fromisoformat(str(day_iso)[:10])
+    except (ValueError, TypeError):
+        return None
+    today = today or date.today()
+    if d >= today:
+        return 0
+    n, cur = 0, d
+    while cur < today:
+        cur += timedelta(days=1)
+        if cur.weekday() < 5:
+            n += 1
+    return n
+
+
 def _check_band_forecasts() -> Dict:
     """The range channel, checked SEPARATELY from the prediction ledger it shares a file with.
 
@@ -241,6 +263,32 @@ def _check_band_forecasts() -> Dict:
                            "shipped; until rows land here that table is the only evidence the "
                            "band is calibrated, and a backtest cannot see a live vol forecast "
                            "that has stopped updating.")}
+
+    # STALENESS FIRST, and it is the half that matters.
+    #
+    # Every other check here asks whether the sweep produced anything when it ran. None of them
+    # can see the sweep no longer being CALLED -- a scheduler entry that stops firing, a config
+    # flag flipped off, an exception swallowed one frame up. That failure leaves the ledger full
+    # of perfectly healthy rows that simply stop arriving, and it is the exact shape of how this
+    # channel spent its whole life empty while `prediction_ledger` reported OK.
+    #
+    # Judged in WEEKDAYS with a tolerance rather than in calendar days, because a weekend is not
+    # a fault and `next_trading_day` does not model holidays. One market holiday costs one
+    # weekday, so the default tolerance of 2 absorbs it; a channel that has actually stopped
+    # accumulates weekdays quickly and trips regardless. Erring toward one extra day of silence
+    # is deliberate -- a CRITICAL that fires on Labor Day is a CRITICAL nobody reads by
+    # November, which is how the shadow_book message stopped being believed.
+    newest = max((str(r.get("made_at") or "")[:10] for r in rows), default="")
+    stale_days = _weekdays_since(newest)
+    max_stale = int(getattr(config, "BAND_STALE_MAX_WEEKDAYS", 2))
+    if stale_days is not None and stale_days > max_stale:
+        return {"status": CRITICAL, "graded": 0, "rows": len(rows), "newest": newest,
+                "stale_weekdays": stale_days,
+                "reason": (f"the band sweep has written nothing for {stale_days} weekdays — "
+                           f"newest range claim is {newest}. The ledger is not empty and the "
+                           f"other prediction channels may look fine; this is the sweep no "
+                           f"longer being CALLED, which no in-sweep check can see.")}
+
     resolved = sum(1 for r in rows if r.get("status") == "resolved")
     horizons = {str(r.get("claim_type")) for r in rows
                 if not str(r.get("claim_type")).endswith("_baseline")}
@@ -254,6 +302,7 @@ def _check_band_forecasts() -> Dict:
                            f"first settlement.")}
     return {"status": OK, "graded": resolved, "rows": len(rows),
             "open": len(rows) - resolved, "horizons": sorted(horizons),
+            "newest": newest, "stale_weekdays": stale_days,
             "note": ("coverage is the measurement here, not hit rate: an 80% band that contains "
                      "price 95% of the time is mis-specified, not good. Discrimination is "
                      "meaningless for this channel -- every claim carries the same stated "

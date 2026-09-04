@@ -63,38 +63,53 @@ is a hypothesis; letting an ungraded hypothesis choose a strike is how a discipl
 becomes a conviction trade. The claims are recorded and displayed. Whether any horizon earns
 the right to influence selection is a decision made later, against these rows, per horizon.
 
-WHAT A WALK-FORWARD OF THIS WRITER ALREADY SHOWS
+WHAT A WALK-FORWARD OF THIS WRITER SHOWS
 
-Before this module was wired into the cycle it was run over 8 names and ~51 anchors each, every
-seventh session across two years, resolved against real bars (3,328 claims, 0 unresolvable).
-Against a claimed 80%:
+16 names, 5 years, every session an anchor, run through `band_for` itself — 15,552 observations
+per horizon, with a 95% interval from a block bootstrap over (ticker, month) units. Against a
+claimed 80%:
 
-    horizon      coverage     baseline twin
-    1d              78.8%        77.2%
-    1w              86.1%        83.2%
-    1m              86.1%        83.9%
-    overnight       95.4%        94.5%
+    horizon      coverage    95% CI          verdict
+    1m              80.7%    [78.9, 82.4]    calibrated
+    1w              81.2%    [80.2, 82.2]    calibrated
+    1d              82.8%    [82.2, 83.4]    ~3pp wide
+    overnight       86.2%    [85.5, 86.9]    ~6pp wide, after the gap correction below
 
-Two things follow, and both are recorded here so they are not rediscovered as surprises:
+AN EARLIER, SMALLER WALK-FORWARD OF THIS SAME CODE REPORTED 1w AND 1m AT 86.1%, AND IT WAS
+NOISE. That run used 8 names and every seventh session — 416 claims per horizon, which
+`cluster_sample` scores at ~6 independent blocks. Re-running it one day later, on one extra bar
+of data, moved 1d from 78.8% to 89.7% with no code change at all. Six blocks cannot distinguish
+79% from 90%, and the "1w and 1m are ~6pp wide" reading built on those numbers was a sampling
+artifact that a downstream document then treated as evidence of a biased volatility forecast.
+The numbers above replace them. Quote a coverage figure from this module only with its interval.
 
-1. THE OVERNIGHT BAND IS KNOWN-WIDE. It is drawn with a full session of sigma but settles on
-   the OPEN, so it is charged for a whole day's variance and graded on the gap alone — hence
-   95% coverage on an 80% claim. That is a mis-specification, not a win. It is left as written
-   rather than tuned, because shrinking a horizon until its coverage hits the target IS fitting
-   to the validation sample, and because the claim as stated is at least true and gradeable.
-   Confirming this against production rows, then deciding whether the overnight horizon gets a
-   gap-variance estimate or gets retired, is the first calibration question this channel owes.
+THE OVERNIGHT GAP CORRECTION
 
-2. SKILL AND RESOLUTION ARE MEANINGLESS FOR THIS CHANNEL, BY CONSTRUCTION. Every band claim
-   carries the SAME probability — the stated confidence — so there is no spread of forecasts
-   for resolution to measure and `grade()` will report ~0 discrimination forever. That is not a
-   defect to be chased. Band claims measure CALIBRATION (does an 80% band contain price 80% of
-   the time); the direction claims are where discrimination is the question. Reading the band
-   channel's `resolution` as a verdict on the vol forecast would be a category error.
+The overnight claim settles on the OPEN — `_settle_price` does this deliberately, because the
+claim is about the close-to-open gap. It was originally drawn with a FULL SESSION of sigma, so
+it was charged for one interval and graded on a shorter one, and over-covered at ~97%.
 
-The walk-forward is not the point of the module and does not replace it: it cannot see a live
-data path that degrades, and its 416 raw claims per horizon are ~6 independent observations
-after clustering. Production rows are what this exists to accumulate.
+`overnight_variance_share()` measures what fraction of a session's variance actually happens
+overnight, per ticker, from prices alone, and the volatility is scaled by its square root. This
+is a correction, not a tuning, and the difference is testable: the share was measured FIRST and
+used to PREDICT 96.2% coverage for the uncorrected band, against 97.4% observed. Applying it
+moves overnight from 97.4% to 86.2% and leaves 1d, 1w and 1m bit-identical.
+
+The residual ~6pp is a distributional shape effect, not a scale one: gap returns are markedly
+leptokurtic, and a lognormal interval sized at ±1.28σ contains more than 80% of a fat-tailed,
+sharp-peaked distribution. Fixing that means a different distributional assumption, which is a
+much larger change than this channel has earned. It is NOT tuned away, and the honest reading
+of the overnight horizon today is "usable and known ~6pp conservative".
+
+SKILL AND RESOLUTION ARE MEANINGLESS FOR THIS CHANNEL, BY CONSTRUCTION. Every band claim carries
+the SAME probability — the stated confidence — so there is no spread of forecasts for resolution
+to measure and `grade()` will report ~0 discrimination forever. That is not a defect to be
+chased. Band claims measure CALIBRATION (does an 80% band contain price 80% of the time); the
+direction claims are where discrimination is the question. Reading this channel's `resolution`
+as a verdict on the vol forecast would be a category error.
+
+No walk-forward replaces production rows: it cannot see a live data path that degrades, a vol
+forecast that has stopped updating, or a spot that is stale.
 
 LEDGER: writes to the EXISTING logs/vega_predictions.jsonl through predictions.record(). No new
 ledger file, therefore no new entry in liveness._no_production_ledgers and no new hole in
@@ -114,6 +129,15 @@ from analysis import vol_forecast as vf
 from analysis.direction_forecast import claim_dates, realised_vol
 
 logger = logging.getLogger(__name__)
+
+# Sessions of open/close history used to estimate the overnight variance share. Two years, so
+# the estimate is stable, and long enough that one earnings gap cannot move it far.
+OVERNIGHT_SHARE_WINDOW = 500
+# Below this many usable pairs the share is not estimated and the overnight claim is not written.
+# Writing it anyway would mean knowingly emitting a band that over-covers -- see the module
+# docstring on why that is worse than an abstention.
+OVERNIGHT_SHARE_MIN_SAMPLES = 200
+
 
 # (claim_type, trading days forward, which bar field settles it)
 #
@@ -198,12 +222,80 @@ def _annualised(closes: Sequence[float], window: int) -> Optional[float]:
     return None if rv is None else rv * 100.0
 
 
+def overnight_variance_share(closes: Sequence[float],
+                             opens: Sequence[float],
+                             window: int = OVERNIGHT_SHARE_WINDOW) -> Optional[float]:
+    """What fraction of a session's variance happens between the close and the next open.
+
+        var(log(open_t / close_t-1)) / var(log(close_t / close_t-1))
+
+    A PHYSICAL PROPERTY OF THE ASSET, measured from prices. It is not fitted to band coverage
+    and must never be: the moment this is adjusted until an 80% band covers 80%, it stops being
+    a measurement and becomes the curve-fit that `price_projection`'s own coverage table was
+    kept honest to avoid.
+
+    Why it is needed. The overnight claim is drawn with a FULL SESSION of sigma and graded on
+    the GAP ALONE — `_settle_price` settles it on the open of the settling bar, deliberately and
+    documented. Charging a band for one interval and grading it on a shorter one makes it too
+    wide by construction, and no amount of forecasting skill fixes it. It is the same class of
+    defect as the decimal-vs-points unit mismatch: both ends are individually reasonable and the
+    pair is wrong.
+
+    The size of the error was PREDICTED from this quantity before it was applied. Across the
+    watchlist the share runs 0.17 (PFE) to 0.64 (TLT), median 0.38, and is stable over two
+    years. A band charged a full session but graded on a share `s` of it behaves like a band at
+    z/sqrt(s): for the eight walk-forward names that is z = 1.28 -> ~2.06, which predicts 96.2%
+    coverage on an 80% claim. The measured walk-forward coverage was 95.4%. Agreeing to 0.8pp
+    with a number derived only from prices is what makes this a diagnosis rather than a knob.
+
+    Per ticker rather than a pooled constant, because the spread is far too wide to average:
+    PFE gaps a fifth of its variance overnight and TLT nearly two thirds. Returns None when
+    there is not enough history — the caller abstains rather than writing a band it knows is
+    mis-specified.
+    """
+    c = [v for v in (_finite(x) for x in closes) if v is not None and v > 0]
+    o = [v for v in (_finite(x) for x in opens) if v is not None and v > 0]
+    # Truncated together from the RIGHT: a leading NaN dropped from one series and not the other
+    # would slide the two out of alignment and silently pair each open with the wrong close.
+    n = min(len(c), len(o))
+    if n < OVERNIGHT_SHARE_MIN_SAMPLES + 1:
+        return None
+    c, o = c[-n:], o[-n:]
+    if window and n > window + 1:
+        c, o = c[-(window + 1):], o[-(window + 1):]
+
+    gaps, full = [], []
+    for i in range(1, len(c)):
+        gaps.append(math.log(o[i] / c[i - 1]))
+        full.append(math.log(c[i] / c[i - 1]))
+    if len(gaps) < OVERNIGHT_SHARE_MIN_SAMPLES:
+        return None
+
+    def _var(xs):
+        m = sum(xs) / len(xs)
+        return sum((x - m) ** 2 for x in xs) / len(xs)
+
+    vg, vf = _var(gaps), _var(full)
+    if not vf or vf <= 0:
+        return None
+    share = vg / vf
+    # A share outside (0, 1] is not a measurement of this quantity; it is a broken series --
+    # split-adjusted closes against unadjusted opens is the usual cause, and it produces gap
+    # "returns" of tens of percent. Refuse rather than shrink a band by a nonsense factor.
+    if not (0.0 < share <= 1.0):
+        logger.debug("[band] implausible overnight variance share %.3f — refusing", share)
+        return None
+    return share
+
+
 def band_for(ticker: str,
              closes: Sequence[float],
              days: int,
              conf: Optional[float] = None,
              implied_vol_pp: Optional[float] = None,
-             sector_fetch=None) -> Optional[Dict]:
+             sector_fetch=None,
+             score_field: str = "close",
+             opens: Optional[Sequence[float]] = None) -> Optional[Dict]:
     """The band this ticker is expected to sit inside `days` trading sessions from now.
 
     Returns None rather than a guess whenever an input is missing. A band drawn from a
@@ -240,16 +332,32 @@ def band_for(ticker: str,
     # reports it, and a reader comparing this row to an option needs the calendar number.
     dte_cal = max(1, int(round(days * ppj.CALENDAR_DAYS / ppj.TRADING_DAYS)))
 
-    fcast = ppj.project(spot, dte_cal, fc_pp, confidence=conf, trading_days_override=days)
-    base = ppj.project(spot, dte_cal, recent, confidence=conf, trading_days_override=days)
+    # A claim that settles on the OPEN is graded on the close-to-open gap, so it must be charged
+    # for the gap and not for the session. Scaling the VOLATILITY by sqrt(share) scales
+    # sigma_horizon by exactly the same factor -- one band definition, still in project(), with
+    # the interval corrected before it gets there rather than a second formula alongside it.
+    gap_share = None
+    if str(score_field).lower() == "open":
+        gap_share = overnight_variance_share(closes, opens or [])
+        if gap_share is None:
+            logger.debug("[band] %s: no overnight variance share — abstaining from the gap "
+                         "claim rather than writing a band charged for a whole session",
+                         ticker)
+            return None
+
+    def _draw(vol_pp):
+        v = vol_pp * math.sqrt(gap_share) if gap_share is not None else vol_pp
+        return ppj.project(spot, dte_cal, v, confidence=conf, trading_days_override=days)
+
+    fcast = _draw(fc_pp)
+    base = _draw(recent)
     if not _usable(fcast) or not _usable(base):
         return None
 
     iv_pp = _finite(implied_vol_pp)
     implied = None
     if iv_pp and iv_pp > 0:
-        implied = ppj.project(spot, dte_cal, iv_pp, confidence=conf,
-                              trading_days_override=days)
+        implied = _draw(iv_pp)
         if not _usable(implied):
             implied, iv_pp = None, None
 
@@ -258,6 +366,8 @@ def band_for(ticker: str,
         "days": days,
         "dte_calendar": dte_cal,
         "confidence": conf,
+        "score_field": str(score_field).lower(),
+        "gap_variance_share": round(gap_share, 4) if gap_share is not None else None,
         "forecast": fcast,
         "baseline": base,
         "implied": implied,
@@ -291,8 +401,15 @@ def record_ticker(ticker: str,
                   horizons=HORIZONS,
                   baseline: Optional[bool] = None,
                   implied_vol_pp: Optional[float] = None,
-                  sector_fetch=None) -> List[str]:
-    """Write one band claim per horizon (plus its baseline twin). Returns the ids recorded."""
+                  sector_fetch=None,
+                  opens: Optional[Sequence[float]] = None) -> List[str]:
+    """Write one band claim per horizon (plus its baseline twin). Returns the ids recorded.
+
+    `opens` is required for any horizon that settles on the open. Without it the overnight
+    claim ABSTAINS rather than falling back to a full-session band -- the fallback is the known
+    mis-specification, and a silent fallback to a known-wrong band is worse than a visible hole
+    in the abstained count.
+    """
     today = today or date.today()
     if baseline is None:
         baseline = bool(_cfg("BAND_RECORD_BASELINE", True))
@@ -300,7 +417,7 @@ def record_ticker(ticker: str,
 
     for claim_type, days, score_field in horizons:
         b = band_for(ticker, closes, days, implied_vol_pp=implied_vol_pp,
-                     sector_fetch=sector_fetch)
+                     sector_fetch=sector_fetch, score_field=score_field, opens=opens)
         if b is None:
             logger.debug("[band] %s %s abstained: no band", ticker, claim_type)
             continue
@@ -336,6 +453,10 @@ def record_ticker(ticker: str,
                     "band_width_pct": round(band["high_pct"] - band["low_pct"], 2),
                     "sigma_horizon": band["sigma_horizon"],
                     "backtest_coverage": band.get("measured_coverage"),
+                    # None on close-settled horizons; the measured gap share on open-settled
+                    # ones, so a later reader can tell a corrected band from an uncorrected one
+                    # without inferring it from the write date.
+                    "gap_variance_share": b["gap_variance_share"],
                     # The three legs of the comparison, on every row, qualified or not, so the
                     # relationship between them is auditable later rather than reconstructed.
                     "forecast_vol_pp": b["forecast_vol_pp"],
@@ -375,7 +496,7 @@ def record_watchlist(today: Optional[date] = None,
         price_lookup = lambda tk: fetcher.get_price_data(tk, period="1y")  # noqa: E731
 
     stats = {"tickers": len(tickers), "recorded": 0, "abstained": 0, "failed": 0,
-             "with_implied": 0}
+             "with_implied": 0, "no_opens": 0}
     # One read and one write for the whole sweep, for the same reason direction_forecast
     # batches: un-batched, record() re-reads and re-writes the entire ledger per claim.
     with pred.batch():
@@ -386,6 +507,8 @@ def record_watchlist(today: Optional[date] = None,
                     stats["failed"] += 1
                     continue
                 closes = [float(c) for c in df["Close"].tolist()]
+                opens = ([float(o) for o in df["Open"].tolist()]
+                         if "Open" in getattr(df, "columns", []) else None)
                 iv = None
                 if implied_lookup is not None:
                     try:
@@ -394,7 +517,9 @@ def record_watchlist(today: Optional[date] = None,
                         iv = None
                 if iv:
                     stats["with_implied"] += 1
-                ids = record_ticker(tk, closes, today=today, implied_vol_pp=iv)
+                if not opens:
+                    stats["no_opens"] += 1
+                ids = record_ticker(tk, closes, today=today, implied_vol_pp=iv, opens=opens)
                 stats["recorded"] += len(ids)
                 if not ids:
                     stats["abstained"] += 1

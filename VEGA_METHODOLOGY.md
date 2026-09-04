@@ -101,3 +101,22 @@ had silently returned half the data?*
 - **Any new ledger, journal, or log file must be registered in the shared test-isolation helper
   and in the liveness rule in the same commit that creates it.** An autouse guard that enumerates
   known ledgers protects only the paths that existed when it was written.
+- **Every build doc gets a "verify this is still true" pass as step one.** A doc written from
+  session logs describes the repo at the moment those logs were written, not the repo you are
+  about to change. Three of eight items in the 2026-09-03 build doc were already complete when
+  it was written; acting on it unchecked would have paused a live grading channel to wait for a
+  fix that shipped on 2026-08-10. Confirm before executing. Cost: minutes.
+- **A coverage, hit rate, or bias figure is quoted with its interval or it is not quoted.** The
+  same walk-forward of the same unchanged code reported 1-day band coverage at 78.8% one day
+  and 89.7% the next, because 416 claims across 8 correlated names is ~6 independent blocks.
+  Those numbers were then read as evidence of a biased volatility forecast and became the
+  headline task of the next build doc. `predictions.cluster_sample()` exists to make the
+  effective count visible; run the estimate at a sample size that can support the claim, and
+  report the interval beside the point estimate.
+- **Correcting a measured mis-specification is not tuning; the difference is whether the number
+  came from outside the thing being fixed.** The overnight band over-covered because it was
+  charged a full session of sigma and graded on the close-to-open gap. The fix estimates the
+  overnight share of variance *from prices*, and it was validated by PREDICTING the observed
+  over-coverage (96.2% predicted, 97.4% observed) before being applied. Adjusting the same
+  parameter until coverage read 80% would have been the curve-fit. Ask: was the correction
+  derived from the outcome it is judged on?

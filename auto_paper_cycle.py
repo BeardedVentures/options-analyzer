@@ -1429,13 +1429,48 @@ def _record_band_forecasts() -> Dict:
         return {}
     try:
         from analysis import band_forecast as bf
+        from analysis import predictions as pred
         stats = bf.record_watchlist()
-        _log(f"BAND FORECAST recorded={stats['recorded']} claims across "
-             f"{stats['tickers']} tickers (abstained={stats['abstained']} "
-             f"failed={stats['failed']} with_implied={stats['with_implied']})")
+
+        # The sweep audits ITSELF, in the log the operator already reads. Every number here
+        # answers a way this channel has actually failed or could fail silently: it wrote
+        # nothing; it wrote for two tickers out of fifty-four; it wrote rows carrying a NaN that
+        # no strict JSON reader will ever parse back.
+        band_rows = [r for r in pred.load()
+                     if str(r.get("claim_type") or "").startswith("band_contains")]
+        newest = max((str(r.get("made_at") or "")[:10] for r in band_rows), default="never")
+        nonfinite = sum(
+            1 for r in band_rows
+            if any(t in json.dumps((r.get("context") or {})) for t in ("NaN", "Infinity")))
+        covered = len({r.get("ticker") for r in band_rows
+                       if str(r.get("made_at") or "")[:10] == datetime.now().date().isoformat()})
+        _log(f"BAND FORECAST recorded={stats['recorded']} claims  "
+             f"tickers={covered}/{stats['tickers']} "
+             f"abstained={stats['abstained']} failed={stats['failed']} "
+             f"no_opens={stats.get('no_opens', 0)} with_implied={stats['with_implied']}  "
+             f"ledger_rows={len(band_rows)} newest={newest} non_finite={nonfinite}")
+
+        # Zero written with a populated watchlist is not starvation, it is a broken channel, and
+        # it must be as loud as the liveness banner rather than a quiet count in a summary line.
+        if stats["tickers"] and not stats["recorded"]:
+            _log(f"!!! MEASUREMENT CHANNEL CRITICAL: band_forecast wrote 0 claims across "
+                 f"{stats['tickers']} watchlist tickers "
+                 f"(abstained={stats['abstained']} failed={stats['failed']}). The range claim "
+                 f"is the only direct measurement of the vol forecast every strike depends on.")
+        elif not stats["tickers"]:
+            _log("BAND FORECAST starved: the watchlist is empty, so there is nothing to "
+                 "forecast. Not a fault.")
+        if nonfinite:
+            _log(f"!!! MEASUREMENT CHANNEL CRITICAL: band_forecast has {nonfinite} row(s) "
+                 f"carrying a non-finite value. json.dumps emits a bare NaN token, which is "
+                 f"not valid JSON — these rows are unreadable by any strict parser.")
         return stats
     except Exception as e:
-        _log(f"Band forecast failed: {e}")
+        # An exception here used to mean the channel simply stopped, quietly, with the rest of
+        # the cycle reporting success. Named at the same volume as a dead channel, because that
+        # is what it is.
+        _log(f"!!! MEASUREMENT CHANNEL CRITICAL: band_forecast raised and wrote nothing: "
+             f"{type(e).__name__}: {e}")
         return {}
 
 

@@ -198,3 +198,74 @@ def test_report_puts_the_worst_first():
     }
     lines = L.report(results)
     assert "CRITICAL" in lines[0] and "OK" in lines[-1]
+
+
+# ── band-channel heartbeat ────────────────────────────────────────────────────
+#
+# The half that matters is STALENESS. Every other check asks whether the sweep produced
+# anything WHEN IT RAN; none of them can see it no longer being called. A heartbeat that cannot
+# return CRITICAL reproduces, one level up, the exact defect it exists to catch.
+
+import datetime as _dt
+
+
+def _band_rows(day, n=8, status="resolved"):
+    return [{"claim_type": "band_contains_1w", "status": status,
+             "made_at": f"{day}T14:50:00", "ticker": f"T{i}"} for i in range(n)]
+
+
+def test_a_stale_band_channel_is_CRITICAL_even_though_the_ledger_is_full(tmp_path, monkeypatch):
+    """The failure this catches: the sweep stops being CALLED. Rows stay healthy, and stop."""
+    _write(tmp_path, monkeypatch, "vega_predictions.jsonl", _band_rows("2026-08-20"))
+    r = L._check_band_forecasts()
+    assert r["status"] == L.CRITICAL
+    assert "no longer being CALLED" in r["reason"]
+    assert r["stale_weekdays"] > 2
+
+
+def test_a_fresh_band_channel_is_OK(tmp_path, monkeypatch):
+    today = _dt.date.today().isoformat()
+    _write(tmp_path, monkeypatch, "vega_predictions.jsonl", _band_rows(today))
+    r = L._check_band_forecasts()
+    assert r["status"] == L.OK and r["stale_weekdays"] == 0
+
+
+def test_a_weekend_is_not_staleness(tmp_path, monkeypatch):
+    """Counted in weekdays, so a Friday write is not two days stale on Sunday."""
+    friday = _dt.date(2026, 9, 4)
+    sunday = _dt.date(2026, 9, 6)
+    assert L._weekdays_since(friday.isoformat(), sunday) == 0
+
+
+def test_one_market_holiday_does_not_trip_the_staleness_alarm():
+    """`next_trading_day` does not model holidays, so the tolerance carries them.
+
+    A CRITICAL that fires every Labor Day is a CRITICAL nobody reads by November -- which is
+    how the shadow_book message stopped being believed.
+    """
+    # The scenario that actually occurs: the sweep writes on Friday, Monday is a market
+    # holiday so no cycle runs, and the check fires on Tuesday MORNING -- before that day's
+    # sweep, which is gated to the afternoon. Two weekdays have passed and nothing is wrong.
+    friday = _dt.date(2026, 9, 4)
+    tuesday_after_a_monday_holiday = _dt.date(2026, 9, 8)
+    assert L._weekdays_since(friday.isoformat(), tuesday_after_a_monday_holiday) == 2
+    assert 2 <= int(getattr(L.config, "BAND_STALE_MAX_WEEKDAYS", 2))
+
+    # And a genuinely missed session still trips: Thursday write, Friday's cycle dead, holiday
+    # Monday, checked Tuesday -- three weekdays, which the tolerance does not absorb.
+    thursday = _dt.date(2026, 9, 3)
+    assert L._weekdays_since(thursday.isoformat(), tuesday_after_a_monday_holiday) == 3
+
+
+def test_staleness_outranks_every_other_band_verdict(tmp_path, monkeypatch):
+    """A stale channel must not be able to report OK on the strength of old resolved rows."""
+    _write(tmp_path, monkeypatch, "vega_predictions.jsonl",
+           _band_rows("2026-01-05", n=500, status="resolved"))
+    assert L._check_band_forecasts()["status"] == L.CRITICAL
+
+
+def test_an_unreadable_made_at_does_not_crash_or_falsely_alarm(tmp_path, monkeypatch):
+    _write(tmp_path, monkeypatch, "vega_predictions.jsonl",
+           [{"claim_type": "band_contains_1w", "status": "resolved", "made_at": "garbage"}])
+    r = L._check_band_forecasts()
+    assert r["status"] in (L.OK, L.STARVED)      # never CRITICAL on an unparseable date
