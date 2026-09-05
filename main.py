@@ -230,9 +230,34 @@ def select_bull_put_pair(
     board on names where no level happens to sit in the right place.
     """
     diag_counts: Dict[str, int] = {}
+    diag_margins: Dict[str, List[float]] = {}
 
-    def _bump(reason: str) -> None:
+    def _bump(reason: str, observed: Optional[float] = None) -> None:
+        """Count a rejection, and where there is a number, record BY HOW MUCH it missed.
+
+        The counters answer "which gate kills the most" and cannot answer "and by how much",
+        which is the question that decides whether a threshold is nearly right or badly wrong.
+        Measured 2026-09-04: quote_spread is 33.8% of enumeration rejections and only 6 of 441
+        one-gate-away spreads, because it filters LEGS before pairing while credit_to_width
+        filters the SPREADS those legs become. A leg killed here never gets to fail or pass
+        anything downstream, so a near-miss count over surviving spreads structurally cannot
+        see it. The margin is the only way to size a stage that filters upstream of the stage
+        being counted.
+
+        Summarised as quantiles rather than stored raw: the diagnostics ride on scan_latest.json
+        and a per-strike list across 54 tickers would bloat the artifact. Quantiles are enough to
+        recompute admission at ANY threshold, which is deliberate -- recording "N would pass at
+        0.50" would privilege a candidate constant, and nothing here is choosing one.
+
+        MEASUREMENT ONLY. No gate reads diag_margins; the rejection has already been decided by
+        the time this is called.
+        """
         diag_counts[reason] = diag_counts.get(reason, 0) + 1
+        if observed is not None:
+            try:
+                diag_margins.setdefault(reason, []).append(round(float(observed), 4))
+            except (TypeError, ValueError):
+                pass
 
 
     short_candidates: List[Tuple[float, Dict]] = []
@@ -260,32 +285,32 @@ def select_bull_put_pair(
             continue
         _qv = _quote_verdict(opt)
         if _qv:
-            _bump(f"short_{_qv}")
+            _bump(f"short_{_qv}", _spread_ratio(opt))
             continue
         if opt.get("volume", 0) < min_vol and opt.get("open_interest", 0) < min_oi:
-            _bump("short_liquidity_below_floor")
+            _bump("short_liquidity_below_floor", opt.get("open_interest") or 0)
             continue
 
         abs_delta = abs(delta)
         if abs_delta > config.SHORT_STRIKE_MAX_DELTA:
-            _bump("short_delta_too_high")
+            _bump("short_delta_too_high", abs_delta)
             continue
 
         if is_spy_like:
             if (current_price - strike) < config.MIN_STRIKE_BUFFER_SPY:
-                _bump("short_buffer_too_tight")
+                _bump("short_buffer_too_tight", (current_price - strike) / current_price)
                 continue
         else:
             min_buffer_pct = config.MIN_STRIKE_BUFFER_STOCK  # 5% for individual stocks
             if (current_price - strike) / current_price < min_buffer_pct:
-                _bump("short_buffer_too_tight")
+                _bump("short_buffer_too_tight", (current_price - strike) / current_price)
                 continue
 
         # A DELTA FLOOR. Without one the sweep happily reaches 0.02-delta strikes that carry
         # almost no premium; they cannot clear the credit floors anyway, so they only cost
         # enumeration and clutter the diagnostics. Matches the fast scan's band.
         if abs_delta < float(getattr(config, "SHORT_STRIKE_MIN_DELTA", 0.12)):
-            _bump("short_delta_too_low")
+            _bump("short_delta_too_low", abs_delta)
             continue
 
         dte = int(opt.get("dte", 0) or 0)
@@ -331,7 +356,7 @@ def select_bull_put_pair(
         for long_put in long_candidates:
             _lqv = _quote_verdict(long_put)
             if _lqv:
-                _bump(f"long_{_lqv}")
+                _bump(f"long_{_lqv}", _spread_ratio(long_put))
                 continue
             if long_put.get("volume", 0) < min_vol and long_put.get("open_interest", 0) < min_oi:
                 _bump("long_liquidity_below_floor")
@@ -377,7 +402,7 @@ def select_bull_put_pair(
             # on MIN_CREDIT_USD: a flat dollar floor is 20x stricter on a $37 underlying than
             # on a $773 one, which kept IBIT out of the book entirely.
             if nat["natural_credit_usd"] < config.min_credit_usd_for(current_price):
-                _bump("credit_below_min_usd")
+                _bump("credit_below_min_usd", nat["natural_credit_usd"])
                 _seen(short_put, long_put, spread_width, nat, "credit_below_min_usd")
                 continue
 
@@ -386,7 +411,8 @@ def select_bull_put_pair(
             credit_per_share = nat_ps
             min_ctw = getattr(config, "MIN_CREDIT_TO_WIDTH_PCT", 0.25)
             if spread_width > 0 and (credit_per_share / spread_width) < min_ctw:
-                _bump("credit_to_width_below_min")
+                _bump("credit_to_width_below_min", credit_per_share / spread_width
+                      if spread_width else None)
                 _seen(short_put, long_put, spread_width, nat, "credit_to_width_below_min")
                 continue
 
@@ -425,6 +451,10 @@ def select_bull_put_pair(
         diagnostics["short_candidates_count"] = len(short_candidates)
         diagnostics["valid_pairs_count"] = len(valid_pairs)
         diagnostics["top_reasons"] = sorted(diag_counts.items(), key=lambda x: x[1], reverse=True)[:6]
+        # BY HOW MUCH, not just how many. Quantiles per reason, so admission at any candidate
+        # threshold is recomputable without this artifact having picked one.
+        diagnostics["reason_margins"] = {
+            k: _quantiles(v) for k, v in diag_margins.items() if v}
 
     if not valid_pairs:
         return None
@@ -1938,3 +1968,28 @@ def _exit_cross_pct(cross, credit_per_share):
         return round(float(cross) / c, 4) if (cross is not None and c > 0) else None
     except (TypeError, ValueError):
         return None
+
+
+def _spread_ratio(opt: Dict) -> Optional[float]:
+    """(ask - bid) / mid for a quote, or None when the book is not two-sided."""
+    try:
+        b, a, m = (float(opt.get("bid", 0) or 0), float(opt.get("ask", 0) or 0),
+                   float(opt.get("mid", 0) or 0))
+    except (TypeError, ValueError):
+        return None
+    return (a - b) / m if (b > 0 and a > 0 and m > 0 and a >= b) else None
+
+
+def _quantiles(values) -> Dict:
+    """n / min / p25 / median / p75 / p90 / max for a rejection margin.
+
+    Enough to recompute how many rejections a different threshold would have admitted, without
+    this record naming a candidate threshold itself.
+    """
+    v = sorted(x for x in values if x is not None)
+    if not v:
+        return {}
+    q = lambda p: v[min(int(p * len(v)), len(v) - 1)]
+    return {"n": len(v), "min": round(v[0], 4), "p25": round(q(.25), 4),
+            "median": round(q(.50), 4), "p75": round(q(.75), 4),
+            "p90": round(q(.90), 4), "max": round(v[-1], 4)}
