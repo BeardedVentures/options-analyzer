@@ -391,6 +391,30 @@ def _score(r: Dict, bars: Sequence) -> tuple:
     highs = [b[1] for b in bars]
     final = closes[-1]
 
+    # A CLAIM WHOSE SETTLING BAR IS ITS OWN ANCHOR BAR MEASURED NOTHING.
+    #
+    # `next_trading_day` counts weekdays and does not model holidays, which is fine when the
+    # holiday lands on `resolves_on` -- resolution just reads the last bar at or before it and
+    # the grace window absorbs the slip. It is NOT fine when the holiday lands on `score_on`,
+    # because then `_bar_on` falls back to the bar the claim was anchored to and the horizon
+    # collapses to zero. Settled price equals price at claim, and every band contains it.
+    #
+    # Concretely: 2026-09-07 is Labor Day. 216 one-day band claims written on Friday 2026-09-04
+    # carry score_on 2026-09-07, and ALL 216 would have graded correct on a zero-day move --
+    # 100% -- as the first grades this channel ever produced. A calibration read opening on a
+    # third of its sample scored for free is worse than no read.
+    #
+    # Refused rather than deferred: the bar will never appear, so waiting cannot help. Marked
+    # unresolvable, which is the existing signal for "this claim cannot be graded as written".
+    if ctx.get("score_on"):
+        _sb = _bar_on(bars, str(ctx["score_on"])[:10])
+        _anchor = str(r.get("made_at") or "")[:10]
+        if _sb is not None and _anchor and _bar_date(_sb) <= _anchor:
+            return None, (f"settling bar {_bar_date(_sb)} is at or before the claim date "
+                          f"{_anchor} — score_on {str(ctx['score_on'])[:10]} had no bar "
+                          f"(market holiday), so the horizon collapsed to zero and the claim "
+                          f"measures nothing")
+
     if ct == STRIKE_HOLDS:
         k = ctx.get("short_strike")
         if k is None:

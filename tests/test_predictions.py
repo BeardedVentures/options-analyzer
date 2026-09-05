@@ -644,3 +644,77 @@ def test_grade_reports_both_counts_side_by_side():
 def test_empty_input_does_not_divide_by_zero():
     c = P.cluster_sample([])
     assert c["n_effective"] == 0 and c["n_raw"] == 0
+
+
+# -- A holiday must not hand out free correct answers ---------------------------------------------
+#
+# `next_trading_day` counts weekdays and does not model holidays. That is harmless when the
+# holiday lands on `resolves_on` -- resolution reads the last bar at or before it. It is fatal
+# when it lands on `score_on`, because `_bar_on` then falls back to the bar the claim was
+# ANCHORED to: settled price equals price at claim, and every band contains it.
+#
+# 2026-09-07 is Labor Day. 216 one-day band claims written Friday 2026-09-04 carried
+# score_on 2026-09-07, and all 216 would have graded correct on a zero-day move -- the first
+# grades this channel ever produced.
+
+def _bars_fri_then_tue():
+    """Friday and Tuesday exist; Monday (a holiday) does not."""
+    return [("2026-09-03", 101.0, 99.0, 100.0, 100.0),
+            ("2026-09-04", 102.0, 98.0, 101.0, 100.5),
+            ("2026-09-08", 106.0, 95.0, 105.0, 96.0)]
+
+
+def _band_claim(score_on, made_at="2026-09-04", low=95.0, high=107.0):
+    return {"claim_type": P.BAND_CONTAINS_1D, "made_at": f"{made_at}T14:50:00",
+            "context": {"band_low": low, "band_high": high, "score_on": score_on,
+                        "score_field": "close", "horizon_days": 1,
+                        "price_at_claim": 101.0}}
+
+
+def test_a_holiday_settling_date_is_unresolvable_not_correct():
+    correct, note = P._score(_band_claim("2026-09-07"), _bars_fri_then_tue())
+    assert correct is None, "a zero-day horizon must not grade as a hit"
+    assert "collapsed to zero" in note and "2026-09-07" in note
+
+
+def test_the_same_claim_one_day_later_grades_normally():
+    """The guard must not swallow a legitimate settlement."""
+    correct, note = P._score(_band_claim("2026-09-08"), _bars_fri_then_tue())
+    assert correct is True                      # close 105.0 sits inside 95-107
+    correct, _ = P._score(_band_claim("2026-09-08", low=95.0, high=100.0),
+                          _bars_fri_then_tue())
+    assert correct is False                     # and a miss still misses
+
+
+def test_a_weekend_score_on_is_not_treated_as_collapsed():
+    """A Saturday score_on with a later anchor bar is fine — only the ANCHOR bar is fatal."""
+    claim = _band_claim("2026-09-05", made_at="2026-09-03")
+    correct, note = P._score(claim, _bars_fri_then_tue())
+    assert correct is True                      # falls back to Friday, which is AFTER 09-03
+
+
+def test_the_guard_needs_no_holiday_calendar():
+    """It compares two dates already on the row, so every future holiday is covered.
+
+    Checked against the module's IMPORTS rather than its text — the guard's own comment
+    explains itself using the word "holidays", and an assertion its own documentation can fail
+    is an assertion that gets deleted rather than fixed.
+    """
+    import ast
+    import inspect
+    tree = ast.parse(inspect.getsource(P))
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".")[0])
+    for dep in ("pandas_market_calendars", "holidays", "exchange_calendars", "trading_calendars"):
+        assert dep not in imported, f"the guard pulled in a calendar dependency: {dep}"
+
+
+def test_a_claim_with_no_score_on_is_unaffected():
+    claim = {"claim_type": P.STRIKE_HOLDS, "made_at": "2026-09-04T14:50:00",
+             "context": {"short_strike": 90.0, "strategy": "bull_put_spread"}}
+    correct, _ = P._score(claim, _bars_fri_then_tue())
+    assert correct is True                      # 105.0 > 90.0, scored as normal
