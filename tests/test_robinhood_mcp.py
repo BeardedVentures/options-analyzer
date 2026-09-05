@@ -307,7 +307,14 @@ import asyncio
 
 def test_fetch_put_chain_contains_a_cancellederror(monkeypatch):
     """Its docstring promises it never raises. CancelledError was the exception to that."""
-    def cancelled(*a, **k):
+    def cancelled(coro=None, *a, **k):
+        # Close the coroutine the way the real asyncio.run would consume it. Without this the
+        # stub is an incomplete double: production builds afetch_chain(...) and hands it over,
+        # and a stub that raises without consuming it leaves the object unawaited, which
+        # surfaces as `RuntimeWarning: coroutine 'afetch_chain' was never awaited` attributed
+        # to whichever test happens to trigger garbage collection.
+        if coro is not None and hasattr(coro, "close"):
+            coro.close()
         raise asyncio.CancelledError("Cancelled via cancel scope 0xdeadbeef")
 
     monkeypatch.setattr(robinhood_mcp.asyncio, "run", cancelled)
@@ -353,7 +360,9 @@ def test_a_cancellederror_still_latches_the_source_off(monkeypatch):
 
 def test_operator_interrupts_are_not_swallowed(monkeypatch):
     """Catching BaseException must not eat Ctrl-C or a shutdown."""
-    def interrupted(*a, **k):
+    def interrupted(coro=None, *a, **k):
+        if coro is not None and hasattr(coro, "close"):
+            coro.close()          # see the note in the CancelledError test above
         raise KeyboardInterrupt()
 
     monkeypatch.setattr(robinhood_mcp.asyncio, "run", interrupted)
