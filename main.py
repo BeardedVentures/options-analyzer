@@ -767,7 +767,25 @@ def screen_ticker(ticker: str, sentiment_map: Dict[str, Dict]) -> Tuple[Optional
     sentiment = sentiment_map.get(ticker, {})
     sentiment_label = (sentiment.get("sentiment") or "NEUTRAL").upper()
     if config.NEWS_SENTIMENT_BLOCK and sentiment_label == "BLOCKING":
-        return _avoid("News BLOCKING event detected", "NEWS_BLOCK", tech)
+        # Record WHAT matched, not just THAT something did. Until 2026-09-09 this row said
+        # "News BLOCKING event detected" and carried no headline, keyword or source, so an
+        # 8-of-54 block list could not be checked by anyone -- and when it was finally checked
+        # by hand, most of it was wrong (a "fire" substring inside "Fires Back", one company's
+        # acquisition blocking its underwriter, one market-wrap headline taking out SPY, QQQ
+        # and IWM together). A gate with veto power has to be auditable after the fact.
+        _kw = sentiment.get("blocking_keyword")
+        _hl = sentiment.get("blocking_headline")
+        _reason = "News BLOCKING event detected"
+        if _kw:
+            _reason += f": matched '{_kw}'"
+            if _hl:
+                _reason += f" in “{_hl[:140]}”"
+        return _avoid(_reason, "NEWS_BLOCK", tech, extra={
+            "blocking_keyword": _kw,
+            "blocking_headline": _hl,
+            "news_scoring_path": sentiment.get("scoring_path"),
+            "news_confidence": sentiment.get("confidence"),
+        })
 
     if (
         getattr(config, "FUNDAMENTALS_ENABLED", True)

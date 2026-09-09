@@ -434,9 +434,25 @@ LEGS_PER_SPREAD = 2
 # PAPER / CREDIT-FREE MODE
 # ─────────────────────────────────────────────
 # DISABLE_AI hard-stops every paid LLM call (news GPT sentiment + tipsheet synthesis) so paper
-# validation never burns Anthropic/OpenAI credits. The system falls back to rule-based/keyword
-# logic, which is fully sufficient for screening and paper tracking. Flip to False only when you
-# deliberately want AI narrative and have credits to spend.
+# validation never burns Anthropic/OpenAI credits. Flip to False only when you deliberately want
+# AI narrative and have credits to spend.
+#
+# "FULLY SUFFICIENT FOR SCREENING" WAS WRONG, AND IS CORRECTED HERE RATHER THAN ONLY IN A DOC
+# (2026-09-09). This comment used to say the rule-based fallback was fully sufficient for
+# screening and paper tracking. That claim was never measured, and when it finally was, it was
+# false: on 2026-09-09 the keyword news gate blocked 18 of 54 tickers -- a third of the universe,
+# including SPY, QQQ and IWM -- and 14 of those 18 were wrong. It matched substrings against the
+# CONCATENATED feed, so "fire" hit inside "Wall Street Fires Back", one company's acquisition
+# blocked its underwriter, and a single market-wrap headline took out all three index ETFs at
+# once. The rejection rows recorded nothing, so none of it was checkable until it was read by
+# hand.
+#
+# The gate has since been narrowed and made auditable (see data/news.py and
+# tests/test_news_block_gate.py), so the specific defects are fixed. What is NOT fixed is the
+# reasoning that produced this line: because DISABLE_AI is True, the rule-based paths are not a
+# degraded fallback, they ARE production, and every one of them decides real board outcomes with
+# no model behind it. Treat "the fallback is sufficient" as a hypothesis about each specific
+# fallback, and measure it against outcomes before writing it down as fact.
 DISABLE_AI = True
 
 # ─────────────────────────────────────────────

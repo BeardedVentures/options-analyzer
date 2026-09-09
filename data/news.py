@@ -11,6 +11,7 @@ All tickers batched into a single GPT-4o call to minimize cost.
 import json
 import logging
 import re
+from functools import lru_cache
 from typing import Dict, List, Optional, Any
 
 import sys
@@ -24,12 +25,66 @@ logger = logging.getLogger(__name__)
 # Keyword-based sentiment fallback
 # ─────────────────────────────────────────────
 
-BLOCKING_KEYWORDS = [
-    "earnings", "earnings surprise", "fda", "approval", "rejection",
-    "merger", "acquisition", "takeover", "bankruptcy", "default",
-    "indictment", "sec charges", "fraud", "restatement", "recall",
-    "data breach", "hack", "attack", "explosion", "fire",
+# Matched on WORD BOUNDARIES against a SINGLE headline, never against the concatenated feed.
+# Both of those are 2026-09-09 fixes; the old rule was `kw in " ".join(headlines).lower()`.
+#
+# "earnings" was removed, not reworded. EARNINGS_BLACKOUT_DAYS + the earnings_clear gate already
+# measure earnings risk from an actual dated calendar, and on the same session they were right
+# where this was wrong: ADBE and JPM both failed earnings_clear correctly, while SPY passed it
+# correctly (an ETF has no earnings date) and was blocked here anyway, by the headline "S&P 500
+# Second Quarter Earnings Outpace Forecast". A keyword is a worse proxy for a risk the system
+# already measures properly, and keeping both means the worse one decides.
+# Canonical term -> the surface forms that actually signal the event.
+#
+# Word-boundary matching is what stopped "Wall Street Fires Back" from blocking QQQ, but it also
+# stopped "Adobe Recalls ... After Data Loss" from blocking ADBE: recall does not match
+# "Recalls". So the forms are listed per term rather than inflected automatically.
+#
+# "fire" deliberately has NO plural. "Fires" in a headline is nearly always the verb -- fires
+# back, fires its CEO -- while the blocking sense is the noun. Adding "fires" would re-create
+# the 2026-09-09 QQQ false positive, so this asymmetry is load-bearing, not an oversight.
+#
+# "earnings" was removed entirely, not reworded. EARNINGS_BLACKOUT_DAYS and the earnings_clear
+# gate already measure earnings risk from a dated calendar, and on the same session they were
+# right where this was wrong: ADBE and JPM both failed earnings_clear correctly, while SPY
+# passed it correctly (an ETF has no earnings date) and was blocked here anyway, on the headline
+# "S&P 500 Second Quarter Earnings Outpace Forecast". Keeping both means the worse one decides.
+BLOCKING_TERMS = {
+    "fda":         ["fda"],
+    # "approval" and "rejection" are NOT here. Bare, they carry no event meaning -- "approval
+    # rating", "pending shareholder approval", "board approval" -- and everything they should
+    # catch is already caught: regulatory decisions by "fda", deal outcomes by merger /
+    # acquisition / takeover. They contributed false positives and no coverage.
+    "merger":      ["merger", "mergers"],
+    "acquisition": ["acquisition", "acquisitions", "acquires", "acquired"],
+    "takeover":    ["takeover", "takeovers"],
+    "bankruptcy":  ["bankruptcy", "bankruptcies"],
+    "default":     ["default", "defaults", "defaulted"],
+    "indictment":  ["indictment", "indictments", "indicted", "indicts"],
+    "fraud":       ["fraud"],
+    "restatement": ["restatement", "restatements", "restates", "restated"],
+    "recall":      ["recall", "recalls", "recalled"],
+    "hack":        ["hack", "hacks", "hacked"],
+    "attack":      ["attack", "attacks", "attacked"],
+    "explosion":   ["explosion", "explosions"],
+    "fire":        ["fire"],
+}
+
+# Kept as a flat list for any caller that still reads it.
+BLOCKING_KEYWORDS = sorted(BLOCKING_TERMS)
+
+# Multi-word phrases, matched as substrings -- word-boundary matching on a phrase is the same
+# thing, and the adjacency is what carries the meaning.
+BLOCKING_PHRASES = [
+    "earnings surprise", "sec charges", "data breach",
 ]
+
+# A blocking headline must plausibly be ABOUT this underlying. Without this, GSK's bond sale to
+# fund the Nuvalent acquisition blocked JPM -- JPM was in that headline's feed because it
+# underwrites the deal -- and a single market-wrap headline blocked SPY, QQQ and IWM at once.
+# Blocking the three broad-market index ETFs simultaneously on a shared signal is a category
+# error: standing aside from single-name event risk is what this gate is for.
+REQUIRE_TICKER_IN_HEADLINE = True
 
 NEGATIVE_KEYWORDS = [
     "downgrade", "miss", "below expectations", "warning", "loss",
@@ -45,22 +100,111 @@ POSITIVE_KEYWORDS = [
 ]
 
 
-def _keyword_sentiment(headlines: List[str]) -> Dict:
-    """
-    Simple keyword-based sentiment scoring.
-    Used when OpenAI API key is not configured.
-    """
-    text = " ".join(headlines).lower()
+@lru_cache(maxsize=1)
+def _alias_map():
+    """{ticker: [names that stand for it in a headline]}, derived from config.WATCHLIST.
 
-    for kw in BLOCKING_KEYWORDS:
-        if kw in text:
-            return {
-                "sentiment": "BLOCKING",
-                "confidence": 0.8,
-                "key_themes": [kw],
-                "market_impact_summary": f"Potential blocking event detected: '{kw}'",
-                "blocking": True,
-            }
+    Derived, not hand-maintained, so it cannot drift out of sync with the universe.
+
+    Stocks get their company name: headlines say "Adobe", not "ADBE", so ticker-only matching
+    would let a genuine single-name event through -- the opposite of today's failure and a worse
+    one, since catching exactly that is what this gate is for.
+
+    ETFs get the ticker ONLY. Their notes ("S&P 500", "Energy Sector ETF") are descriptions, not
+    headline names, and "S&P 500" as an alias would re-create the bug: a market-wrap headline
+    would block SPY again. A basket has no single-name event risk, so requiring the literal
+    ticker is the correct standard for them.
+    """
+    out = {}
+    try:
+        watchlist = getattr(config, "WATCHLIST", []) or []
+    except Exception:
+        return out
+    for row in watchlist:
+        try:
+            tk = str(row.get("ticker", "")).strip()
+            if not tk:
+                continue
+            names = [tk]
+            if str(row.get("type", "")).strip().lower() != "etf":
+                name = str(row.get("note", "")).split(chr(8212))[0].strip()
+                # Guard the derivation: a note that lost its em dash would otherwise donate a
+                # whole sentence as an alias and match nearly anything.
+                if name and len(name) <= 30:
+                    names.append(name)
+            out[tk.upper()] = names
+        except Exception:
+            continue
+    return out
+
+
+def _headline_mentions(headline, ticker, aliases=None):
+    """Is this headline plausibly ABOUT this underlying?"""
+    if not ticker:
+        return True
+    names = list(aliases) if aliases else _alias_map().get(ticker.upper(), [ticker])
+    h = headline.lower()
+    wb = chr(92) + "b"
+    return any(re.search(wb + re.escape(n.lower()) + wb, h) for n in names)
+
+
+def _blocking_hit(headline):
+    """Return the canonical blocking term this ONE headline matches, or None.
+
+    Word boundaries, not substrings. The old rule was `kw in " ".join(headlines).lower()`, which
+    matched "fire" inside "Wall Street Fires Back With 'Activist Treasury'" and would equally
+    match wildfire, misfired, approval rating, by default, or he recalls -- and matched it
+    against the whole feed at once, so any headline could block on any other headline's word.
+    On 2026-09-09 that removed QQQ from the board on a Treasury-policy headline.
+    """
+    h = headline.lower()
+    wb = chr(92) + "b"
+    for phrase in BLOCKING_PHRASES:
+        if phrase in h:
+            return phrase
+    for term, forms in BLOCKING_TERMS.items():
+        for form in forms:
+            if re.search(wb + re.escape(form) + wb, h):
+                return term
+    return None
+
+
+def _keyword_sentiment(headlines: List[str], ticker: Optional[str] = None,
+                       aliases: Optional[List[str]] = None) -> Dict:
+    """Rule-based sentiment. This is the PRODUCTION path, not a degraded one.
+
+    config.DISABLE_AI is True by design -- it hard-stops paid LLM calls so paper validation
+    never burns credits -- so every NEWS_BLOCK on the board comes from here. That makes this the
+    one gate that disqualifies a ticker outright with no model behind it, which is exactly why
+    it has to record what it matched.
+
+    Until 2026-09-09 it recorded nothing: the rejection row said "News BLOCKING event detected"
+    and carried no headline, no keyword, no source. 8 of 54 tickers were removed before any
+    other gate saw them -- including SPY, QQQ and IWM -- and nothing on the artifact could be
+    used to check whether a single one of them was right.
+    """
+    for headline in headlines:
+        kw = _blocking_hit(headline)
+        if not kw:
+            continue
+        if REQUIRE_TICKER_IN_HEADLINE and not _headline_mentions(headline, ticker, aliases):
+            # Someone else's event, carried in this ticker's feed.
+            logger.debug("[news] %s: '%s' in a headline that does not name it -- not blocking: %s",
+                         ticker, kw, headline[:120])
+            continue
+        return {
+            "sentiment": "BLOCKING",
+            "confidence": 0.8,
+            "key_themes": [kw],
+            "market_impact_summary": f"Potential blocking event detected: '{kw}'",
+            "blocking": True,
+            # The evidence trail. A gate with veto power has to be auditable after the fact.
+            "blocking_keyword": kw,
+            "blocking_headline": headline[:300],
+            "scoring_path": "keyword",
+        }
+
+    text = " ".join(headlines).lower()
 
     neg_count = sum(1 for kw in NEGATIVE_KEYWORDS if kw in text)
     pos_count = sum(1 for kw in POSITIVE_KEYWORDS if kw in text)
@@ -315,7 +459,7 @@ def analyze_all_tickers(
             _sentiment_cache[ticker] = gpt_results[ticker]
         else:
             headlines = ticker_headlines.get(ticker, [])
-            _sentiment_cache[ticker] = _keyword_sentiment(headlines)
+            _sentiment_cache[ticker] = _keyword_sentiment(headlines, ticker=ticker)
 
     _save_disk_cache(
         {t: _sentiment_cache[t] for t in tickers if t in _sentiment_cache},
@@ -335,7 +479,7 @@ def get_ticker_sentiment(ticker: str) -> Dict:
 
     # Not yet analyzed — run keyword fallback on cached headlines
     headlines = _headlines_cache.get(ticker, [])
-    result = _keyword_sentiment(headlines)
+    result = _keyword_sentiment(headlines, ticker=ticker)
     _sentiment_cache[ticker] = result
     return result
 
