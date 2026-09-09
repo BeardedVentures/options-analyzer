@@ -22,6 +22,17 @@ fixing only the cockpit leaves every other consumer of `degraded` believing a de
 The fixture below is the REAL artifact from that session, kept at
 backups/scan_latest.BROKEN-2026-09-08.json, so these tests are anchored to what actually
 happened rather than to a reconstruction of it.
+
+ONE FIELD IS REDACTED. `book` held the operator's live position set, open count and dollar
+risk (open_tickers / open_positions / current_book_risk_usd) and is committed as `{}`. This
+repo is public, that block is position data, and no test here reads it -- these tests read
+`degraded`, `scan_coverage`, `scan_errors` and `rejected_trades`. Every other field is the
+artifact exactly as written, which is the property that makes it worth keeping over a
+reconstruction. The four tickers that were in the book still appear in `rejected_trades`, but
+so do all 54 watchlist names with the same NameError, so they disclose nothing.
+
+The artifact was untracked until 2026-09-09, which meant these three tests skipped on any
+clean clone -- naming their own precondition, but still not running where it matters.
 """
 import json
 from pathlib import Path

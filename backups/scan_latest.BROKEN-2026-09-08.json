@@ -1,0 +1,344 @@
+{
+  "timestamp": "2026-09-08T15:47:30.156782-04:00",
+  "session_type": "close",
+  "market_context": {
+    "vix": {
+      "current": 15.58,
+      "week_ago": 15.2,
+      "change": 0.38,
+      "trend": "rising",
+      "label": "MODERATE",
+      "history": [
+        15.2,
+        14.32,
+        14.53,
+        15.3,
+        15.58
+      ]
+    },
+    "spy": {
+      "price": 766.53,
+      "prev_close": 770.19,
+      "day_change_pct": -0.48
+    },
+    "macro_events": [
+      "How To Trade SPY, QQQ, AAPL, MSFT, NVDA, GOOGL, META, And TSLA",
+      "S&P 500 Nears Record, Expert Says Nothing \u2018Usual\u2019 About the Market as Investors Brace for Worst Month of Year",
+      "Exchange-Traded Funds, Equity Futures Mixed Pre-Bell Tuesday Amid Rising Oil Prices",
+      "Dr. Copper Says the AI Boom Is Spreading Through the Real Economy",
+      "S&P 500\u2019s \u2018Teflon\u2019 Streak Has Reached 329 Sessions \u2014 Wall Street Warns These Risks Could Finally Break the Market"
+    ],
+    "bias": "NEUTRAL",
+    "summary": "VIX 15.58 (MODERATE); SPY -0.48% on the day. Bias: NEUTRAL."
+  },
+  "regime": {
+    "regime_flag": "LOW_VOL",
+    "regime_note": "LOW VOLATILITY REGIME \u2014 VIX 15.6 is below 16. Premium is thinner here: measured 1990-2026 this band earned about +2.9 vol points versus +4.2 at VIX 16-20, so expect fewer qualifiers and smaller credits. It is NOT a stand-aside \u2014 the same band was positive 85.5% of the time with a 95.9% win rate and a milder worst case than higher-VIX regimes. Let the per-trade gates decide; they read this name's own premium, which is better information than the index level.",
+    "trade_suppressed": false
+  },
+  "scan_summary": {
+    "tickers_scanned": 54,
+    "total_scanned": 0,
+    "total_qualified": 0,
+    "high_edge_count": 0,
+    "exceptional_count": 0,
+    "counts_structures_from": "bull_put_enumeration"
+  },
+  "source_health": {
+    "enabled": true,
+    "mode": "polygon_delayed_15m",
+    "healthy": false,
+    "reason": "HTTP 200/OK but bid/ask empty on all 5 contracts checked -- plan is very likely not entitled to options quotes (Starter/Developer lack this; Advanced tier includes it)"
+  },
+  "scan_coverage": {
+    "enabled": true,
+    "healthy": true,
+    "mode": "chain_coverage",
+    "attempted": 54,
+    "scored": 54,
+    "skipped": [],
+    "ratio": 1.0,
+    "floor": 0.7,
+    "band_holes": {},
+    "truncated_walks": {},
+    "unrecognized_errors": {},
+    "measures": "quotability (two-sided price present, spread <= 0.80 of mid) \u2014 NOT tradeability; selection additionally requires spread <= 35% and a positive bid",
+    "reason": "54/54 tickers (100%) cleared the chain-QUOTABILITY floor, minimum is 70%. This is not a tradeability figure: strikes quoting up to 0.80 of mid count as quotable here and are refused by selection."
+  },
+  "degraded": false,
+  "qualified_trades": [],
+  "rejected_trades": [
+    {
+      "ticker": "SPY",
+      "reason": "name '_quantiles' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "QQQ",
+      "reason": "name '_quantiles' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "IWM",
+      "reason": "name '_quantiles' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "NVDA",
+      "reason": "name '_quantiles' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "AAPL",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "MSFT",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "GOOG",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "META",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "AMD",
+      "reason": "name '_quantiles' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "PLTR",
+      "reason": "name '_quantiles' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "MU",
+      "reason": "name '_quantiles' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "QCOM",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "CRM",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "ADBE",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "NFLX",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "JNJ",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "PFE",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "UNH",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "AMGN",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "JPM",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "BAC",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "GS",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "BLK",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "USB",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "TSLA",
+      "reason": "name '_quantiles' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "AMZN",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "RCL",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "MAR",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "NKE",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "WMT",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "KO",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "PEP",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "XOM",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "CVX",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "COP",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "PSX",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "FCX",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "CLF",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "SCCO",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "BA",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "GE",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "NEE",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "PLD",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "AMT",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "XLE",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "GDX",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "XLV",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "ARKK",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "IBIT",
+      "reason": "name '_quantiles' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "COIN",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "SMH",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "XBI",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "TLT",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    },
+    {
+      "ticker": "CRWD",
+      "reason": "name '_spread_ratio' is not defined",
+      "category": "ERROR"
+    }
+  ],
+  "book": {},
+  "_redacted": "book: open_tickers / open_positions / current_book_risk_usd removed before committing to a public repo. It is position data and no test reads it; every other field is the artifact as written."
+}

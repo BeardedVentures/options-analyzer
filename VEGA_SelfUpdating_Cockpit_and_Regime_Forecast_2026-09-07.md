@@ -683,10 +683,15 @@ is unrun here; these are not equivalent claims.
 > worse, not better, and is recorded at `config.py`'s `DISABLE_AI`: the comment claiming
 > keyword screening was "fully sufficient for screening" was never measured, and was false.
 >
-> Two corrections to the numbers below. The headline "15% of the watchlist" counts what reached
-> the board; the sentiment cache held **18 of 54** tickers marked BLOCKING, a third of the
-> universe. Re-scoring those 18 under the fixed gate frees **14** and keeps 4, each naming its
-> own ticker (GE's acquisition, JNJ and PFE on FDA decisions, NEE's shareholder merger vote).
+> On the numbers: there are **two different populations** below and they should not be collapsed
+> into one figure. **8 of 54** is what NEWS_BLOCK removed in the 10:19 scan — the headline "15%
+> of the watchlist", and the population this diagnosis was written from. **18 of 54** is what the
+> sentiment cache held marked BLOCKING across the whole day, a wider set because the cache
+> accumulates and the scan is a snapshot. Both are correct for what they count.
+>
+> The re-scoring below was run against the 18, since that is the cache the fix had to correct:
+> **14 freed, 4 kept**, each of the 4 naming its own ticker (GE's acquisition, JNJ and PFE on FDA
+> decisions, NEE's shareholder merger vote).
 >
 > Regression tests: `tests/test_news_block_gate.py`. Six of the seven false-positive cases below
 > block under the old rule and pass under the new one, so they are not vacuous; the seventh
