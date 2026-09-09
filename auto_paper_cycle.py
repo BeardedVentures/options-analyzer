@@ -1488,6 +1488,54 @@ def _record_band_forecasts() -> Dict:
         return {}
 
 
+def _record_market_forecast() -> Dict:
+    """One dated BULL / BEAR / NEUTRAL claim per tracked index and crypto asset per horizon.
+
+    THIS IS THE DRIVER THAT MAKES THE FORECAST GRADEABLE, and it lives here rather than only in
+    the cockpit for a reason worth stating plainly. The cockpit's scheduler also fires this job
+    once a day, but the cockpit is a window the operator opens when they want to look at
+    something. A ledger written only while somebody is watching is not a record of the market,
+    it is a record of when the desk was staffed -- and every horizon's hit rate would then be
+    conditioned on that without a single number on the page hinting at it. The paper cycle runs
+    on the Windows task whether anyone is at the machine or not, so the claim gets written on
+    days nobody opens the dashboard.
+
+    Running from both drivers is safe and deliberate: predictions.record is idempotent per
+    (asset, horizon, day), so whichever fires first writes the claim and the other is a no-op.
+    Redundancy is the point -- either driver alone has a way of not running.
+
+    KNOWN AND ACCEPTED GAP: this cycle exits early when the equity market is closed, so on
+    weekends only the cockpit path can write. That costs BTC and ETH their Saturday and Sunday
+    anchors when the dashboard is shut. It is a smaller distortion than a weekday hole and is
+    left visible here rather than papered over; the fix, if the crypto record ever needs it, is
+    a --force-market-open invocation on weekends, not a second scheduled task.
+
+    MEASURING INSTRUMENT ONLY. Nothing here reaches selection, sizing or execution.
+    """
+    if not getattr(config, "MARKET_FORECAST_ENABLED", True):
+        return {}
+    try:
+        from analysis import market_forecast as mf
+        stats = mf.record_daily()
+        if stats.get("skipped_hour"):
+            return stats        # before the anchor hour; the last cycle of the day writes it
+        _log(f"MARKET FORECAST recorded={stats.get('recorded', 0)} claims across "
+             f"{stats.get('assets', 0)} assets "
+             f"(abstained={stats.get('abstained', 0)} failed={stats.get('failed', 0)})")
+        # Same rule as the band sweep: zero written with assets configured is a broken channel,
+        # not a quiet day, and it must be as loud as any other dead measurement channel.
+        if stats.get("assets") and not stats.get("recorded"):
+            _log(f"!!! MEASUREMENT CHANNEL CRITICAL: market_forecast wrote 0 claims across "
+                 f"{stats['assets']} assets (abstained={stats.get('abstained', 0)} "
+                 f"failed={stats.get('failed', 0)}). The regime call on the Forecast tab is "
+                 f"live-only until this writes, so nothing on it can ever be graded.")
+        return stats
+    except Exception as e:
+        _log(f"!!! MEASUREMENT CHANNEL CRITICAL: market_forecast raised and wrote nothing: "
+             f"{type(e).__name__}: {e}")
+        return {}
+
+
 def _record_crypto_premium_view() -> Optional[str]:
     """One dated claim per day about whether IBIT premium is worth selling.
 
@@ -1752,6 +1800,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             _resolve_predictions()
             _record_direction_forecasts()
             _record_band_forecasts()
+            _record_market_forecast()
             _record_crypto_premium_view()
             _grade_shadow_book()
             _compact_quality_log()
@@ -1792,6 +1841,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         _resolve_predictions()
         _record_direction_forecasts()
         _record_band_forecasts()
+        _record_market_forecast()
         _record_crypto_premium_view()
         _record_counterfactuals()
         _grade_shadow_book()

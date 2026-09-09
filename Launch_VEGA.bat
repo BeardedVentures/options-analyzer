@@ -46,5 +46,10 @@ if errorlevel 1 (
 
 echo === starting cockpit at http://127.0.0.1:8765 ===
 echo Bear-call / iron-condor / lottery are LIVE but VERIFY-flagged: spot-check vs your broker first.
+echo.
+echo The cockpit now re-scans every 15 minutes while the options market is open and the
+echo open page reloads itself when a new scan lands - leave THIS WINDOW open and you do
+echo not need to close and relaunch to see current numbers. The Forecast tab carries the
+echo bull/bear/neutral regime call for stocks and crypto and its graded track record.
 "%PY%" vega_app.py
 pause
