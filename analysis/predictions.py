@@ -897,7 +897,30 @@ def _verdict(n: int, min_n: int, hit: float, avg_p: Optional[float],
     if avg_p is None:
         return f"{hit*100:.0f}% correct over {n}, but no confidence was recorded to calibrate"
     bias = (avg_p - hit) * 100
-    if brier is not None and brier > 0.25:
+
+    # 0.25 IS A TWO-OUTCOME CONSTANT AND ONLY MEANS ANYTHING ON A TWO-OUTCOME SCALE.
+    #
+    # It is the Brier of "always say 50%", so it is the right thing to beat when a claim has
+    # two outcomes and the forecaster is working on a 50-100 confidence scale -- which is every
+    # claim this scorer originally graded.
+    #
+    # The directional claims are three-outcome, and constructed so bull, bear and flat start
+    # TIED AT A THIRD, so a stated probability never leaves roughly 0.33-0.45. On that scale
+    # the test runs backwards. With p around 0.35 a call that turns out RIGHT scores
+    # (1 - 0.35)^2 = 0.42 and one that turns out WRONG scores 0.12, so
+    #
+    #     Brier = 0.12 + 0.30 * hit_rate
+    #
+    # crosses 0.25 at 42.5% correct against a 33% base rate. Every regime horizon forecasting
+    # BETTER than chance would have been declared "worse than a coin flip -- not adding
+    # information", and the more skilful it got the louder the page would have said so. The
+    # market-regime tab would have printed that verdict about its own best horizon.
+    #
+    # So the constant is applied only where it is defined. Below a 50% average confidence the
+    # claim is not on a two-outcome scale and this branch has no opinion: resolution and the
+    # permutation test below are scale-free, they are what the docstring says this verdict
+    # leads with, and they are the honest instrument for those claim types.
+    if brier is not None and brier > 0.25 and avg_p >= 0.5:
         return (f"{hit*100:.0f}% correct over {n} with a Brier of {brier:.2f} — worse than "
                 f"always guessing 50%. This claim type is not adding information.")
 
@@ -920,12 +943,39 @@ def _verdict(n: int, min_n: int, hit: float, avg_p: Optional[float],
                          f"barely could be — the probabilities hardly vary")
             disc += "."
 
+    # A PRESCRIPTION REQUIRES DISCRIMINATION; A MISCALIBRATION IS ONLY A DESCRIPTION.
+    #
+    # Both bias branches used to end in advice -- "the direction is useful", "deserves more
+    # weight" -- and handed it out on the strength of the gap between confidence and hit rate
+    # alone. That gap says nothing about whether the channel knows anything. A forecaster that
+    # states a third about everything in a market that rose 60% of the time is right 60% of the
+    # time, and the old text called that "underconfident by 27pp -- this signal deserves more
+    # weight" while the very next clause said it does not discriminate. That verdict was being
+    # printed about the CLIMATOLOGY CONTROL, the one row in the ledger that is defined to know
+    # nothing: 444 claims, resolution 0.000, and a recommendation to weight it up.
+    #
+    # Read in full the row was not misleading, because `disc` contradicted it. But a verdict
+    # whose first sentence must be walked back by its second is a verdict that will be quoted
+    # by its first sentence.
+    #
+    # So where the channel discriminates the advice stands, and where it does not the honest
+    # statement is what the numbers actually support: the probabilities are mis-stated relative
+    # to the base rate. That is a calibration to fix, not a signal to weight.
+    discriminates = p is not None and p < 0.05
     if bias > 10:
+        why = ("The direction is useful; the certainty is not earned."
+               if discriminates else
+               "The certainty is not earned, and there is no demonstrated direction under it "
+               "to fall back on.")
         return (f"{hit*100:.0f}% correct but claiming {avg_p*100:.0f}% — overconfident by "
-                f"{bias:.0f}pp. The direction is useful; the certainty is not earned.{disc}")
+                f"{bias:.0f}pp. {why}{disc}")
     if bias < -10:
+        why = ("This signal deserves more weight."
+               if discriminates else
+               "That is the stated probabilities sitting below the base rate — a calibration "
+               "to correct, not a signal to weight up.")
         return (f"{hit*100:.0f}% correct while only claiming {avg_p*100:.0f}% — "
-                f"underconfident by {abs(bias):.0f}pp. This signal deserves more weight.{disc}")
+                f"underconfident by {abs(bias):.0f}pp. {why}{disc}")
     return f"{hit*100:.0f}% correct over {n}, well calibrated (Brier {brier:.2f}).{disc}"
 
 

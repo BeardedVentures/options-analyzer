@@ -243,11 +243,49 @@ def test_overconfidence_is_named_not_just_accuracy():
     assert "overconfident" in v["verdict"]
 
 
+def _mixed(spec, ctype=P.STRIKE_HOLDS):
+    """Resolved claims from an explicit [(probability, was_correct)] list, one per ticker/day."""
+    return [{"claim_type": ctype, "status": "resolved", "correct": ok, "ticker": f"AA{i:03d}",
+             "made_at": f"2026-0{1 + i // 28}-{1 + i % 28:02d}T12:00:00",
+             "probability": pr, "context": {}} for i, (pr, ok) in enumerate(spec)]
+
+
 def test_underconfidence_is_named_too():
+    """The BIAS is named whether or not the channel knows anything — that part is arithmetic."""
     g = P.grade(_seed(18, True, 0.55) + _seed(2, False, 0.55))
     v = g["by_type"][P.STRIKE_HOLDS]
     assert v["bias_pp"] < -10
-    assert "deserves more weight" in v["verdict"]
+    assert "underconfident by 35pp" in v["verdict"]
+
+
+def test_underconfidence_alone_does_not_earn_a_recommendation():
+    """"Deserves more weight" is a PRESCRIPTION, and the confidence-to-hit-rate gap does not
+    support one on its own.
+
+    This fixture states 55% about everything and is right 90% of the time, so its probabilities
+    never vary and it cannot discriminate by construction — it has simply mis-stated the base
+    rate. The live ledger's climatology CONTROL is the same shape and much worse: 444 claims,
+    33% stated, 60% correct, resolution 0.000, and the verdict recommended weighting it up. The
+    row that is defined to know nothing must not be handed advice, and a first sentence that
+    the second has to walk back is one that will be quoted alone.
+    """
+    v = P.grade(_seed(18, True, 0.55) + _seed(2, False, 0.55))["by_type"][P.STRIKE_HOLDS]
+    assert v["resolution"] == 0.0 and "does NOT discriminate" in v["verdict"]
+    assert "deserves more weight" not in v["verdict"], v["verdict"]
+    assert "calibration to correct" in v["verdict"]
+
+
+def test_a_channel_that_is_underconfident_AND_discriminates_does_get_the_recommendation():
+    """And the gate must not simply delete the sentence: where the channel earns it, it stands.
+
+    Confident calls right, timid calls a coin flip — genuine resolution, and still underconfident
+    overall. This is the case the advice was written for.
+    """
+    v = P.grade(_mixed([(0.60, True)] * 12 + [(0.45, True)] * 6
+                       + [(0.45, False)] * 6))["by_type"][P.STRIKE_HOLDS]
+    assert v["bias_pp"] < -10 and v["resolution"] > 0
+    assert "It also DISCRIMINATES" in v["verdict"]
+    assert "deserves more weight" in v["verdict"], v["verdict"]
 
 
 def test_well_calibrated_reads_as_calibrated():
@@ -259,6 +297,39 @@ def test_a_claim_type_worse_than_a_coin_flip_is_called_out():
     g = P.grade(_seed(6, True, 0.9) + _seed(14, False, 0.9))
     v = g["by_type"][P.STRIKE_HOLDS]
     assert v["brier"] > 0.25
+    assert "not adding information" in v["verdict"]
+
+
+def test_a_three_outcome_forecaster_that_is_RIGHT_is_not_called_uninformative():
+    """The verdict's coin-flip test is a TWO-outcome constant, and applying it to a three-way
+    call inverts it.
+
+    Bull / bear / neutral claims are built so the three outcomes start tied at a third, so the
+    stated probability never leaves roughly 0.33-0.45. On that scale a correct call scores
+    (1 - 0.35)^2 = 0.42 and a wrong one scores 0.12, so Brier = 0.12 + 0.30 * hit_rate crosses
+    0.25 at 42.5% correct -- against a 33% base rate. Judged against a fixed 0.25, a regime
+    forecaster is declared "worse than a coin flip, not adding information" precisely BECAUSE
+    it is doing well, and the better it gets the louder that verdict becomes.
+
+    This fixture is right 70% of the time about a three-way call: nearly the best outcome the
+    channel could hope for, and the exact input that used to produce the worst verdict.
+    """
+    rows = [{"claim_type": "direction_mkt_1m", "status": "resolved", "correct": i < 14,
+             "ticker": f"AA{i:03d}", "made_at": f"2026-0{1 + i // 28}-{1 + i % 28:02d}T12:00:00",
+             "probability": 0.34 + (0.02 if i % 3 == 0 else 0.0), "context": {}}
+            for i in range(20)]
+    v = P.grade(rows)["by_type"]["direction_mkt_1m"]
+    assert v["hit_rate"] == 70.0
+    assert v["brier"] > 0.25, "the setup only bites while Brier is above the two-outcome bar"
+    assert "not adding information" not in v["verdict"], v["verdict"]
+    assert "worse than" not in v["verdict"], v["verdict"]
+
+
+def test_the_coin_flip_test_still_fires_on_a_two_outcome_claim():
+    """The guard above must not amnesty the case the check exists for: a genuinely useless
+    two-outcome claim stated at high confidence."""
+    v = P.grade(_seed(6, True, 0.9) + _seed(14, False, 0.9))["by_type"][P.STRIKE_HOLDS]
+    assert v["brier"] > 0.25 and v["avg_confidence"] >= 50
     assert "not adding information" in v["verdict"]
 
 
