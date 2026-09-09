@@ -1223,6 +1223,41 @@ HORIZON_LOOKBACK_MAX_BARS = 250
 # spike at Sep 11", "3-touch support holds" — all falsifiable inside a known window, all
 # discarded the moment they were printed. That is why the calibration engine could only grade
 # modelled POP, the one prediction that happened to be stored.
+# ─────────────────────────────────────────────
+# ENGINE SELF-REPORTING (main.py scan_errors / vega_app board fallback)
+# ─────────────────────────────────────────────
+# The share of the watchlist that may fail to reach a VERDICT before the scan calls itself
+# degraded. An ERROR-category rejection is not a rejection -- it is the screening loop raising
+# and being caught -- and until 2026-09-08 nothing counted them: 54 of 54 tickers raised
+# NameError all session while `degraded` stayed False, because it was derived from chain
+# coverage, which was a perfect 54/54. The board read "0 qualified" and looked like a quiet
+# market. Low floor on purpose: two bad chains is noise, a fifth of the list is a broken engine.
+SCAN_ERROR_DEGRADE_SHARE = 0.20
+
+# How old the OLDEST QUOTE on the board may be, WHILE THE MARKET IS OPEN, before the cockpit
+# treats the artifact as stale and falls back to the legacy fast scan.
+#
+# MEASURED FROM SCAN START (the artifact's own `timestamp`), NOT FROM THE FILE'S mtime, and the
+# name says so because the difference is a real 8 minutes and it matters in one direction.
+#
+# A scan gathers quotes across its whole window, so the first ticker's chain is scan-start old
+# and the last one's is scan-end old. `timestamp` therefore bounds the age of the STALEST row on
+# the board; mtime would bound the freshest. Keying off mtime would make a board look 8 minutes
+# younger than its oldest quote actually is, and the error would GROW exactly as scans slow --
+# a 20-minute scan would report itself 0 minutes old at the instant it landed, with its first
+# ticker's quotes 20 minutes cold. The conservative clock is the correct one here.
+#
+# Consequence, stated so nobody "fixes" it later: an 8-minute scan trips this at roughly 37
+# minutes of post-write age, not 45. That is deliberate -- a slower scan SHOULD go stale sooner.
+#
+# The failure mode of the conservative choice, for completeness: a scan whose duration exceeds
+# this limit would be born stale and the cockpit would fall back permanently. At 8-minute scans
+# against 45 there is ~5x headroom, but that is the number to raise if scan times ever climb.
+#
+# After hours staleness is not applied at all -- the session's last scan IS the current board,
+# and an artifact six hours old at 9pm is correct rather than expired.
+ENGINE_ARTIFACT_MAX_QUOTE_AGE_MIN = 45
+
 PREDICTION_LEDGER_ENABLED = True
 PREDICTION_MIN_FOR_GRADE = 10       # resolved claims of a type before it is graded at all
 PREDICTION_TIMING_HORIZON_DAYS = 14 # how long an EARLY timing claim gets to prove itself
@@ -1254,6 +1289,42 @@ DIRECTION_MAX_TILT_SIGMAS = 0.25   # hard cap on how far the signal may move the
 DIRECTION_RECORD_BASELINE = True
 
 # ─────────────────────────────────────────────
+# MARKET REGIME FORECAST (analysis/market_forecast.py)
+# ─────────────────────────────────────────────
+# The standing bull / bear / neutral call on the whole market and on crypto, at four horizons,
+# shown live on the cockpit's Forecast tab and written down once a day so it can be graded.
+#
+# SAME STATUS AS THE DIRECTION SWEEP: a measurement instrument. No gate reads it, no strike
+# moves because of it, and no order can be placed from it. The reason it exists is that VEGA
+# has never had a written-down opinion about the market it is selling premium into — only about
+# individual spreads — so there has never been anything to grade.
+#
+# The 24-hour horizon is here because it was asked for, and it is carried under protest: the
+# equivalent single-name horizons were measured at resolution 0.0000 and retired on 2026-09-04.
+# It is graded in its own bucket and labelled UNPROVEN on the page. If it comes back at
+# resolution ~0 past the gradeability floor, retire it and record the numbers in the module
+# docstring the way direction_forecast did.
+MARKET_FORECAST_ENABLED = True
+MARKET_FORECAST_AFTER_HOUR = 14    # local hour; the daily claim anchors near the close
+MARKET_FORECAST_RECORD_BASELINE = True   # climatology twin beside every claim — see above
+# How long the Forecast tab may reuse a price series before re-fetching. data/fetcher's own
+# cache never expires (it is sized for a two-minute scan process), so in a long-lived cockpit
+# this TTL is what stops a page advertising a LIVE call from showing the first frame it ever
+# loaded. See market_forecast._default_lookup.
+MARKET_FORECAST_CACHE_MIN = 10
+
+# Each asset declares its own CALENDAR. Equities compound over 252 sessions a year, crypto over
+# 365; annualising a crypto series on 252 understates its horizon sigma by 20% and makes
+# NEUTRAL that much harder to hit on exactly the assets that move most.
+MARKET_FORECAST_ASSETS = [
+    {"ticker": "SPY", "name": "S&P 500", "klass": "equity", "group": "US stock market"},
+    {"ticker": "QQQ", "name": "Nasdaq 100", "klass": "equity", "group": "US stock market"},
+    {"ticker": "IWM", "name": "Russell 2000", "klass": "equity", "group": "US stock market"},
+    {"ticker": "BTC-USD", "name": "Bitcoin", "klass": "crypto", "group": "Crypto"},
+    {"ticker": "ETH-USD", "name": "Ethereum", "klass": "crypto", "group": "Crypto"},
+]
+
+# ─────────────────────────────────────────────
 # INTRADAY REFRESH SCHEDULER (runs inside vega_app.py cockpit)
 # ─────────────────────────────────────────────
 # The cockpit runs a market-hours-only background scheduler so the board tracks the free
@@ -1275,9 +1346,46 @@ DIRECTION_RECORD_BASELINE = True
 # Re-enabling this REQUIRES disabling the task, or the collision returns. The flag is read once
 # when the scheduler thread starts (vega_app._scheduler_loop), so the cockpit must be restarted
 # for a change here to take effect.
-INTRADAY_SCHEDULER_ENABLED = False  # Master switch for the in-cockpit market-hours scheduler
+# RE-ENABLED 2026-09-07, BUT SPLIT IN TWO, WHICH IS WHAT MAKES IT SAFE.
+#
+# The collision described above was between two drivers of the SAME job: the cockpit's paper
+# cycle and the Windows task's paper cycle. It was never about the board scan. Turning the
+# whole scheduler back on as one switch would reproduce it exactly; leaving it all off left the
+# cockpit serving whatever numbers were on disk when its window opened, so the only way to see
+# a fresh board was to close and relaunch the engine. Both of those are wrong.
+#
+# So the master switch now arms a scheduler whose two jobs are gated SEPARATELY:
+#
+#   INTRADAY_BOARD_REFRESH_ENABLED — the cockpit re-runs main.py every BOARD_REFRESH_MIN while
+#       US equity options are open, and the page reloads itself when the artifact changes. This
+#       is the one that makes the cockpit self-updating. ON.
+#
+#   INTRADAY_PAPER_CYCLE_ENABLED — the cockpit ALSO runs auto_paper_cycle. This is the half
+#       that collided with VEGA_AutoPaper_2Weeks and it stays OFF. The Windows task remains the
+#       sole owner of paper execution and the re-mark loop, for the reason given above: those
+#       must not be conditional on a dashboard being open.
+#
+# The residual overlap is that auto_paper_cycle spawns main.py as a subprocess of its own, so
+# the task's cycle and a cockpit board scan could run main.py at the same time and race on
+# logs/scan_latest.json. vega_app._spawn_job refuses to start a board scan while
+# logs/auto_paper_cycle.lock is fresh, which closes that window without either driver having to
+# know about the other.
+#
+# Flags are read once when the scheduler thread starts (vega_app._scheduler_loop), so the
+# cockpit must be restarted for a change here to take effect.
+INTRADAY_SCHEDULER_ENABLED = True   # Master switch for the in-cockpit market-hours scheduler
+INTRADAY_BOARD_REFRESH_ENABLED = True   # cockpit re-scans the board on BOARD_REFRESH_MIN
+INTRADAY_PAPER_CYCLE_ENABLED = False    # LEAVE OFF — the Windows task owns the paper cycle
 BOARD_REFRESH_MIN = 15              # Full local re-scan (main.py, no JARVIS post) cadence
 PAPER_CYCLE_MIN = 60               # Auto-open + mark paper positions (auto_paper_cycle.py) cadence
+
+# How often the OPEN PAGE asks the server whether the artifact on disk has changed, and how long
+# it waits before reloading once it has. The page never reloads on a timer: it reloads when the
+# scan it is displaying has actually been superseded, so a board sitting untouched over a
+# weekend is left alone and one that just re-scanned refreshes within a few seconds.
+COCKPIT_AUTOREFRESH_ENABLED = True
+COCKPIT_POLL_SECONDS = 20          # how often the page checks freshness (cheap JSON, no scan)
+COCKPIT_RELOAD_GRACE_SECONDS = 8   # visible countdown before the reload, so a click is never stolen
 NEWS_CACHE_TTL_MIN = 60            # Sentiment disk-cache lifetime — news re-scrapes ~hourly, and the
                                    # 15-min board scans in between reuse the cache instead of re-scraping.
 

@@ -1855,6 +1855,36 @@ def run_scan(session_type: str) -> None:
     }
     append_scan_log(log_dir, scan_entry)
 
+    # -- Did the engine actually reach a verdict on each ticker? -------------
+    # Counted here rather than inferred by each reader, so every consumer sees the same number
+    # and `degraded` has something scale-free to key on. The floor is deliberately low: a
+    # couple of tickers erroring is an ordinary bad chain, but a fifth of the watchlist failing
+    # to EVALUATE is a broken engine wearing an empty board.
+    _err = [a for a in avoided if str((a or {}).get("category", "")).upper() == "ERROR"]
+    _considered = len(avoided) + len(qualified_trades)
+    _err_share = (len(_err) / _considered) if _considered else 0.0
+    _err_floor = float(getattr(config, "SCAN_ERROR_DEGRADE_SHARE", 0.20))
+    _by_reason = {}
+    for _a in _err:
+        _by_reason[_a.get("reason")] = _by_reason.get(_a.get("reason"), 0) + 1
+    scan_errors = {
+        "errored": len(_err),
+        "considered": _considered,
+        "share": round(_err_share, 4),
+        "floor": _err_floor,
+        "degrading": bool(_considered) and _err_share >= _err_floor,
+        # Distinct messages, most common first. One repeated NameError across 54 tickers is ONE
+        # defect, not 54, and the banner should say so in the words the exception used.
+        "reasons": [{"reason": r, "n": n} for r, n in
+                    sorted(_by_reason.items(), key=lambda kv: -kv[1])[:6]],
+    }
+    if scan_errors["degrading"]:
+        logger.error(
+            "[scan] ENGINE DEGRADED: %d of %d tickers raised before reaching a verdict "
+            "(%.0f%%, floor %.0f%%). The board's zero is a CRASH, not a quiet market. %s",
+            scan_errors["errored"], _considered, _err_share * 100, _err_floor * 100,
+            "; ".join(f'{d["n"]}x {d["reason"]}' for d in scan_errors["reasons"]))
+
     # Canonical board artifact: full engine payload for the cockpit (single source of truth).
     scan_latest = {
         "timestamp": ts.isoformat(),
@@ -1868,7 +1898,24 @@ def run_scan(session_type: str) -> None:
         # about scan_coverage["scored"] tickers and about no others; anything reading it needs
         # to be able to know that.
         "scan_coverage": scan_coverage,
-        "degraded": not scan_coverage.get("healthy", False),
+        # WHAT THE SCAN COULD SEE, AND WHETHER IT COULD THINK. Two different questions, and
+        # until 2026-09-08 only the first was asked.
+        #
+        # `scan_coverage` measures QUOTABILITY -- did a two-sided chain arrive for this ticker.
+        # It cannot notice that every ticker then raised NameError inside the screening loop,
+        # because the chains arrived perfectly. On 2026-09-08 it reported healthy: true, ratio
+        # 1.0, 54/54, no band holes, while 54 of 54 tickers failed with
+        # `name '_spread_ratio' is not defined` and the board qualified nothing. `degraded` was
+        # derived from coverage alone, so it said False, and the LOW_VOL regime note supplied a
+        # plausible story for the zero. Every health field agreed the scan was fine. Nothing
+        # had been evaluated at all.
+        #
+        # An ERROR-category rejection is not a rejection. It is the engine failing to reach a
+        # verdict, and a board that cannot tell those apart reads its own crash as a quiet
+        # market -- the most dangerous state this artifact can be in, because it is the one
+        # that looks most like good news.
+        "scan_errors": scan_errors,
+        "degraded": (not scan_coverage.get("healthy", False)) or scan_errors["degrading"],
         "qualified_trades": qualified_trades,
         "rejected_trades": avoided,
         "book": {
@@ -1940,15 +1987,21 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    setup_logging()
-    args = parse_args()
-    session = args.session or resolve_session()
-    logger.info(f"[main] Running {session} scan"
-                + ("" if args.session else " (session auto-detected from clock)"))
-    run_scan(session)
-
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers used DURING a scan. They must stay ABOVE the __main__ guard.
+#
+# These four sat BELOW it from 2026-09-04 to 2026-09-08. `python main.py` executes the
+# module top to bottom, so the guard ran the whole scan and returned before these defs were
+# ever reached: every ticker raised NameError inside select_bull_put_pair, the per-ticker
+# try/except turned each one into a polite `category: ERROR` rejection, and the scan exited 0
+# with `degraded: false` and 54/54 chain coverage. Two full sessions of boards read
+# "0 qualified" as though the market were quiet. It was not; nothing was ever evaluated.
+#
+# The test suite CANNOT catch this. `import main` runs the module body with __name__ !=
+# "__main__", so the guard is skipped and every one of these exists — tests/test_reason_margins
+# calls _spread_ratio directly and passes. Only running main.py as a script reproduces it.
+# tests/test_main_entrypoint_ordering.py asserts the ordering statically instead.
+# ─────────────────────────────────────────────────────────────────────────────
 def _exit_cross_proj(short_leg, long_leg):
     """Projected cost of crossing back out, from the entry book. See the call site."""
     try:
@@ -1993,3 +2046,14 @@ def _quantiles(values) -> Dict:
     return {"n": len(v), "min": round(v[0], 4), "p25": round(q(.25), 4),
             "median": round(q(.50), 4), "p75": round(q(.75), 4),
             "p90": round(q(.90), 4), "max": round(v[-1], 4)}
+
+
+if __name__ == "__main__":
+    setup_logging()
+    args = parse_args()
+    session = args.session or resolve_session()
+    logger.info(f"[main] Running {session} scan"
+                + ("" if args.session else " (session auto-detected from clock)"))
+    run_scan(session)
+
+

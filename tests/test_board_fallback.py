@@ -7,9 +7,11 @@ page looked like it had lost its feed rather than found no trade. Whether a SPRE
 and what VIX did are different questions and the artifact holds both.
 """
 import json
+from datetime import datetime, timedelta
 
 import pytest
 
+import config
 import vega_app
 
 
@@ -23,8 +25,22 @@ def artifact(tmp_path, monkeypatch):
     return _write
 
 
-def _payload(qualified):
-    return {"timestamp": "2026-08-11T15:09:12", "qualified_trades": qualified,
+def _payload(qualified, timestamp=None):
+    """A scan artifact for TODAY.
+
+    THE TIMESTAMP MUST NOT BE HARDCODED. `_engine_artifact` ages the artifact off this field
+    while the market is open, so a pinned date makes every test in this file pass on the day it
+    is written and fail from the next session onward -- for a reason that has nothing to do with
+    what any of them assert. The literal "2026-08-11T15:09:12" that used to sit here did exactly
+    that: on 2026-09-09 it read as 41,778 minutes old, tripped the staleness branch, and
+    test_the_market_read_survives_a_board_with_nothing_on_it failed with source="legacy" while
+    looking like a regression in the fallback rule it was written to protect.
+
+    Tests that ARE about staleness pass an explicit `timestamp` and own that dimension
+    themselves; everything else gets a fresh one and is isolated from the clock.
+    """
+    ts = timestamp or datetime.now().astimezone().isoformat()
+    return {"timestamp": ts, "qualified_trades": qualified,
             "market_context": {"vix": {"current": 15.4, "trend": "falling"},
                                "spy": {"day_change_pct": -0.2}, "bias": "NEUTRAL"},
             "regime": {"regime_flag": "LOW_VOL", "regime_note": "n", "trade_suppressed": False},
@@ -33,12 +49,48 @@ def _payload(qualified):
 
 
 def test_the_market_read_survives_a_board_with_nothing_on_it(artifact, monkeypatch):
+    """CONTRACT CHANGED 2026-09-08, DELIBERATELY. This asserted `source == "legacy"`, because
+    load_board used to fall back to the fast scan whenever `qualified_trades` was empty -- for
+    any reason at all. That rule is what let a crashed engine (54/54 NameErrors) be served as
+    162 ungated fast-scan rows under a routine amber strip, with nothing on screen separating
+    "found nothing" from "died". A clean empty scan is now TRUSTED and stays on the engine path.
+
+    The intent of this test is unchanged and is what is still asserted: a board with nothing on
+    it must not lose the market read. Only the path it arrives by is different, and it now
+    arrives by the better one -- with the engine's own scan_summary rather than a fallback's.
+    """
     artifact(_payload([]))
     monkeypatch.setattr(vega_app, "_latest_candidates", lambda: (None, None))
     b = vega_app.load_board()
-    assert b["source"] == "legacy"
+    assert b["source"] == "engine" and b["engine_state"] == "trust"
+    assert b["trades"] == [], "a trusted zero shows zero rows, not a fallback's rows"
     assert b["context"].get("vix"), "market context was thrown away with the trades"
     assert b["regime"].get("regime_flag") == "LOW_VOL"
+    assert b["note"], "an empty table with no explanation reads as a broken feed"
+
+
+def test_the_market_read_survives_the_REAL_fallback_too(artifact, monkeypatch):
+    """The coverage the test above used to provide, kept where it still applies.
+
+    When the artifact is genuinely absent the legacy path really does run, and that path is
+    where market_context and regime were once discarded. Nothing above exercises it any more,
+    so it is exercised here or the original regression is uncovered.
+    """
+    # Stale while the market is open is the ordinary way to reach the fallback with an artifact
+    # still on disk -- exactly the case where its market read must be carried across. The age is
+    # stated as an explicit offset from NOW, so this test measures staleness rather than
+    # measuring how long ago it was written.
+    stale = (datetime.now().astimezone()
+             - timedelta(minutes=10 * float(getattr(config, "ENGINE_ARTIFACT_MAX_QUOTE_AGE_MIN", 45))))
+    artifact(_payload([], timestamp=stale.isoformat()))
+    monkeypatch.setattr(vega_app, "_latest_candidates",
+                        lambda: ({"meta": {"stamp": "s"}, "rows": []}, "x"))
+    monkeypatch.setattr(vega_app, "market_status", lambda: (True, ""))
+    b = vega_app.load_board()
+    assert b["source"] == "legacy" and b["engine_state"] == "absent"
+    assert b["context"].get("vix"), "the fallback dropped the market read again"
+    assert b["regime"].get("regime_flag") == "LOW_VOL"
+    assert "ENGINE FAILED" not in b["note"], "a stale artifact is not an engine failure"
 
 
 def test_the_density_funnel_survives_it_too(artifact, monkeypatch):

@@ -7,7 +7,9 @@ The Copilot then answers "should I take this, and why" before it shows a single 
 
 These tests pin the properties that make that work — not the markup, which will keep moving.
 """
+import json
 import re
+from datetime import datetime
 
 import pytest
 
@@ -365,11 +367,53 @@ def test_brief_is_gone_and_old_links_still_work():
     assert "<html" in vega_app.render("brief")      # falls back to Today
 
 
-def test_the_order_tickets_survived_the_merge():
+def test_the_order_tickets_survived_the_merge(tmp_path, monkeypatch):
     """The one thing Brief genuinely added was the executable ticket and the position size for
-    the current tier. Dropping the tab must not drop those."""
+    the current tier. Dropping the tab must not drop those.
+
+    SUPPLIES ITS OWN BOARD (2026-09-09). This used to render `today` against whatever
+    scan_latest.json happened to be on the machine and assert the panel appeared. It passed for
+    a reason it never stated: until 2026-09-08 an empty `qualified_trades` fell through to the
+    legacy fast-scan board's ~162 ungated rows, so `trades` was never empty and the panel always
+    rendered. Once a clean zero became a trusted zero, a genuine no-trade day produced
+    `trades == []`, `_mc_tickets` correctly returned "", and this went red -- describing the
+    operator's disk, not the merge it is named for. Same shape as `seeded_measurement_ledgers`
+    above, and the same fix: the test brings its own data.
+
+    That an empty board renders NO panel is deliberate and is asserted separately below; an
+    empty "Order tickets" heading with nothing under it is furniture.
+    """
+    p = tmp_path / "scan_latest.json"
+    p.write_text(json.dumps({
+        "timestamp": datetime.now().astimezone().isoformat(),
+        # `_t()`'s support level omits last_touch_bars_ago, which only the FULL page render
+        # reads (_levels_block); the unit tests above never reach it. Supplied here rather than
+        # changed in _t(), which forty-odd other tests depend on the exact shape of.
+        "qualified_trades": [
+            _t(support_levels=[{"price": 105.0, "touches": 3, "strength": 60.0,
+                                "last_touch_bars_ago": 4}]),
+            _t(ticker="BBB", support_levels=[]),
+        ],
+        "market_context": {"vix": {"current": 15.4, "trend": "falling"},
+                           "spy": {"day_change_pct": -0.2}, "bias": "NEUTRAL"},
+        "regime": {"regime_flag": "LOW_VOL", "regime_note": "n", "trade_suppressed": False},
+        "scan_summary": {"total_scanned": 1842, "total_qualified": 2,
+                         "high_edge_count": 1, "exceptional_count": 0},
+    }), encoding="utf-8")
+    monkeypatch.setattr(vega_app, "SCAN_LATEST", p)
+
     txt = _txt(vega_app.render("today"))
     assert "Order tickets" in txt
+
+
+def test_the_order_tickets_panel_is_absent_when_there_is_nothing_to_size():
+    """The counterpart to the test above, and the behaviour that exposed it.
+
+    A no-trade day is an ordinary outcome. The panel sizes positions for trades that exist, so
+    with no trades there is nothing for it to say -- and a heading over an empty space reads as
+    a rendering failure rather than a quiet market.
+    """
+    assert vega_app._mc_tickets([], "tier2") == ""
 
 
 def test_bitcoin_leads_with_something_tradeable():

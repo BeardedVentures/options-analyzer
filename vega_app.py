@@ -74,7 +74,7 @@ _COPILOT_CTX: dict = {}
 # so those failures are logged rather than raised, and this is where they go.
 logger = logging.getLogger(__name__)
 
-VIEWS = ("today", "track", "open", "bitcoin", "history", "lottery")
+VIEWS = ("today", "track", "open", "forecast", "bitcoin", "history", "lottery")
 IVR_MIN = getattr(config, "MIN_IV_RANK", 45)
 # The two edge-score bands the density funnel and the status ladder both count against.
 # Defined once so the bar, the cards and the engine's scan_summary cannot drift apart.
@@ -536,24 +536,97 @@ def _adapt_legacy(row: dict, c: dict) -> dict:
     }
 
 
-def load_board():
-    """Return dict: {source, trades[], asof, note}. Engine artifact first, legacy fallback."""
-    if SCAN_LATEST.exists():
+def _engine_artifact():
+    """The engine payload and a verdict on whether it may be TRUSTED, not merely read.
+
+    Three states, and conflating any two of them is how the cockpit lied for two sessions:
+
+      trust    the scan ran, reached a verdict on the watchlist, and is current. Its answer
+               stands even when that answer is ZERO -- a genuine drought must be allowed to
+               look like a drought.
+      failed   the scan ran and could not reach a verdict (ERROR-category rejections past
+               config.SCAN_ERROR_DEGRADE_SHARE, or main.py's own `degraded`). The legacy board
+               is the only usable data, so it is still shown -- but it must be BANNERED, never
+               swapped in quietly.
+      absent   missing, unparseable, or stale-while-the-market-is-open. Fall back as before.
+
+    Staleness is only applied while the market is OPEN. After the close, the session's last
+    scan IS the current board; an artifact six hours old at 9pm is correct, and expiring it
+    would make the cockpit fall back to the fast scan every evening.
+    """
+    if not SCAN_LATEST.exists():
+        return None, "absent", "no engine artifact on disk"
+    try:
+        d = json.loads(SCAN_LATEST.read_text(encoding="utf-8"))
+    except Exception as e:
+        return None, "absent", f"engine artifact unreadable: {e}"
+
+    se = d.get("scan_errors") or {}
+    # `degrading` is main.py's own verdict; the share is recomputed here so an artifact written
+    # before scan_errors existed is still judged rather than trusted by default.
+    if not se:
+        rej = d.get("rejected_trades") or []
+        errs = [r for r in rej if str((r or {}).get("category", "")).upper() == "ERROR"]
+        considered = len(rej) + len(d.get("qualified_trades") or [])
+        share = (len(errs) / considered) if considered else 0.0
+        floor = float(getattr(config, "SCAN_ERROR_DEGRADE_SHARE", 0.20))
+        by = {}
+        for r in errs:
+            by[r.get("reason")] = by.get(r.get("reason"), 0) + 1
+        se = {"errored": len(errs), "considered": considered, "share": round(share, 4),
+              "floor": floor, "degrading": bool(considered) and share >= floor,
+              "reasons": [{"reason": r, "n": n}
+                          for r, n in sorted(by.items(), key=lambda kv: -kv[1])[:6]]}
+        d["scan_errors"] = se
+    if se.get("degrading"):
+        return d, "failed", "engine raised before reaching a verdict"
+
+    is_open, _ = market_status()
+    if is_open:
         try:
-            d = json.loads(SCAN_LATEST.read_text(encoding="utf-8"))
-            qt = d.get("qualified_trades") or []
-            if qt:
-                trades = [_adapt_engine(t) for t in qt]
-                trades.sort(key=lambda x: (x["priority"] or 0), reverse=True)
-                return {"source": "engine", "trades": trades, "asof": d.get("timestamp"),
-                        "session": d.get("session_type"),
-                        "context": d.get("market_context") or {}, "regime": d.get("regime") or {},
-                        # Absent on boards written before the funnel existed; the bar renders
-                        # nothing rather than guessing a denominator from the row count.
-                        "scan_summary": d.get("scan_summary") or {},
-                        "book": d.get("book") or {}, "note": ""}
+            age_min = (datetime.now(datetime.fromisoformat(d["timestamp"]).tzinfo)
+                       - datetime.fromisoformat(d["timestamp"])).total_seconds() / 60.0
         except Exception:
-            pass
+            age_min = None
+        # Named for what it measures: the age of the OLDEST quote on the board, since
+        # `timestamp` is stamped at scan START. See config for why not mtime.
+        limit = float(getattr(config, "ENGINE_ARTIFACT_MAX_QUOTE_AGE_MIN", 45))
+        if age_min is not None and age_min > limit:
+            return d, "absent", (f"the oldest quote on the engine board is {age_min:.0f} min "
+                                 f"old while the market is open (limit {limit:.0f})")
+    return d, "trust", ""
+
+
+def load_board():
+    """Return dict: {source, trades[], asof, note}. Engine artifact first, legacy fallback.
+
+    A TRUSTED ENGINE ZERO IS NOW A ZERO. This used to fall back to the legacy fast scan whenever
+    `qualified_trades` was empty, for any reason. On 2026-09-08 the engine raised NameError on
+    all 54 tickers, qualified nothing, and the cockpit silently swapped in 162 ungated fast-scan
+    rows -- no true POP, no edge score, blocked spreads included -- under the same PROVISIONAL
+    label it shows on an ordinary fallback. Nothing on screen distinguished "the engine found
+    nothing" from "the engine died", and the operator had no way to know which board they were
+    reading.
+    """
+    d, state, why = _engine_artifact()
+    if d is not None and state == "trust":
+        qt = d.get("qualified_trades") or []
+        trades = [_adapt_engine(t) for t in qt]
+        trades.sort(key=lambda x: (x["priority"] or 0), reverse=True)
+        return {"source": "engine", "trades": trades, "asof": d.get("timestamp"),
+                "session": d.get("session_type"),
+                "context": d.get("market_context") or {}, "regime": d.get("regime") or {},
+                # Absent on boards written before the funnel existed; the bar renders
+                # nothing rather than guessing a denominator from the row count.
+                "scan_summary": d.get("scan_summary") or {},
+                "book": d.get("book") or {},
+                # A trusted zero says so in the operator's words rather than by rendering an
+                # empty table that reads like a broken feed.
+                "note": ("" if qt else
+                         "The engine reached a verdict on every ticker it could quote and "
+                         "qualified none of them. This is a real zero, not a fallback."),
+                "engine_state": "trust", "scan_errors": d.get("scan_errors") or {}}
+
     data, path = _latest_candidates()
     trades = []
     if data:
@@ -568,17 +641,28 @@ def load_board():
     # vanished, as though the cockpit had lost its data feed rather than found no trade.
     # The engine artifact still holds market_context and regime in exactly that case.
     ctx, reg, sums = {}, {}, {}
-    if SCAN_LATEST.exists():
-        try:
-            _d = json.loads(SCAN_LATEST.read_text(encoding="utf-8"))
-            ctx = _d.get("market_context") or {}
-            reg = _d.get("regime") or {}
-            sums = _d.get("scan_summary") or {}
-        except Exception:
-            pass
+    if d is not None:
+        ctx = d.get("market_context") or {}
+        reg = d.get("regime") or {}
+        sums = d.get("scan_summary") or {}
+
+    # WHY the fallback is showing decides how loudly it says so. An absent or stale artifact is
+    # ordinary and gets the provisional note it always had. An artifact whose engine RAISED is
+    # not a fallback, it is a failure being papered over by whatever else is on disk, and it
+    # gets a banner naming the exception and the count.
+    se = (d or {}).get("scan_errors") or {}
+    if state == "failed":
+        top = "; ".join(f'{r["n"]}x {r["reason"]}' for r in (se.get("reasons") or [])[:3])
+        note = (f"ENGINE FAILED — {se.get('errored', 0)} of {se.get('considered', 0)} tickers "
+                f"raised before reaching a verdict. These rows are the ungated fast scan: no "
+                f"true POP, no edge score, and BLOCKED spreads are included. Do not read this "
+                f"board as the engine's opinion."
+                + (f" ({top})" if top else ""))
+    else:
+        note = ("Fast local scan (yfinance). No edge scores — treat as provisional until the "
+                "full engine runs." + (f" ({why})" if why else ""))
     return {"source": "legacy", "trades": trades, "asof": asof, "context": ctx, "regime": reg,
-            "scan_summary": sums,
-            "note": "Fast local scan (yfinance). No edge scores — treat as provisional until the full engine runs."}
+            "scan_summary": sums, "engine_state": state, "scan_errors": se, "note": note}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -604,6 +688,93 @@ function presetOff(){document.querySelectorAll('.rpre button').forEach(function(
 /* Presets write the same input the typed box does — one filter, one source of truth,
    so the two controls can never disagree about what the board is showing. */
 function setRisk(btn,v){var e=document.getElementById('fmaxloss');if(e){e.value=(v===''?'':v);}presetOff();btn.classList.add('on');filterBoard();}
+</script>"""
+
+
+# The page keeps itself current. Three rules, and each one exists because the obvious version of
+# this feature is worse:
+#
+#   1. It reloads on a CHANGED ARTIFACT, never on a timer. A plain meta-refresh would reload a
+#      weekend board that cannot have moved, and would reload mid-read while the operator is
+#      looking at a row.
+#   2. It refuses to reload while a form is being filled or a drawer is open. Reloading out from
+#      under a half-typed contract count or an expanded candidate is a worse failure than being
+#      one scan behind, because the operator loses work rather than freshness.
+#   3. It counts down VISIBLY before reloading, so a page that is about to move says so and can
+#      be stopped with one click.
+#
+# It also updates the age readout in the nav on every poll WITHOUT reloading, so an idle screen
+# still tells the truth about how old the numbers on it are.
+AUTOREFRESH_JS = """<script>
+(function(){
+  var CFG = window.__VEGA_REFRESH__ || {};
+  if(!CFG.enabled) return;
+  var stamp = CFG.stamp || 0, poll = (CFG.poll||20)*1000, grace = (CFG.grace||8);
+  var pill = document.getElementById('freshpill'), banner = null, timer = null, left = 0;
+  /* `paused` outlives the banner, and has to. Without it the next poll's setAge overwrites the
+     paused message with an ordinary age readout, so twenty seconds after the operator opts out
+     the pill is INDISTINGUISHABLE from the armed state -- a page that has permanently stopped
+     updating itself and no longer says so. That is the exact failure this whole feature exists
+     to remove, re-entering through its own opt-out. */
+  var paused = false, lastF = null;
+  function busy(){
+    var a = document.activeElement;
+    if(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return true;
+    if(document.querySelector('.vdetail.open, tr.vdetail.open')) return true;
+    if(document.querySelector('button[disabled] .spin')) return true;
+    return false;
+  }
+  function setAge(f){
+    if(!pill) return;
+    if(f) lastF = f;
+    f = lastF || {};
+    var t = (f.scan_at ? 'Board '+f.scan_at : 'No scan yet');
+    if(f.scan_age_min !== null && f.scan_age_min !== undefined){
+      var m = Math.round(f.scan_age_min);
+      t += ' \u00b7 ' + (m < 1 ? 'just now' : m + 'm ago');
+    }
+    if(f.running && f.running.length) t += ' \u00b7 scanning\u2026';
+    /* The age keeps updating while paused -- knowing HOW old the board is stays useful. What
+       must never disappear is that nothing is going to refresh it. */
+    if(paused) t += ' · auto-refresh paused';
+    pill.textContent = t;
+    var stale = (f.scan_age_min !== null && f.scan_age_min !== undefined
+                 && f.scan_age_min > 2*(f.refresh_min||15) && f.market_open);
+    pill.className = (paused || stale) ? 'fresh stale' : 'fresh';
+  }
+  function showBanner(){
+    if(banner) return;
+    banner = document.createElement('div');
+    banner.className = 'reloadbar';
+    banner.innerHTML = '<span>New scan on disk \u2014 refreshing in <b id="rlsec">'+grace+'</b>s</span>'+
+      '<button type="button" id="rlnow">Refresh now</button>'+
+      '<button type="button" id="rlstop" class="ghost">Keep this view</button>';
+    document.body.appendChild(banner);
+    document.getElementById('rlnow').onclick = function(){ location.reload(); };
+    document.getElementById('rlstop').onclick = function(){
+      clearInterval(timer); timer = null; banner.remove(); banner = null;
+      stamp = -1;   /* stop asking until the operator reloads by hand */
+      paused = true; setAge(null);
+    };
+    left = grace;
+    timer = setInterval(function(){
+      if(busy()) return;                 /* the countdown waits, it does not steal the click */
+      left -= 1;
+      var el = document.getElementById('rlsec'); if(el) el.textContent = left;
+      if(left <= 0){ clearInterval(timer); location.reload(); }
+    }, 1000);
+  }
+  function tick(){
+    fetch('/api/freshness', {cache:'no-store'}).then(function(r){return r.json();}).then(function(f){
+      setAge(f);
+      if(stamp === -1) return;
+      if(f.stamp && stamp && f.stamp > stamp) showBanner();
+      else if(f.stamp && !stamp) stamp = f.stamp;
+    }).catch(function(){ /* the cockpit is local; a failed poll means it is restarting */ });
+  }
+  setInterval(tick, poll);
+  tick();
+})();
 </script>"""
 
 
@@ -2861,10 +3032,35 @@ def view_today(board, s, tier):
     _COPILOT_CTX = board.get("context") or {}
     fresh_label, _fc, _fs = _freshness(board)
     prov = ""
-    if board.get("source") == "legacy":
+    # An ENGINE FAILURE is not a provisional board and must not wear the provisional band. The
+    # amber "fast scan" strip is a routine notice the eye learns to skip; on 2026-09-08 it was
+    # the ONLY thing distinguishing 162 ungated rows served after the engine raised on all 54
+    # tickers from the same 162 rows served because a scan had not run yet. Red, first on the
+    # page, naming the exception and the count.
+    if board.get("engine_state") == "failed":
+        se = board.get("scan_errors") or {}
+        rs = "".join(f'<li><code>{esc(str(r.get("reason")))}</code> — {r.get("n")} tickers</li>'
+                     for r in (se.get("reasons") or [])[:4])
+        prov = ('<div class="provbar" style="border-color:rgba(240,69,90,.55);'
+                'background:rgba(240,69,90,.10)">'
+                f'🛑 <b>ENGINE FAILED — this board is NOT the engine\'s opinion.</b> '
+                f'{se.get("errored", 0)} of {se.get("considered", 0)} tickers raised before '
+                f'reaching a verdict, so nothing was graded. The rows below are the ungated '
+                f'fast scan: <b>no True POP, no edge score, and spreads the gates would have '
+                f'BLOCKED are included</b>.'
+                + (f'<ul style="margin:6px 0 0 18px;padding:0">{rs}</ul>' if rs else '')
+                + '<div style="margin-top:6px">Fix the scan before trading off this board.</div>'
+                '</div>')
+    elif board.get("source") == "legacy":
         prov = ('<div class="provbar">⚡ <b>Fast scan (provisional)</b> — ranked by model POP + ROC. '
                 'Edge, EV $ and True POP are blank here because they need the full engine. '
                 'Run the engine (<code>python main.py</code>) for the graded board.</div>')
+    elif board.get("note"):
+        # A TRUSTED ZERO. Green rather than amber: the engine worked, and saying nothing here
+        # would leave an empty table looking indistinguishable from a broken feed.
+        prov = ('<div class="provbar" style="border-color:rgba(0,201,122,.4);'
+                'background:rgba(0,201,122,.07)">'
+                f'✓ <b>No qualifying trade.</b> {esc(board["note"])}</div>')
     # Quotes stale → the credits shown are MODELLED, not fillable. Said out loud, because the
     # whole point of pricing on the natural basis is that the board never quotes a price its
     # reader cannot get, and after the close nobody can get any of them. Measured 2026-08-10:
@@ -4305,6 +4501,306 @@ def view_bitcoin():
     return f'<h1>Research — cross-venue volatility</h1>{intro}{xv}{fc_block}{foot}'
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Forecast — the standing regime call, and its graded record
+# ─────────────────────────────────────────────────────────────────────────────
+FORECAST_CSS = """
+/* Forecast tab. Same tokens as the rest of the cockpit: green means bull, red means bear, and
+   neutral is deliberately GREY rather than amber — amber already means "verify this" on every
+   other page, and a neutral market is not a warning. */
+.fcell{display:flex;flex-direction:column;gap:5px;align-items:flex-end}
+.fcall{font-size:13px;font-weight:800;letter-spacing:.06em}
+.fcall.bull{color:var(--green)}.fcall.bear{color:var(--red)}.fcall.flat{color:var(--ink2)}
+.fcall.none{color:var(--ink4);font-weight:600}
+.fmeta{font-size:10.5px;color:var(--ink3);white-space:nowrap}
+.lean{display:flex;width:104px;height:5px;border-radius:99px;overflow:hidden;background:var(--panel3)}
+.lean i{display:block;height:100%}
+.lean i.d{background:var(--red);opacity:.85}
+.lean i.f{background:var(--ink4);opacity:.55}
+.lean i.u{background:var(--green);opacity:.85}
+.fhz{font-size:10px;color:var(--ink4);text-transform:uppercase;letter-spacing:.07em}
+.fgrp td{background:var(--panel2);color:var(--ink3);font-size:10px;text-transform:uppercase;
+         letter-spacing:.07em;font-weight:700;padding:6px 10px}
+.fnote{font-size:11.5px;color:var(--ink3);line-height:1.5;margin:6px 0 0}
+.fdrv{font-size:11px;color:var(--ink4)}
+.hzcard{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);
+        border-radius:10px;padding:12px 15px}
+.hzcard.ok{border-left-color:var(--green)}
+.hzcard.warn{border-left-color:var(--amber)}
+.hzcard.wait{border-left-color:var(--line)}
+.hzcard .hzt{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.hzcard .hzn{font-size:15px;font-weight:700}
+.hzcard .hzs{font-size:11px;color:var(--ink3)}
+.hzcard .hzv{font-size:12px;color:var(--ink2);margin-top:7px;line-height:1.5}
+.hzcard .hzu{font-size:11px;color:var(--ink4);margin-top:6px;line-height:1.5}
+.hzrow{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px}
+.hzrow div{font-size:11px;color:var(--ink3)}
+.hzrow div b{display:block;font-size:15px;color:var(--ink);font-weight:700}
+.fresh{color:var(--ink3)}
+.fresh.stale{color:var(--amber)}
+.reloadbar{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:60;display:flex;
+           align-items:center;gap:12px;background:var(--panel2);border:1px solid var(--line);
+           border-left:3px solid var(--green);border-radius:10px;padding:10px 14px;font-size:12.5px;
+           color:var(--ink2);box-shadow:0 8px 26px rgba(0,0,0,.45)}
+.reloadbar button{font:inherit;font-weight:700;font-size:11.5px;color:#04120c;background:var(--green);
+                  border:0;border-radius:6px;padding:6px 11px;cursor:pointer}
+.reloadbar button.ghost{background:transparent;color:var(--ink3);border:1px solid var(--line)}
+"""
+
+_CALL_CLS = {"BULL": "bull", "BEAR": "bear", "NEUTRAL": "flat", "NO CALL": "none"}
+
+
+def _tilt_cap() -> float:
+    """The tilt cap the forecast ACTUALLY ran with.
+
+    Read from direction_forecast rather than re-read from config, because the two can disagree:
+    that module prefers DIRECTION_MAX_TILT_IR and only falls back to DIRECTION_MAX_TILT_SIGMAS,
+    so a footnote quoting the fallback by name would keep printing 0.25 on the day someone sets
+    the other one. A number on the page describing the model has to come from the model.
+    """
+    try:
+        from analysis import direction_forecast as _df
+        return float(_df.MAX_TILT_IR)
+    except Exception:
+        return float(getattr(config, "DIRECTION_MAX_TILT_SIGMAS", 0.25))
+
+
+def _fcell(c):
+    """One asset at one horizon.
+
+    Shows the call, the probability, AND the three-way split as a bar, because the probability
+    on its own is misread. The flat band is set at ±0.4307 sigma — the width that makes bull,
+    bear and neutral EQUALLY likely under zero drift — so all three start at 33.3%. A 38% call
+    is therefore a real lean and a 34% call is very nearly no opinion, and a reader who does not
+    know the base rate would score both as feeble. The bar makes the tilt visible without
+    needing the footnote.
+    """
+    if not c or c.get("expected") in (None, "none"):
+        why = esc((c or {}).get("reason") or "not enough history")
+        return (f'<td><div class="fcell"><span class="fcall none">NO CALL</span>'
+                f'<span class="fmeta" title="{why}">abstained</span></div></td>')
+    call = c.get("call") or "NO CALL"
+    p = c.get("probability") or 0
+    pu, pd, pf = (c.get("p_up") or 0), (c.get("p_down") or 0), (c.get("p_flat") or 0)
+    # The lean, in points over the runner-up. This is the number that says how much the signal
+    # actually moved the call away from the tie it starts at.
+    ranked = sorted((pu, pd, pf), reverse=True)
+    lean = (ranked[0] - ranked[1]) * 100
+    tot = max(pu + pd + pf, 1e-9)
+    bar = (f'<span class="lean"><i class="d" style="width:{pd/tot*100:.1f}%"></i>'
+           f'<i class="f" style="width:{pf/tot*100:.1f}%"></i>'
+           f'<i class="u" style="width:{pu/tot*100:.1f}%"></i></span>')
+    band = c.get("flat_band_pct")
+    tip = esc(f"up {pu:.1%} / flat {pf:.1%} / down {pd:.1%} · "
+              f"flat band ±{band:.2f}% · 1σ {c.get('sigma_pct') or 0:.2f}% over "
+              f"{c.get('horizon_periods')} days" if band is not None else "")
+    return (f'<td><div class="fcell" title="{tip}">'
+            f'<span class="fcall {_CALL_CLS.get(call, "none")}">{esc(call)}</span>'
+            f'<span class="fmeta">{p*100:.0f}% · lean +{lean:.0f}pp</span>{bar}</div></td>')
+
+
+def _forecast_grade_card(h):
+    """One horizon's graded record, or an honest account of why there is not one yet."""
+    sig = h.get("signal") or {}
+    base = h.get("baseline") or {}
+    gradeable = h.get("gradeable")
+    res = h.get("resolution")
+    # Colour is earned, not assigned by horizon. A card goes green only when the type is
+    # gradeable AND discriminates; amber when it is gradeable and does not; grey while it is
+    # still filling up. Nothing here is green today and it should not pretend otherwise.
+    if not gradeable:
+        cls, verdict_cls = "wait", "hzu"
+    elif res is not None and res > 0.005:
+        cls, verdict_cls = "ok", "hzv"
+    else:
+        cls, verdict_cls = "warn", "hzv"
+
+    stats = ""
+    if sig:
+        skill = h.get("skill_vs_baseline")
+        stats = ('<div class="hzrow">'
+                 f'<div><b>{sig.get("n", 0)}</b>resolved</div>'
+                 f'<div><b>{sig.get("n_effective", 0)}</b>independent</div>'
+                 f'<div><b>{sig.get("hit_rate", 0):.0f}%</b>correct</div>'
+                 # Brier carries its scale in a tooltip because on a THREE-way call it does
+                 # not mean what a reader trained on binary forecasts assumes. Stated
+                 # confidence here lives near a third, so a correct call scores about 0.42 and
+                 # a wrong one about 0.12: lower is NOT better, and a reader comparing this
+                 # figure against the usual "0 is perfect, 0.25 is a coin flip" would rank the
+                 # channel exactly backwards. Resolution, next to it, is the scale-free one.
+                 f'<div title="Three-way call: a correct call scores ~0.42 and a wrong one '
+                 f'~0.12, so LOWER IS NOT BETTER here. Read resolution instead.">'
+                 f'<b>{(sig.get("brier") if sig.get("brier") is not None else float("nan")):.3f}</b>'
+                 f'Brier<sup>?</sup></div>'
+                 f'<div><b>{(res if res is not None else 0):.4f}</b>resolution</div>'
+                 + (f'<div><b>{skill:+.4f}</b>vs climatology</div>' if skill is not None else "")
+                 + '</div>')
+    else:
+        nxt = h.get("next_resolution")
+        stats = ('<div class="hzrow">'
+                 f'<div><b>{h.get("made", 0)}</b>claims written</div>'
+                 f'<div><b>{h.get("open", 0)}</b>in flight</div>'
+                 + (f'<div><b>{esc(nxt)}</b>first resolution</div>' if nxt else "")
+                 + '</div>')
+
+    baseline_line = ""
+    if base:
+        baseline_line = (f'<div class="hzu">Climatology twin (same band, mean pinned at zero): '
+                         f'{base.get("hit_rate", 0):.0f}% correct over {base.get("n", 0)}, '
+                         f'resolution {(base.get("resolution") or 0):.4f}. The signal is only '
+                         f'worth something to the extent it beats this row.</div>')
+
+    return (f'<div class="hzcard {cls}"><div class="hzt">'
+            f'<span class="hzn">{esc(h["label"])}</span>'
+            f'<span class="tier tier-{"validated" if cls == "ok" else ("provisional" if cls == "warn" else "unproven")}">'
+            f'{"graded" if gradeable else "unproven"}</span>'
+            f'<span class="hzs">{esc(h["claim_type"])}</span></div>'
+            f'{stats}'
+            f'<div class="{verdict_cls}">{esc(h.get("verdict") or "")}</div>'
+            f'{baseline_line}'
+            f'<div class="hzu">{esc(h.get("note") or "")}</div></div>')
+
+
+def view_forecast():
+    """The regime call: what the model thinks right now, and how its past calls have scored.
+
+    Two panels that must never be confused with each other. The grid at the top is recomputed
+    from the latest closes on every load and is written nowhere. The record underneath is built
+    only from claims that were dated, stored and settled against a later bar. A page that let
+    the live call bleed into the track record would be grading itself on what it currently
+    believes, which is the failure mode every prediction ledger in this system exists to avoid.
+    """
+    try:
+        from analysis import market_forecast as mf
+    except Exception as e:
+        return (f'<h1>Forecast</h1><div class="empty">Forecast layer unavailable: '
+                f'{esc(str(e))}</div>')
+
+    intro = ('<p class="q">One BULL / BEAR / NEUTRAL call per market at four horizons. The '
+             'three outcomes start <b>tied at 33%</b> by construction — the flat band is set at '
+             '±0.43σ, the width that makes them equally likely if price has no drift — so the '
+             'number to read is the <b>lean</b>, not the raw percentage. A 38% call is a real '
+             'tilt; 34% is close to no opinion. The grid recomputes on every load; a dated copy '
+             'is written once a day near the close and graded below. '
+             '<b>Nothing here moves a strike, a size or an order.</b></p>')
+
+    try:
+        board = mf.live_board()
+    except Exception as e:
+        return f'<h1>Forecast</h1>{intro}<div class="warn">Live board failed: {esc(str(e))}</div>'
+
+    hz = list(mf.HORIZONS)
+    head = ('<div class="board"><table><thead>'
+            '<tr class="col"><th class="l">Market</th><th>Spot</th>'
+            + "".join(f'<th>{esc(h[1])}</th>' for h in hz)
+            + '</tr></thead><tbody>')
+
+    rows_html, last_group, warnings = "", None, []
+    ncols = 2 + len(hz)
+    for r in board["rows"]:
+        if r["group"] != last_group:
+            rows_html += f'<tr class="fgrp"><td class="l" colspan="{ncols}">{esc(r["group"])}</td></tr>'
+            last_group = r["group"]
+        spot = (f'{r["spot"]:,.2f}' if r["spot"] and r["spot"] < 1000
+                else (f'{r["spot"]:,.0f}' if r["spot"] else "—"))
+        age = r.get("price_age_s")
+        age_txt = ("live" if age is None else
+                   ("just now" if age < 90 else f"{age/60:.0f}m old"))
+        if not r["closes"]:
+            warnings.append(f'{r["ticker"]}: no price history returned — every horizon abstained.')
+        # Same cell idiom as the Today board — `td.l.tk` with the name in bold and the muted
+        # secondary line under it — so the two boards read as one system rather than two.
+        rows_html += (f'<tr><td class="l tk"><b>{esc(r["name"])}</b>'
+                      f'<div class="dim">{esc(r["ticker"])} · {r["closes"]} closes · {age_txt}</div></td>'
+                      f'<td class="num">{spot}</td>'
+                      + "".join(_fcell(r["cells"].get(h[0])) for h in hz) + '</tr>')
+        drv = r.get("drivers") or []
+        if drv:
+            rows_html += (f'<tr><td class="l fdrv" colspan="{ncols}">'
+                          f'↳ {esc("; ".join(drv))}</td></tr>')
+    grid = head + rows_html + '</tbody></table></div>'
+
+    warn = ""
+    if board.get("errors") or warnings:
+        warn = ('<div class="warn" style="margin:10px 0">'
+                + esc(" ".join(list(board.get("errors") or []) + warnings)) + '</div>')
+
+    # ── The graded record ──
+    try:
+        t = mf.track_record()
+    except Exception as e:
+        return (f'<h1>Forecast — market regime</h1>{intro}{warn}{grid}'
+                f'<h2>Track record</h2><div class="warn">Ledger unavailable: {esc(str(e))}</div>')
+
+    cards = "".join(_forecast_grade_card(h) for h in t["horizons"])
+    ledger_line = (f'<div class="kv" style="margin:2px 0 10px"><span class="dim">'
+                   f'{t["total"]} claims in the ledger · {t["resolved"]} resolved · '
+                   f'{t["open"]} in flight · {t["unresolvable"]} unresolvable · '
+                   f'cohort {esc(t["cohort"])}</span></div>')
+
+    empty = ""
+    if not t["total"]:
+        empty = ('<div class="warn" style="margin:8px 0">No dated claims yet. The first set is '
+                 'written on the next cycle after '
+                 f'{int(getattr(config, "MARKET_FORECAST_AFTER_HOUR", 14)):02d}:00 local — the '
+                 'claims anchor near the close, so recording them in the morning would hand the '
+                 '24-hour call several hours of the move it is supposed to be predicting.</div>')
+
+    # ── Recent claims ──
+    crows = ""
+    for r in mf.recent(30):
+        ctx = r.get("context") or {}
+        st = r.get("status")
+        if st == "resolved":
+            mark = ('<span class="pos">correct</span>' if r.get("correct")
+                    else '<span class="neg">wrong</span>')
+        elif st == "unresolvable":
+            mark = '<span class="dim">unresolvable</span>'
+        else:
+            mark = '<span class="dim">awaiting</span>'
+        call = (ctx.get("call") or (ctx.get("expected") or "").upper())
+        band = ctx.get("flat_band_pct")
+        band_txt = f'&plusmn;{float(band):.2f}%' if band is not None else '&mdash;'
+        crows += (f'<tr><td class="l num">{esc(str(r.get("made_at"))[:10])}</td>'
+                  f'<td class="l">{esc(ctx.get("asset_name") or r.get("ticker"))}</td>'
+                  f'<td class="l fhz">{esc(ctx.get("horizon") or "")}</td>'
+                  f'<td class="l"><span class="fcall {_CALL_CLS.get(call, "none")}">{esc(call)}</span></td>'
+                  f'<td class="num">{(r.get("probability") or 0)*100:.0f}%</td>'
+                  f'<td class="num">{band_txt}</td>'
+                  f'<td class="num">{(ctx.get("price_at_claim") or 0):,.2f}</td>'
+                  f'<td class="l num">{esc(str(r.get("resolves_on") or "")[:10])}</td>'
+                  f'<td class="l">{mark}</td>'
+                  f'<td class="l dim">{esc((r.get("resolution_note") or "")[:64])}</td></tr>')
+    ledger = ""
+    if crows:
+        ledger = ('<h2>Recent claims</h2>'
+                  '<p class="q">Only the live claims are listed. Each one also has a climatology '
+                  'twin in the ledger — same band, same horizon, mean pinned at zero — which is '
+                  'graded but not shown, because it is a control and not a forecast.</p>'
+                  '<div class="board"><table><thead><tr class="col">'
+                  '<th class="l">Made</th><th class="l">Market</th><th class="l">Horizon</th>'
+                  '<th class="l">Call</th><th>Conf</th><th>Flat band</th><th>Price</th>'
+                  '<th class="l">Resolves</th><th class="l">Result</th><th class="l">Note</th>'
+                  f'</tr></thead><tbody>{crows}</tbody></table></div>')
+
+    foot = ('<div class="foot">The probability comes from the band the asset\'s own volatility '
+            'implies, not from a signal score: p(up) = 1 − Φ(b − μ) with b fixed at 0.4307σ and '
+            'μ the only thing the signal may move, capped at an annualised information ratio of '
+            f'{_tilt_cap():.2f}. Drift accumulates '
+            'linearly and sigma with its square root, so the same edge is worth μ = IR·√t at '
+            'horizon t — which is why the lean is small at 24 hours and largest at six months. '
+            'Equities are annualised on 252 sessions and crypto on 365 days, each against its '
+            'own calendar. Prices are the free ≈15-minute-delayed feed. This is a measuring '
+            'instrument: no gate reads it, no strike moves because of it, and no order can be '
+            'placed from it. Not financial advice.</div>')
+
+    return (f'<h1>Forecast — market regime</h1>{intro}{warn}{grid}'
+            f'<h2>Track record — is any of this worth reading?</h2>'
+            f'{ledger_line}{empty}'
+            f'<div class="grid g2" style="margin-bottom:6px">{cards}</div>'
+            f'{ledger}{foot}')
+
+
 def _btc_card(label, value, sub, color=None):
     style = f' style="color:{color}"' if color else ""
     return (f'<div class="card"><div class="lab">{esc(label)}</div>'
@@ -4315,13 +4811,21 @@ def _btc_card(label, value, sub, color=None):
 def nav(view):
     links = ""
     labels = {"today": "Today", "track": "Track Record", "open": "Open",
-              "bitcoin": "Research", "history": "History", "lottery": "Momentum"}
+              "forecast": "Forecast", "bitcoin": "Research", "history": "History",
+              "lottery": "Momentum"}
     for v in VIEWS:
         links += f'<a class="{"on" if v == view else ""}" href="/?view={v}">{labels[v]}</a>'
     is_open, _ = market_status()
     mkt = f'<span><span class="dot {"" if is_open else "off"}"></span>{"Market open" if is_open else "Market closed"}</span>'
+    # The board's age sits beside the market clock rather than buried in the footer, because
+    # "how old is what I am looking at" is the question the operator was answering by closing
+    # and relaunching the engine. Filled by AUTOREFRESH_JS on every poll, so it stays true on a
+    # page nobody has touched for an hour.
+    scan_at = _mtime(SCAN_LATEST)
+    initial = (f'Board {datetime.fromtimestamp(scan_at):%H:%M}' if scan_at else 'No scan yet')
+    fresh = f'<span id="freshpill" class="fresh">{initial}</span>'
     return (f'<div class="topnav"><div class="brand">VEGA<span class="sub">Market Opportunity Engine</span></div>'
-            f'<div class="nav">{links}</div><div class="rside">{mkt}'
+            f'<div class="nav">{links}</div><div class="rside">{fresh}{mkt}'
             f'<span>{datetime.now().strftime("%Y-%m-%d %H:%M")}</span></div></div>')
 
 
@@ -4343,6 +4847,8 @@ def render(view="today", flash=""):
         content = view_track()
     elif view == "open":
         content = view_open(open_)
+    elif view == "forecast":
+        content = view_forecast()
     elif view == "bitcoin":
         content = view_bitcoin()
     elif view == "history":
@@ -4358,12 +4864,84 @@ def render(view="today", flash=""):
             'provisional yfinance refresh without edge scores. True POP is the drift-removed historical frequency '
             '(C2); implied POP is what the market prices; edge = true − implied. Educational tool — no orders are '
             'placed and no money moves. Not financial advice.</div>')
+    cfg = json.dumps({
+        "enabled": bool(getattr(config, "COCKPIT_AUTOREFRESH_ENABLED", True)),
+        "stamp": data_stamp(),
+        "poll": float(getattr(config, "COCKPIT_POLL_SECONDS", 20)),
+        "grace": float(getattr(config, "COCKPIT_RELOAD_GRACE_SECONDS", 8)),
+    })
+    refresh = f'<script>window.__VEGA_REFRESH__ = {cfg};</script>{AUTOREFRESH_JS}'
     return (f'<!doctype html><html><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>VEGA · {view}</title><style>{CSS}</style></head><body>'
+            f'<title>VEGA · {view}</title><style>{CSS}{FORECAST_CSS}</style></head><body>'
             f'{nav(view)}<div class="wrap">'
             f'<div style="display:flex;justify-content:flex-end;margin-top:12px">{rescan}</div>'
-            f'{banner}{content}{foot}</div>{JS}</body></html>')
+            f'{banner}{content}{foot}</div>{JS}{refresh}</body></html>')
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Freshness — the one number that decides whether an open page is out of date
+# ─────────────────────────────────────────────────────────────────────────────
+# The cockpit used to be a snapshot of whatever was on disk when its window opened. The board
+# behind it changed and the page never found out, so the only way to see a current board was to
+# close the engine and relaunch it — which is the thing this exists to stop.
+#
+# The page therefore carries the artifact's modification time it was rendered from, and asks
+# /api/freshness on a timer whether that has moved. It reloads when the scan it is SHOWING has
+# actually been superseded, never on a plain timer: a board nobody has re-scanned (a weekend, a
+# closed market, a failed job) is left exactly where it is instead of flickering every minute
+# for no reason, and a page that is genuinely stale refreshes within seconds of the new scan
+# landing. The stamp is a file mtime, so it is honest even if the scan was run from the command
+# line, by the Windows task, or by another cockpit entirely.
+def _mtime(path) -> float:
+    try:
+        return float(Path(path).stat().st_mtime)
+    except Exception:
+        return 0.0
+
+
+def data_stamp() -> float:
+    """The newest write across every artifact a view can render. Changes => the page is stale."""
+    latest = 0.0
+    for f in (SCAN_LATEST, LOTTERY_LATEST):
+        latest = max(latest, _mtime(f))
+    try:
+        newest_cand = max((_mtime(f) for f in CAND_DIR.glob("*.json")), default=0.0)
+        latest = max(latest, newest_cand)
+    except Exception:
+        pass
+    return round(latest, 3)
+
+
+def freshness() -> dict:
+    """What the server knows about how current the board is. Cheap: stats files, scans nothing."""
+    stamp = data_stamp()
+    scan_at = _mtime(SCAN_LATEST)
+    is_open, _ = market_status()
+    try:
+        running = sorted(_sched_state["running"])
+    except Exception:
+        running = []
+    if _scan_status.get("running"):
+        running = sorted(set(running) | {"rescan"})
+    return {
+        "stamp": stamp,
+        "scan_at": datetime.fromtimestamp(scan_at).strftime("%H:%M") if scan_at else None,
+        "scan_age_min": (round((time.time() - scan_at) / 60.0, 1) if scan_at else None),
+        "market_open": bool(is_open),
+        "running": running,
+        # `board_at` is stamped when a scan is SPAWNED, so it is the LAST run, not the next one.
+        # Reporting it under the name `next_board_at` made the endpoint say 08:45 was still to
+        # come at 08:57. Both are published now, each under the name it actually means, and the
+        # next time is derived rather than guessed.
+        "last_board_at": (_sched_state.get("board_at").strftime("%H:%M")
+                          if _sched_state.get("board_at") else None),
+        "next_board_at": ((_sched_state["board_at"]
+                           + timedelta(minutes=float(getattr(config, "BOARD_REFRESH_MIN", 15))))
+                          .strftime("%H:%M") if _sched_state.get("board_at") else None),
+        "refresh_min": float(getattr(config, "BOARD_REFRESH_MIN", 15)),
+        "server_time": datetime.now().strftime("%H:%M:%S"),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4392,6 +4970,10 @@ class H(BaseHTTPRequestHandler):
             q = parse_qs(u.query)
             view = (q.get("view") or ["today"])[0]
             self._send(render(view))
+        elif u.path == "/api/freshness":
+            # Deliberately the cheapest endpoint in the app: a few stat() calls and no scan, so
+            # a page may poll it every twenty seconds without costing anything.
+            self._send(json.dumps(freshness()), 200, "application/json; charset=utf-8")
         elif u.path == "/favicon.ico":
             self._send("", 204)
         else:
@@ -4464,8 +5046,33 @@ class H(BaseHTTPRequestHandler):
 # only ~hourly (data/news.py disk-cache TTL), so the 15-min board scans stay cheap. Each job runs
 # as an isolated subprocess with PYTHONUTF8=1 — a job crash can't take down the cockpit, and the
 # UTF-8 env prevents the cp1252 print crash that used to stall the old scheduled cycle.
-_sched_state = {"board_at": None, "paper_at": None, "running": set()}
+_sched_state = {"board_at": None, "paper_at": None, "forecast_on": None, "running": set()}
 _sched_lock = threading.Lock()
+
+PAPER_LOCK = BASE / "logs" / "auto_paper_cycle.lock"
+
+
+def _paper_cycle_running() -> bool:
+    """Is the Windows task's paper cycle mid-run right now?
+
+    It matters here because auto_paper_cycle spawns main.py as a SUBPROCESS of its own. A
+    cockpit board scan starting while that is in flight puts two main.py processes on the same
+    artifact, and the loser writes a scan_latest.json assembled from the winner's half-written
+    state — a board that looks fine and reconciles against nothing.
+
+    The lock file is auto_paper_cycle's own, and this only READS it: taking it here would make
+    the cockpit capable of blocking paper execution, which is exactly the dependency the
+    scheduler was disabled to avoid. Same staleness rule as the writer, so a crashed cycle's
+    abandoned lock stops holding the board hostage at the same moment it stops holding the
+    cycle hostage.
+    """
+    try:
+        if not PAPER_LOCK.exists():
+            return False
+        stale = int(os.getenv("VEGA_LOCK_STALE_MIN", "30")) * 60
+        return (time.time() - PAPER_LOCK.stat().st_mtime) < stale
+    except Exception:
+        return False
 
 
 def _spawn_job(name: str, argv: list, extra_env: dict) -> None:
@@ -4502,14 +5109,30 @@ def _spawn_job(name: str, argv: list, extra_env: dict) -> None:
 
 
 def _scheduler_loop() -> None:
+    """The cockpit's own cadence. Three jobs, gated independently — see config for why.
+
+      board    every BOARD_REFRESH_MIN while US equity options are open. This is what makes the
+               cockpit self-updating: it rewrites the engine artifact, the open page notices the
+               new mtime through /api/freshness and reloads itself.
+      paper    OFF by default. It is the job that collided with the Windows task, and paper
+               execution must not be conditional on a dashboard window being open.
+      forecast once a calendar day, after the anchor hour, REGARDLESS of market state. Crypto
+               trades on weekends; gating this on the equity clock would silently drop two
+               claims in seven for BTC and ETH and quietly bias their record toward weekdays.
+    """
     if not getattr(config, "INTRADAY_SCHEDULER_ENABLED", True):
         print("[scheduler] disabled (config.INTRADAY_SCHEDULER_ENABLED=False)")
         return
     py = sys.executable
     board_min = float(getattr(config, "BOARD_REFRESH_MIN", 15))
     paper_min = float(getattr(config, "PAPER_CYCLE_MIN", 60))
-    print(f"[scheduler] market-hours refresh armed — board every {board_min:.0f}m "
-          f"(local only), paper cycle every {paper_min:.0f}m")
+    do_board = bool(getattr(config, "INTRADAY_BOARD_REFRESH_ENABLED", True))
+    do_paper = bool(getattr(config, "INTRADAY_PAPER_CYCLE_ENABLED", False))
+    do_fc = bool(getattr(config, "MARKET_FORECAST_ENABLED", True))
+    fc_hour = int(getattr(config, "MARKET_FORECAST_AFTER_HOUR", 14))
+    print(f"[scheduler] armed — board {'every %.0fm' % board_min if do_board else 'OFF'}, "
+          f"paper {'every %.0fm' % paper_min if do_paper else 'OFF (Windows task owns it)'}, "
+          f"regime forecast {'daily after %02d:00' % fc_hour if do_fc else 'OFF'}")
     was_open = None
     while True:
         try:
@@ -4518,12 +5141,22 @@ def _scheduler_loop() -> None:
                 print(f"[scheduler] market {'OPEN' if is_open else 'closed'} — "
                       f"{'refreshing' if is_open else 'idle until next session'}")
                 was_open = is_open
-            if is_open:
-                now = datetime.now()
+            now = datetime.now()
+
+            if is_open and do_board:
                 b = _sched_state["board_at"]
                 if b is None or (now - b).total_seconds() >= board_min * 60:
-                    _sched_state["board_at"] = now
-                    _spawn_job("board", [py, "main.py"], {"VEGA_NO_JARVIS": "1"})
+                    # Deliberately NOT stamped when deferred: the next tick is thirty seconds
+                    # away and re-checking a file mtime is free, so a board scan waits out the
+                    # paper cycle rather than losing its whole slot to it.
+                    if _paper_cycle_running():
+                        print("[scheduler] board scan deferred — paper cycle holds the lock "
+                              "and runs main.py itself")
+                    else:
+                        _sched_state["board_at"] = now
+                        _spawn_job("board", [py, "main.py"], {"VEGA_NO_JARVIS": "1"})
+
+            if is_open and do_paper:
                 p = _sched_state["paper_at"]
                 if p is None or (now - p).total_seconds() >= paper_min * 60:
                     _sched_state["paper_at"] = now
@@ -4531,6 +5164,14 @@ def _scheduler_loop() -> None:
                     # inside the cockpit-managed, market-hours-checked scheduler.
                     _spawn_job("paper", [py, "auto_paper_cycle.py"],
                                {"VEGA_COCKPIT_SPAWNED": "1"})
+
+            if do_fc and now.hour >= fc_hour and _sched_state["forecast_on"] != now.date():
+                # Stamped BEFORE the job runs, not after. record_daily is idempotent per
+                # (asset, horizon, day), so a retry writes nothing; a stamp set on completion
+                # would let a slow job be launched again on the next tick.
+                _sched_state["forecast_on"] = now.date()
+                _spawn_job("forecast",
+                           [py, str(BASE / "analysis" / "market_forecast.py"), "--record"], {})
         except Exception as exc:
             print(f"[scheduler] tick error: {exc}")
         time.sleep(30)
